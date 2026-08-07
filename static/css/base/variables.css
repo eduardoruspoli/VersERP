@@ -1,0 +1,62 @@
+/* ==========================================
+   VERSERP - DESIGN SYSTEM
+========================================== */
+
+:root {
+
+    /* ===== CORES ===== */
+
+    --primary: #1F4E79;
+    --primary-hover: #163A5C;
+
+    --secondary: #5C6F82;
+
+    --success: #198754;
+    --warning: #FFC107;
+    --danger: #DC3545;
+    --info: #0DCAF0;
+
+    --background: #F4F6F9;
+    --surface: #FFFFFF;
+
+    --border: #DEE2E6;
+
+    --text: #212529;
+    --text-light: #6C757D;
+
+    /* ===== SIDEBAR ===== */
+
+    --sidebar-bg: #1F2937;
+    --sidebar-hover: #374151;
+    --sidebar-active: #1F4E79;
+    --sidebar-text: #FFFFFF;
+
+    /* ===== HEADER ===== */
+
+    --header-height: 65px;
+
+    /* ===== ESPAÇAMENTOS ===== */
+
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+
+    /* ===== BORDAS ===== */
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+
+    /* ===== SOMBRAS ===== */
+
+    --shadow-sm: 0 2px 5px rgba(0,0,0,.08);
+    --shadow-md: 0 6px 15px rgba(0,0,0,.10);
+    --shadow-lg: 0 10px 30px rgba(0,0,0,.15);
+
+    /* ===== TRANSIÇÃO ===== */
+
+    --transition: .25s;
+
+}

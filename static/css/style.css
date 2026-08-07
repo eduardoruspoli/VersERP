@@ -1,0 +1,80 @@
+/* ==========================================
+   BASE
+========================================== */
+
+@import url("base/reset.css");
+@import url("base/variables.css");
+@import url("base/typography.css");
+
+
+/* ==========================================
+   LAYOUT
+========================================== */
+
+@import url("layout/header.css");
+@import url("layout/sidebar.css");
+@import url("layout/footer.css");
+@import url("layout/content.css");
+
+
+/* ==========================================
+   COMPONENTS
+========================================== */
+
+@import url("components/button.css");
+@import url("components/card.css");
+@import url("components/form.css");
+@import url("components/table.css");
+@import url("components/badge.css");
+
+
+/* ==========================================
+   PAGES
+========================================== */
+
+@import url("pages/dashboard.css");
+@import url("pages/clientes.css");
+@import url("pages/financeiro.css");
+@import url("pages/propostas.css");
+
+/* ==========================================
+   RESET
+========================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    background: var(--background);
+    color: var(--text);
+    font-family: "Inter", sans-serif;
+    overflow-x: hidden;
+}
+
+/* ==========================================
+   LAYOUT
+========================================== */
+
+.app {
+    display: flex;
+    min-height: 100vh;
+}
+
+.main {
+    flex: 1;
+    margin-left: 250px;
+    display: flex;
+    flex-direction: column;
+}
+
+.content {
+    flex: 1;
+    padding: 30px;
+}
