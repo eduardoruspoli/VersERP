@@ -1,17 +1,248 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
-{% block title %}
-Dashboard
-{% endblock %}
+{% block title %}Dashboard | VersERP{% endblock %}
 
 {% block content %}
 
-<h1>Bem-vindo ao VersERP</h1>
+<div class="page-header">
 
-<p>
+    <div>
+        <h1>Dashboard</h1>
+        <p>Visão geral da empresa</p>
+    </div>
 
-Primeira versão da interface.
+    <div class="page-actions">
 
-</p>
+        <button class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i>
+            Nova proposta
+        </button>
+
+    </div>
+
+</div>
+
+
+<!-- INDICADORES -->
+
+<div class="dashboard-cards">
+
+    <div class="dashboard-card">
+
+        <div class="card-icon">
+            <i class="bi bi-arrow-down-circle"></i>
+        </div>
+
+        <div class="card-info">
+
+            <span>Contas a Receber</span>
+
+            <strong>R$ 0,00</strong>
+
+            <small>Valores em aberto</small>
+
+        </div>
+
+    </div>
+
+
+    <div class="dashboard-card">
+
+        <div class="card-icon">
+            <i class="bi bi-arrow-up-circle"></i>
+        </div>
+
+        <div class="card-info">
+
+            <span>Contas a Pagar</span>
+
+            <strong>R$ 0,00</strong>
+
+            <small>Valores em aberto</small>
+
+        </div>
+
+    </div>
+
+
+    <div class="dashboard-card">
+
+        <div class="card-icon">
+            <i class="bi bi-wallet2"></i>
+        </div>
+
+        <div class="card-info">
+
+            <span>Saldo em Caixa</span>
+
+            <strong>R$ 0,00</strong>
+
+            <small>Saldo atual</small>
+
+        </div>
+
+    </div>
+
+
+    <div class="dashboard-card">
+
+        <div class="card-icon">
+            <i class="bi bi-file-earmark-text"></i>
+        </div>
+
+        <div class="card-info">
+
+            <span>Propostas em Aberto</span>
+
+            <strong>0</strong>
+
+            <small>Aguardando retorno</small>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- CONTEÚDO -->
+
+<div class="dashboard-grid">
+
+
+    <!-- ÚLTIMAS PROPOSTAS -->
+
+    <section class="dashboard-panel">
+
+        <div class="panel-header">
+
+            <div>
+                <h2>Últimas propostas</h2>
+                <span>Propostas cadastradas recentemente</span>
+            </div>
+
+            <a href="#">
+                Ver todas
+            </a>
+
+        </div>
+
+
+        <div class="empty-state">
+
+            <i class="bi bi-file-earmark-text"></i>
+
+            <h3>Nenhuma proposta cadastrada</h3>
+
+            <p>
+                As propostas cadastradas aparecerão aqui.
+            </p>
+
+            <button class="btn btn-primary">
+
+                <i class="bi bi-plus-lg"></i>
+
+                Nova proposta
+
+            </button>
+
+        </div>
+
+    </section>
+
+
+    <!-- MOVIMENTAÇÕES -->
+
+    <section class="dashboard-panel">
+
+        <div class="panel-header">
+
+            <div>
+                <h2>Últimas movimentações</h2>
+                <span>Movimentações financeiras recentes</span>
+            </div>
+
+            <a href="#">
+                Ver todas
+            </a>
+
+        </div>
+
+
+        <div class="empty-state">
+
+            <i class="bi bi-cash-stack"></i>
+
+            <h3>Nenhuma movimentação</h3>
+
+            <p>
+                As movimentações financeiras aparecerão aqui.
+            </p>
+
+        </div>
+
+    </section>
+
+</div>
+
+
+<!-- AÇÕES RÁPIDAS -->
+
+<section class="quick-actions">
+
+    <h2>Ações rápidas</h2>
+
+    <div class="quick-actions-grid">
+
+        <a href="#" class="quick-action">
+
+            <i class="bi bi-person-plus"></i>
+
+            <span>
+                <strong>Novo cliente</strong>
+                <small>Cadastrar cliente</small>
+            </span>
+
+        </a>
+
+
+        <a href="#" class="quick-action">
+
+            <i class="bi bi-file-earmark-plus"></i>
+
+            <span>
+                <strong>Nova proposta</strong>
+                <small>Criar proposta comercial</small>
+            </span>
+
+        </a>
+
+
+        <a href="#" class="quick-action">
+
+            <i class="bi bi-arrow-down-circle"></i>
+
+            <span>
+                <strong>Conta a receber</strong>
+                <small>Lançar recebimento</small>
+            </span>
+
+        </a>
+
+
+        <a href="#" class="quick-action">
+
+            <i class="bi bi-arrow-up-circle"></i>
+
+            <span>
+                <strong>Conta a pagar</strong>
+                <small>Lançar pagamento</small>
+            </span>
+
+        </a>
+
+    </div>
+
+</section>
 
 {% endblock %}

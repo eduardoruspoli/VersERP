@@ -1,21 +1,375 @@
-.main{
+/* ==========================================
+   DASHBOARD
+========================================== */
 
-    margin-left:250px;
+.page-header {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    margin-bottom: 30px;
 
 }
 
-.content{
+.page-header h1 {
 
-    padding:30px;
+    margin: 0;
+
+    font-size: 28px;
+
+    font-weight: 700;
 
 }
 
-.footer{
+.page-header p {
 
-    text-align:center;
+    margin: 5px 0 0;
 
-    padding:20px;
+    color: var(--text-light);
 
-    color:gray;
+}
+
+
+/* ==========================================
+   CARDS
+========================================== */
+
+.dashboard-cards {
+
+    display: grid;
+
+    grid-template-columns: repeat(4, 1fr);
+
+    gap: 20px;
+
+    margin-bottom: 30px;
+
+}
+
+.dashboard-card {
+
+    background: var(--surface);
+
+    border: 1px solid var(--border);
+
+    border-radius: var(--radius-md);
+
+    padding: 22px;
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 18px;
+
+    box-shadow: var(--shadow-sm);
+
+}
+
+.card-icon {
+
+    width: 50px;
+
+    height: 50px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border-radius: var(--radius-md);
+
+    background: #EAF2F8;
+
+    color: var(--primary);
+
+    font-size: 22px;
+
+}
+
+.card-info {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 3px;
+
+}
+
+.card-info span {
+
+    font-size: 13px;
+
+    color: var(--text-light);
+
+}
+
+.card-info strong {
+
+    font-size: 21px;
+
+}
+
+.card-info small {
+
+    font-size: 11px;
+
+    color: var(--text-light);
+
+}
+
+
+/* ==========================================
+   PAINÉIS
+========================================== */
+
+.dashboard-grid {
+
+    display: grid;
+
+    grid-template-columns: 1fr 1fr;
+
+    gap: 20px;
+
+    margin-bottom: 30px;
+
+}
+
+.dashboard-panel {
+
+    background: var(--surface);
+
+    border: 1px solid var(--border);
+
+    border-radius: var(--radius-md);
+
+    box-shadow: var(--shadow-sm);
+
+}
+
+.panel-header {
+
+    padding: 20px;
+
+    border-bottom: 1px solid var(--border);
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+}
+
+.panel-header h2 {
+
+    font-size: 17px;
+
+    margin: 0;
+
+    font-weight: 600;
+
+}
+
+.panel-header span {
+
+    display: block;
+
+    margin-top: 4px;
+
+    font-size: 12px;
+
+    color: var(--text-light);
+
+}
+
+.panel-header a {
+
+    color: var(--primary);
+
+    text-decoration: none;
+
+    font-size: 13px;
+
+    font-weight: 500;
+
+}
+
+
+/* ==========================================
+   ESTADO VAZIO
+========================================== */
+
+.empty-state {
+
+    padding: 45px 20px;
+
+    text-align: center;
+
+}
+
+.empty-state i {
+
+    font-size: 38px;
+
+    color: var(--text-light);
+
+}
+
+.empty-state h3 {
+
+    font-size: 16px;
+
+    margin: 15px 0 5px;
+
+}
+
+.empty-state p {
+
+    color: var(--text-light);
+
+    font-size: 13px;
+
+    margin-bottom: 20px;
+
+}
+
+
+/* ==========================================
+   AÇÕES RÁPIDAS
+========================================== */
+
+.quick-actions h2 {
+
+    font-size: 18px;
+
+    margin-bottom: 15px;
+
+}
+
+.quick-actions-grid {
+
+    display: grid;
+
+    grid-template-columns: repeat(4, 1fr);
+
+    gap: 15px;
+
+}
+
+.quick-action {
+
+    background: var(--surface);
+
+    border: 1px solid var(--border);
+
+    border-radius: var(--radius-md);
+
+    padding: 18px;
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 14px;
+
+    color: var(--text);
+
+    text-decoration: none;
+
+    transition: var(--transition);
+
+}
+
+.quick-action:hover {
+
+    border-color: var(--primary);
+
+    transform: translateY(-2px);
+
+    box-shadow: var(--shadow-sm);
+
+}
+
+.quick-action > i {
+
+    font-size: 24px;
+
+    color: var(--primary);
+
+}
+
+.quick-action span {
+
+    display: flex;
+
+    flex-direction: column;
+
+}
+
+.quick-action strong {
+
+    font-size: 13px;
+
+}
+
+.quick-action small {
+
+    color: var(--text-light);
+
+    font-size: 11px;
+
+}
+
+
+/* ==========================================
+   RESPONSIVIDADE
+========================================== */
+
+@media (max-width: 1100px) {
+
+    .dashboard-cards {
+
+        grid-template-columns: repeat(2, 1fr);
+
+    }
+
+    .quick-actions-grid {
+
+        grid-template-columns: repeat(2, 1fr);
+
+    }
+
+}
+
+
+@media (max-width: 768px) {
+
+    .main {
+
+        margin-left: 0;
+
+    }
+
+    .content {
+
+        padding: 20px;
+
+    }
+
+    .dashboard-cards,
+
+    .dashboard-grid,
+
+    .quick-actions-grid {
+
+        grid-template-columns: 1fr;
+
+    }
 
 }
