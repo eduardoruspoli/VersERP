@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+
+{% block title %}Nova Pessoa | VersERP{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Nova Pessoa</h1>
+        <p>Cadastre um cliente, fornecedor ou ambos</p>
+    </div>
+
+    <a href="{% url 'pessoas:lista' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+</div>
+
+<form method="post" class="verserp-form">
+
+    {% csrf_token %}
+
+    {% if form.errors %}
+        <div class="alert alert-danger">
+            <strong>Verifique os campos abaixo.</strong>
+            {{ form.non_field_errors }}
+        </div>
+    {% endif %}
+
+
+    <!-- DADOS PRINCIPAIS -->
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+            <div>
+                <h2>Dados principais</h2>
+                <p>Informações básicas do cadastro</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+
+            <div class="form-group">
+
+                <label for="{{ form.tipo_pessoa.id_for_label }}">
+                    Tipo de pessoa
+                </label>
+
+                {{ form.tipo_pessoa }}
+                {{ form.tipo_pessoa.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.classificacao.id_for_label }}">
+                    Classificação
+                </label>
+
+                {{ form.classificacao }}
+                {{ form.classificacao.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.razao_social.id_for_label }}">
+                    Razão Social / Nome
+                    <span class="required">*</span>
+                </label>
+
+                {{ form.razao_social }}
+                {{ form.razao_social.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.nome_fantasia.id_for_label }}">
+                    Nome Fantasia
+                </label>
+
+                {{ form.nome_fantasia }}
+                {{ form.nome_fantasia.errors }}
+
+            </div>
+
+
+            <!-- CPF / CNPJ -->
+
+            <div class="form-group form-group-wide">
+
+                <label 
+                    id="label-cpf-cnpj"
+                    for="{{ form.cpf_cnpj.id_for_label }}">
+                    CPF / CNPJ
+                </label>
+
+                <div class="input-with-action">
+
+                    {{ form.cpf_cnpj }}
+
+                    <button
+                        type="button"
+                        id="btn-consultar-cnpj"
+                        class="btn btn-outline-primary"
+                    >
+                        <i class="bi bi-search"></i>
+                        Consultar CNPJ
+                    </button>
+
+                </div>
+
+                <small
+                    id="cnpj-status"
+                    class="form-text"
+                ></small>
+
+                {{ form.cpf_cnpj.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.inscricao_estadual.id_for_label }}">
+                    Inscrição Estadual
+                </label>
+
+                {{ form.inscricao_estadual }}
+                {{ form.inscricao_estadual.errors }}
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- CONTATO -->
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+            <div>
+                <h2>Contato</h2>
+                <p>Dados para comunicação</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.email.id_for_label }}">
+                    E-mail
+                </label>
+
+                {{ form.email }}
+                {{ form.email.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.telefone.id_for_label }}">
+                    Telefone
+                </label>
+
+                {{ form.telefone }}
+                {{ form.telefone.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.whatsapp.id_for_label }}">
+                    WhatsApp
+                </label>
+
+                {{ form.whatsapp }}
+                {{ form.whatsapp.errors }}
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- ENDEREÇO -->
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+            <div>
+                <h2>Endereço</h2>
+                <p>Endereço principal</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+
+            <div class="form-group">
+
+                <label for="{{ form.cep.id_for_label }}">
+                    CEP
+                </label>
+
+                {{ form.cep }}
+                {{ form.cep.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.endereco.id_for_label }}">
+                    Endereço
+                </label>
+
+                {{ form.endereco }}
+                {{ form.endereco.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.numero.id_for_label }}">
+                    Número
+                </label>
+
+                {{ form.numero }}
+                {{ form.numero.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.complemento.id_for_label }}">
+                    Complemento
+                </label>
+
+                {{ form.complemento }}
+                {{ form.complemento.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.bairro.id_for_label }}">
+                    Bairro
+                </label>
+
+                {{ form.bairro }}
+                {{ form.bairro.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.cidade.id_for_label }}">
+                    Cidade
+                </label>
+
+                {{ form.cidade }}
+                {{ form.cidade.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.estado.id_for_label }}">
+                    Estado
+                </label>
+
+                {{ form.estado }}
+                {{ form.estado.errors }}
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- INFORMAÇÕES ADICIONAIS -->
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+            <div>
+                <h2>Informações adicionais</h2>
+            </div>
+        </div>
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-full">
+
+                <label for="{{ form.observacoes.id_for_label }}">
+                    Observações
+                </label>
+
+                {{ form.observacoes }}
+                {{ form.observacoes.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-full">
+
+                <div class="form-check">
+
+                    {{ form.ativo }}
+
+                    <label
+                        class="form-check-label"
+                        for="{{ form.ativo.id_for_label }}"
+                    >
+                        Cadastro ativo
+                    </label>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- AÇÕES -->
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'pessoas:lista' %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+        <button
+            type="submit"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-check-lg"></i>
+            Salvar Pessoa
+        </button>
+
+    </div>
+
+</form>
+
+{% endblock %}

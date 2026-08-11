@@ -1,0 +1,148 @@
+.verserp-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.form-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.form-section-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+}
+
+.form-section-header h2 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.form-section-header p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    padding: 24px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.form-group-wide {
+    grid-column: span 2;
+}
+
+.form-group-full {
+    grid-column: 1 / -1;
+}
+
+.form-group label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.form-control,
+.form-select {
+    min-height: 42px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(31, 78, 121, 0.12);
+}
+
+textarea.form-control {
+    resize: vertical;
+}
+
+.required {
+    color: var(--danger);
+}
+
+.errorlist {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 11px;
+    color: var(--danger);
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 20px 0;
+}
+
+@media (max-width: 1100px) {
+    .form-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 700px) {
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .form-group-wide,
+    .form-group-full {
+        grid-column: auto;
+    }
+}
+
+/* ==========================================
+   CAMPO CPF / CNPJ + BOTÃO CONSULTAR
+========================================== */
+
+.input-with-action {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.input-with-action .form-control {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 180px;
+}
+
+.input-with-action .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.form-text {
+    display: block;
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--text-light);
+}
+
+.form-text.success {
+    color: var(--success);
+}
+
+.form-text.error {
+    color: var(--danger);
+}

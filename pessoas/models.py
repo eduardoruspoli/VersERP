@@ -2,7 +2,6 @@ from django.db import models
 
 
 class Pessoa(models.Model):
-    nome = models.CharField(max_length=100, verbose_name="Nome")
 
     class TipoPessoa(models.TextChoices):
         FISICA = "PF", "Pessoa Física"

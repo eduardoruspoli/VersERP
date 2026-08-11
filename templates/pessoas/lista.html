@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Pessoas | VersERP{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Pessoas</h1>
+        <p>Clientes e fornecedores cadastrados</p>
+    </div>
+
+    <a href="{% url 'pessoas:nova' %}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i>
+        Nova Pessoa
+    </a>
+</div>
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+        <div>
+            <h2>Cadastros</h2>
+            <span>{{ pessoas|length }} registro{{ pessoas|length|pluralize }}</span>
+        </div>
+    </div>
+
+    <div class="pessoas-toolbar">
+        <div class="pessoas-search">
+            <i class="bi bi-search"></i>
+            <input
+                type="text"
+                placeholder="Pesquisar por nome, CNPJ, e-mail..."
+                disabled
+            >
+        </div>
+
+        <select disabled>
+            <option>Todas as classificações</option>
+        </select>
+
+        <select disabled>
+            <option>Todos os status</option>
+        </select>
+    </div>
+
+    <div class="table-responsive">
+        <table class="verserp-table">
+
+            <thead>
+                <tr>
+                    <th>Nome / Razão Social</th>
+                    <th>Tipo</th>
+                    <th>Classificação</th>
+                    <th>CPF / CNPJ</th>
+                    <th>Cidade</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {% for pessoa in pessoas %}
+
+                <tr>
+                    <td>
+                        <div class="person-name">
+                            <strong>{{ pessoa.razao_social }}</strong>
+
+                            {% if pessoa.nome_fantasia %}
+                                <small>{{ pessoa.nome_fantasia }}</small>
+                            {% endif %}
+                        </div>
+                    </td>
+
+                    <td>
+                        {{ pessoa.get_tipo_pessoa_display }}
+                    </td>
+
+                    <td>
+                        {{ pessoa.get_classificacao_display }}
+                    </td>
+
+                    <td>
+                        {% if pessoa.cpf_cnpj %}
+                            {{ pessoa.cpf_cnpj }}
+                        {% else %}
+                            <span class="text-muted">Não informado</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if pessoa.cidade %}
+                            {{ pessoa.cidade }}
+                            {% if pessoa.estado %}
+                                / {{ pessoa.estado }}
+                            {% endif %}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if pessoa.ativo %}
+                            <span class="status-badge status-active">
+                                Ativo
+                            </span>
+                        {% else %}
+                            <span class="status-badge status-inactive">
+                                Inativo
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td class="table-actions">
+                        <a href="#" title="Editar">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                    </td>
+                </tr>
+
+                {% empty %}
+
+                <tr>
+                    <td colspan="7">
+
+                        <div class="empty-state">
+                            <i class="bi bi-people"></i>
+
+                            <h3>Nenhuma pessoa cadastrada</h3>
+
+                            <p>
+                                Cadastre o primeiro cliente ou fornecedor.
+                            </p>
+                        </div>
+
+                    </td>
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}
