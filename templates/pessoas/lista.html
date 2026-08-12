@@ -11,10 +11,14 @@
         <p>Clientes e fornecedores cadastrados</p>
     </div>
 
+    {% if perms.pessoas.add_pessoa %}
+
     <a href="{% url 'pessoas:nova' %}" class="btn btn-primary">
         <i class="bi bi-plus-lg"></i>
         Nova Pessoa
     </a>
+
+    {% endif %}
 
 </div>
 
@@ -270,6 +274,7 @@
 
                         <td class="table-actions">
 
+                        {% if perms.pessoas.change_pessoa %}
                             <a
                                 href="{% url 'pessoas:editar' pessoa.pk %}"
                                 title="Editar"
@@ -277,6 +282,9 @@
                                 <i class="bi bi-pencil"></i>
                             </a>
 
+                        {% endif %}
+
+                        {% if perms.pessoas.change_pessoa %}
 
                             <form
                                 method="post"
@@ -309,6 +317,8 @@
                                 {% endif %}
 
                             </form>
+                        
+                        {% endif %}
 
                         </td>
 

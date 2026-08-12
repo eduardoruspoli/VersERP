@@ -8,12 +8,16 @@ from django.http import JsonResponse, request
 from django.shortcuts import get_object_or_404, redirect, render
 from django.db.models import Q
 from django.core.paginator import Paginator
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, permission_required
 
 from .forms import PessoaForm
 from .models import Pessoa
 
+
+
 @login_required
+@permission_required("pessoas.view_pessoa", raise_exception=True)
+
 def lista_pessoas(request):
     pessoas = Pessoa.objects.all()
 
@@ -61,6 +65,7 @@ def lista_pessoas(request):
     )
 
 @login_required
+@permission_required("pessoas.add_pessoa", raise_exception=True)
 def nova_pessoa(request):
 
     if request.method == "POST":
@@ -85,6 +90,7 @@ def nova_pessoa(request):
     )
 
 @login_required
+@permission_required("pessoas.change_pessoa", raise_exception=True)
 def editar_pessoa(request, pk):
     pessoa = get_object_or_404(Pessoa, pk=pk)
 
@@ -115,6 +121,7 @@ def editar_pessoa(request, pk):
 
 
 @login_required
+@permission_required("pessoas.view_pessoa", raise_exception=True)
 def detalhe_pessoa(request, pk):
     pessoa = get_object_or_404(Pessoa, pk=pk)
 
@@ -130,6 +137,7 @@ def detalhe_pessoa(request, pk):
 
 
 @login_required
+@permission_required("pessoas.change_pessoa", raise_exception=True)
 def alterar_status_pessoa(request, pk):
     pessoa = get_object_or_404(Pessoa, pk=pk)
 
@@ -141,6 +149,7 @@ def alterar_status_pessoa(request, pk):
 
 
 @login_required
+@permission_required("pessoas.view_pessoa", raise_exception=True)
 def consultar_cnpj(request):
     cnpj = request.GET.get("cnpj", "")
     cnpj = re.sub(r"\D", "", cnpj)

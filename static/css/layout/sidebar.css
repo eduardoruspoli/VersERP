@@ -35,3 +35,12 @@
 .sidebar nav a:hover {
     background: #374151;
 }
+
+.sidebar-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.sidebar-disabled:hover {
+    background: transparent !important;
+}
