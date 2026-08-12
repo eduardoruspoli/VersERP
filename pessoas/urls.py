@@ -15,4 +15,17 @@ urlpatterns = [
         views.consultar_cnpj,
         name="consultar_cnpj",
     ),
+
+    path(
+        "<int:pk>/editar/",
+        views.editar_pessoa,
+        name="editar",
+    ),
+
+    path(
+        "<int:pk>/status/",
+        views.alterar_status_pessoa,
+        name="alterar_status",
+    ),
 ]
+

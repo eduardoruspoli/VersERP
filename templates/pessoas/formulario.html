@@ -1,13 +1,24 @@
 {% extends "base.html" %}
 
-{% block title %}Nova Pessoa | VersERP{% endblock %}
+{% block title %}
+    {% if modo_edicao %}
+        Editar Pessoa | VersERP
+    {% else %}
+        Nova Pessoa | VersERP
+    {% endif %}
+{% endblock %}
 
 {% block content %}
 
 <div class="page-header">
     <div>
-        <h1>Nova Pessoa</h1>
-        <p>Cadastre um cliente, fornecedor ou ambos</p>
+        {% if modo_edicao %}
+            <h1>Editar Pessoa</h1>
+            <p>Atualize os dados do cadastro</p>
+        {% else %}
+            <h1>Nova Pessoa</h1>
+            <p>Cadastre um cliente, fornecedor ou ambos</p>
+        {% endif %}
     </div>
 
     <a href="{% url 'pessoas:lista' %}" class="btn btn-outline-secondary">
@@ -357,7 +368,12 @@
             class="btn btn-primary"
         >
             <i class="bi bi-check-lg"></i>
-            Salvar Pessoa
+
+            {% if modo_edicao %}
+                Salvar Alterações
+            {% else %}
+                Salvar Pessoa
+            {% endif %}
         </button>
 
     </div>

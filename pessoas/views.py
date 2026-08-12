@@ -3,7 +3,7 @@ import re
 import requests
 
 from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import PessoaForm
 from .models import Pessoa
@@ -45,6 +45,45 @@ def nova_pessoa(request):
         "pessoas/formulario.html",
         contexto,
     )
+
+def editar_pessoa(request, pk):
+    pessoa = get_object_or_404(Pessoa, pk=pk)
+
+    if request.method == "POST":
+        form = PessoaForm(
+            request.POST,
+            instance=pessoa,
+        )
+
+        if form.is_valid():
+            form.save()
+            return redirect("pessoas:lista")
+
+    else:
+        form = PessoaForm(instance=pessoa)
+
+    contexto = {
+        "form": form,
+        "pessoa": pessoa,
+        "modo_edicao": True,
+    }
+
+    return render(
+        request,
+        "pessoas/formulario.html",
+        contexto,
+    )
+
+
+def alterar_status_pessoa(request, pk):
+    pessoa = get_object_or_404(Pessoa, pk=pk)
+
+    if request.method == "POST":
+        pessoa.ativo = not pessoa.ativo
+        pessoa.save(update_fields=["ativo"])
+
+    return redirect("pessoas:lista")
+
 
 def consultar_cnpj(request):
     cnpj = request.GET.get("cnpj", "")

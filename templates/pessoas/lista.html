@@ -114,9 +114,42 @@
                     </td>
 
                     <td class="table-actions">
-                        <a href="#" title="Editar">
+                        <a 
+                            href="{% url 'pessoas:editar' pessoa.pk %}" title="Editar"
+                        >
                             <i class="bi bi-pencil"></i>
                         </a>
+
+                        <form
+                            method="post"
+                            action="{% url 'pessoas:alterar_status' pessoa.pk %}"
+                            class="d-inline"
+                        >
+                            {% csrf_token %}
+
+                            {% if pessoa.ativo %}
+
+                                 <button
+                                    type="submit"
+                                    class="btn-action"
+                                    title="Inativar"
+                                >
+                                    <i class="bi bi-person-x"></i>
+                                </button>
+
+                            {% else %}
+
+                                <button
+                                    type="submit"
+                                    class="btn-action"
+                                    title="Ativar"
+                                >
+                                    <i class="bi bi-person-check"></i>
+                                </button>
+
+                            {% endif %}
+                           
+                        </form>
                     </td>
                 </tr>
 

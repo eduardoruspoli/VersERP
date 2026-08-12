@@ -113,3 +113,17 @@
         grid-template-columns: 1fr;
     }
 }
+
+.btn-action {
+    border: none;
+    background: transparent;
+    color: var(--text-light);
+    font-size: 16px;
+    padding: 0;
+    margin-left: 10px;
+    cursor: pointer;
+}
+
+.btn-action:hover {
+    color: var(--primary);
+}
