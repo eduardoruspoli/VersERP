@@ -95,20 +95,30 @@ As etapas abaixo representam a evolução funcional do sistema e podem ser reorg
 - [x] Inativação
 - [x] Tela de detalhes
 
-**Status:** Concluído para a etapa atual
+**Status:** Concluído 
 
----
+### Autenticação e Controle de Acesso
 
-## Próximas Etapas
+- [x] Login próprio do VersERP
+- [x] Logout
+- [x] Proteção de páginas para usuários autenticados
+- [x] Redirecionamento para página originalmente solicitada
+- [x] Usuário técnico Admin
+- [x] Grupos de usuários
+- [x] Permissões por grupo
+- [x] Proteção de views no backend
+- [x] Controle de ações na interface
+- [x] Controle de módulos na sidebar
+- [x] Usuários de teste por perfil
+- [x] Validação de acesso negado (403)
 
-### Autenticação e Usuários
+#### Grupos atuais
 
-- [ ] Login
-- [ ] Logout
-- [ ] Usuários
-- [ ] Perfis
-- [ ] Permissões
-- [ ] Controle de acesso por módulo
+- Gerência Administrativa
+- Financeiro e Compras
+- RH
+
+**Status:** Concluído
 
 ### Comercial
 

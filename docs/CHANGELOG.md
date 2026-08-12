@@ -4,7 +4,44 @@ Todas as alterações relevantes do VersERP serão registradas neste arquivo.
 
 O projeto utiliza versionamento incremental durante a fase de desenvolvimento.
 
----
+## [0.5.0] - 2026-08-12
+
+### Adicionado
+
+#### Autenticação
+
+- Tela própria de login do VersERP
+- Logout seguro através de requisição POST
+- Proteção de páginas para usuários autenticados
+- Redirecionamento após login através do parâmetro `next`
+- Identificação do usuário autenticado no header
+
+#### Controle de Acesso
+
+- Grupos de usuários
+- Grupo Gerência Administrativa
+- Grupo Financeiro e Compras
+- Grupo RH
+- Permissões de Pessoas por grupo
+- Proteção de views através das permissões do Django
+- Tratamento de acesso não autorizado com HTTP 403
+- Controle de exibição de ações conforme permissões
+- Controle de acesso ao módulo Pessoas pela sidebar
+- Separação entre conta técnica Admin e usuários operacionais
+
+#### Interface
+
+- Página de login integrada ao Design System
+- Botão de logout no header
+- Módulos futuros identificados na sidebar
+- Inclusão do módulo RH na estrutura futura do VersERP
+
+### Segurança
+
+- Usuários operacionais não possuem acesso ao Django Admin
+- Permissões atribuídas através de grupos
+- Exclusão de Pessoa não concedida aos grupos operacionais
+- Validação de permissões realizada também no backend
 
 ## [0.4.0] - 2026-08-11
 
