@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}
+{{ pessoa.razao_social }} | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>{{ pessoa.razao_social }}</h1>
+
+        <p>
+            {% if pessoa.nome_fantasia %}
+                {{ pessoa.nome_fantasia }}
+            {% else %}
+                Cadastro de pessoa
+            {% endif %}
+        </p>
+    </div>
+
+    <div class="page-actions">
+
+        <a
+            href="{% url 'pessoas:lista' %}"
+            class="btn btn-light"
+        >
+            <i class="bi bi-arrow-left"></i>
+            Voltar
+        </a>
+
+        <a
+            href="{% url 'pessoas:editar' pessoa.pk %}"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-pencil"></i>
+            Editar
+        </a>
+
+    </div>
+
+</div>
+
+
+<div class="detail-grid">
+
+    <section class="detail-card">
+
+        <div class="detail-card-header">
+            <h2>Dados principais</h2>
+        </div>
+
+        <div class="detail-card-body">
+
+            <div class="detail-item">
+                <span>Tipo de pessoa</span>
+                <strong>
+                    {{ pessoa.get_tipo_pessoa_display }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Classificação</span>
+                <strong>
+                    {{ pessoa.get_classificacao_display }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Razão Social / Nome</span>
+                <strong>
+                    {{ pessoa.razao_social }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Nome Fantasia</span>
+                <strong>
+                    {{ pessoa.nome_fantasia|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>CPF / CNPJ</span>
+                <strong>
+                    {% if pessoa.cpf_cnpj %}
+                        {{ pessoa.cpf_cnpj_formatado }}
+                    {% else %}
+                        Não informado
+                    {% endif %}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Inscrição Estadual</span>
+                <strong>
+                    {{ pessoa.inscricao_estadual|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Status</span>
+
+                {% if pessoa.ativo %}
+                    <span class="status-badge status-active">
+                        Ativo
+                    </span>
+                {% else %}
+                    <span class="status-badge status-inactive">
+                        Inativo
+                    </span>
+                {% endif %}
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <section class="detail-card">
+
+        <div class="detail-card-header">
+            <h2>Contato</h2>
+        </div>
+
+        <div class="detail-card-body">
+
+            <div class="detail-item">
+                <span>E-mail</span>
+                <strong>
+                    {{ pessoa.email|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Telefone</span>
+                <strong>
+                    {{ pessoa.telefone|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>WhatsApp</span>
+                <strong>
+                    {{ pessoa.whatsapp|default:"Não informado" }}
+                </strong>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <section class="detail-card detail-card-full">
+
+        <div class="detail-card-header">
+            <h2>Endereço</h2>
+        </div>
+
+        <div class="detail-card-body">
+
+            <div class="detail-item">
+                <span>CEP</span>
+                <strong>
+                    {{ pessoa.cep|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Endereço</span>
+                <strong>
+                    {{ pessoa.endereco|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Número</span>
+                <strong>
+                    {{ pessoa.numero|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Complemento</span>
+                <strong>
+                    {{ pessoa.complemento|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Bairro</span>
+                <strong>
+                    {{ pessoa.bairro|default:"Não informado" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Cidade</span>
+                <strong>
+                    {% if pessoa.cidade %}
+                        {{ pessoa.cidade }}
+                        {% if pessoa.estado %}
+                            / {{ pessoa.estado }}
+                        {% endif %}
+                    {% else %}
+                        Não informado
+                    {% endif %}
+                </strong>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <section class="detail-card detail-card-full">
+
+        <div class="detail-card-header">
+            <h2>Informações adicionais</h2>
+        </div>
+
+        <div class="detail-card-body">
+
+            <div class="detail-item detail-item-full">
+                <span>Observações</span>
+
+                <strong>
+                    {{ pessoa.observacoes|default:"Nenhuma observação cadastrada." }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Cadastrado em</span>
+                <strong>
+                    {{ pessoa.criado_em|date:"d/m/Y H:i" }}
+                </strong>
+            </div>
+
+            <div class="detail-item">
+                <span>Última atualização</span>
+                <strong>
+                    {{ pessoa.atualizado_em|date:"d/m/Y H:i" }}
+                </strong>
+            </div>
+
+        </div>
+
+    </section>
+
+</div>
+
+{% endblock %}

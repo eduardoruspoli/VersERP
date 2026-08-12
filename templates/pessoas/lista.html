@@ -5,6 +5,7 @@
 {% block content %}
 
 <div class="page-header">
+
     <div>
         <h1>Pessoas</h1>
         <p>Clientes e fornecedores cadastrados</p>
@@ -14,40 +15,145 @@
         <i class="bi bi-plus-lg"></i>
         Nova Pessoa
     </a>
+
 </div>
+
 
 <div class="dashboard-panel">
 
+    <!-- CABEÇALHO -->
+
     <div class="panel-header">
+
         <div>
+
             <h2>Cadastros</h2>
-            <span>{{ pessoas|length }} registro{{ pessoas|length|pluralize }}</span>
+
+            <span>
+                {{ pagina.paginator.count }}
+                registro{{ pagina.paginator.count|pluralize }}
+            </span>
+
         </div>
+
     </div>
 
-    <div class="pessoas-toolbar">
+
+    <!-- FILTROS -->
+
+    <form method="get" class="pessoas-toolbar">
+
         <div class="pessoas-search">
+
             <i class="bi bi-search"></i>
+
             <input
                 type="text"
+                name="busca"
+                value="{{ busca }}"
                 placeholder="Pesquisar por nome, CNPJ, e-mail..."
-                disabled
             >
+
         </div>
 
-        <select disabled>
-            <option>Todas as classificações</option>
+
+        <select name="classificacao">
+
+            <option value="">
+                Todas as classificações
+            </option>
+
+            <option
+                value="CLIENTE"
+                {% if classificacao_selecionada == "CLIENTE" %}
+                    selected
+                {% endif %}
+            >
+                Cliente
+            </option>
+
+            <option
+                value="FORNECEDOR"
+                {% if classificacao_selecionada == "FORNECEDOR" %}
+                    selected
+                {% endif %}
+            >
+                Fornecedor
+            </option>
+
+            <option
+                value="AMBOS"
+                {% if classificacao_selecionada == "AMBOS" %}
+                    selected
+                {% endif %}
+            >
+                Cliente e Fornecedor
+            </option>
+
         </select>
 
-        <select disabled>
-            <option>Todos os status</option>
+
+        <select name="status">
+
+            <option value="">
+                Todos os status
+            </option>
+
+            <option
+                value="ativo"
+                {% if status_selecionado == "ativo" %}
+                    selected
+                {% endif %}
+            >
+                Ativo
+            </option>
+
+            <option
+                value="inativo"
+                {% if status_selecionado == "inativo" %}
+                    selected
+                {% endif %}
+            >
+                Inativo
+            </option>
+
         </select>
-    </div>
+
+
+        <div class="pessoas-filter-actions">
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+                <i class="bi bi-funnel"></i>
+                Filtrar
+            </button>
+
+            {% if busca or classificacao_selecionada or status_selecionado %}
+
+                <a
+                    href="{% url 'pessoas:lista' %}"
+                    class="btn btn-light"
+                >
+                    Limpar
+                </a>
+
+            {% endif %}
+
+        </div>
+
+    </form>
+
+
+    <!-- TABELA -->
 
     <div class="table-responsive">
+
         <table class="verserp-table">
 
             <thead>
+
                 <tr>
                     <th>Nome / Razão Social</th>
                     <th>Tipo</th>
@@ -57,126 +163,237 @@
                     <th>Status</th>
                     <th></th>
                 </tr>
+
             </thead>
+
 
             <tbody>
 
                 {% for pessoa in pessoas %}
 
-                <tr>
-                    <td>
-                        <div class="person-name">
-                            <strong>{{ pessoa.razao_social }}</strong>
+                    <tr>
 
-                            {% if pessoa.nome_fantasia %}
-                                <small>{{ pessoa.nome_fantasia }}</small>
-                            {% endif %}
-                        </div>
-                    </td>
+                        <td>
 
-                    <td>
-                        {{ pessoa.get_tipo_pessoa_display }}
-                    </td>
+                            <div class="person-name">
 
-                    <td>
-                        {{ pessoa.get_classificacao_display }}
-                    </td>
+                                <strong>
+                                    <a
+                                        href="{% url 'pessoas:detalhe' pessoa.pk %}"
+                                        class="person-link"
+                                    >
+                                        {{ pessoa.razao_social }}
+                                    </a>
+                                </strong>
 
-                    <td>
-                        {% if pessoa.cpf_cnpj %}
-                            {{ pessoa.cpf_cnpj }}
-                        {% else %}
-                            <span class="text-muted">Não informado</span>
-                        {% endif %}
-                    </td>
+                                {% if pessoa.nome_fantasia %}
 
-                    <td>
-                        {% if pessoa.cidade %}
-                            {{ pessoa.cidade }}
-                            {% if pessoa.estado %}
-                                / {{ pessoa.estado }}
-                            {% endif %}
-                        {% else %}
-                            <span class="text-muted">—</span>
-                        {% endif %}
-                    </td>
+                                    <small>
+                                        {{ pessoa.nome_fantasia }}
+                                    </small>
 
-                    <td>
-                        {% if pessoa.ativo %}
-                            <span class="status-badge status-active">
-                                Ativo
-                            </span>
-                        {% else %}
-                            <span class="status-badge status-inactive">
-                                Inativo
-                            </span>
-                        {% endif %}
-                    </td>
+                                {% endif %}
 
-                    <td class="table-actions">
-                        <a 
-                            href="{% url 'pessoas:editar' pessoa.pk %}" title="Editar"
-                        >
-                            <i class="bi bi-pencil"></i>
-                        </a>
+                            </div>
 
-                        <form
-                            method="post"
-                            action="{% url 'pessoas:alterar_status' pessoa.pk %}"
-                            class="d-inline"
-                        >
-                            {% csrf_token %}
+                        </td>
 
-                            {% if pessoa.ativo %}
 
-                                 <button
-                                    type="submit"
-                                    class="btn-action"
-                                    title="Inativar"
-                                >
-                                    <i class="bi bi-person-x"></i>
-                                </button>
+                        <td>
+                            {{ pessoa.get_tipo_pessoa_display }}
+                        </td>
+
+
+                        <td>
+                            {{ pessoa.get_classificacao_display }}
+                        </td>
+
+
+                        <td>
+
+                            {% if pessoa.cpf_cnpj %}
+
+                                {{ pessoa.cpf_cnpj_formatado }}
 
                             {% else %}
 
-                                <button
-                                    type="submit"
-                                    class="btn-action"
-                                    title="Ativar"
-                                >
-                                    <i class="bi bi-person-check"></i>
-                                </button>
+                                <span class="text-muted">
+                                    Não informado
+                                </span>
 
                             {% endif %}
-                           
-                        </form>
-                    </td>
-                </tr>
+
+                        </td>
+
+
+                        <td>
+
+                            {% if pessoa.cidade %}
+
+                                {{ pessoa.cidade }}
+
+                                {% if pessoa.estado %}
+                                    / {{ pessoa.estado }}
+                                {% endif %}
+
+                            {% else %}
+
+                                <span class="text-muted">
+                                    —
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <td>
+
+                            {% if pessoa.ativo %}
+
+                                <span class="status-badge status-active">
+                                    Ativo
+                                </span>
+
+                            {% else %}
+
+                                <span class="status-badge status-inactive">
+                                    Inativo
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <!-- AÇÕES -->
+
+                        <td class="table-actions">
+
+                            <a
+                                href="{% url 'pessoas:editar' pessoa.pk %}"
+                                title="Editar"
+                            >
+                                <i class="bi bi-pencil"></i>
+                            </a>
+
+
+                            <form
+                                method="post"
+                                action="{% url 'pessoas:alterar_status' pessoa.pk %}"
+                                class="d-inline"
+                            >
+
+                                {% csrf_token %}
+
+                                {% if pessoa.ativo %}
+
+                                    <button
+                                        type="submit"
+                                        class="btn-action"
+                                        title="Inativar"
+                                    >
+                                        <i class="bi bi-person-x"></i>
+                                    </button>
+
+                                {% else %}
+
+                                    <button
+                                        type="submit"
+                                        class="btn-action"
+                                        title="Ativar"
+                                    >
+                                        <i class="bi bi-person-check"></i>
+                                    </button>
+
+                                {% endif %}
+
+                            </form>
+
+                        </td>
+
+                    </tr>
+
 
                 {% empty %}
 
-                <tr>
-                    <td colspan="7">
+                    <tr>
 
-                        <div class="empty-state">
-                            <i class="bi bi-people"></i>
+                        <td colspan="7">
 
-                            <h3>Nenhuma pessoa cadastrada</h3>
+                            <div class="empty-state">
 
-                            <p>
-                                Cadastre o primeiro cliente ou fornecedor.
-                            </p>
-                        </div>
+                                <i class="bi bi-people"></i>
 
-                    </td>
-                </tr>
+                                <h3>
+                                    Nenhuma pessoa encontrada
+                                </h3>
+
+                                <p>
+                                    Nenhum cadastro corresponde aos critérios informados.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
 
                 {% endfor %}
 
             </tbody>
 
         </table>
+
     </div>
+
+
+    <!-- PAGINAÇÃO -->
+
+    {% if pagina.paginator.num_pages > 1 %}
+
+        <div class="verserp-pagination">
+
+            <div class="pagination-info">
+
+                Página {{ pagina.number }}
+                de {{ pagina.paginator.num_pages }}
+
+            </div>
+
+
+            <div class="pagination-actions">
+
+                {% if pagina.has_previous %}
+
+                    <a
+                        href="?page={{ pagina.previous_page_number }}&busca={{ busca|urlencode }}&classificacao={{ classificacao_selecionada }}&status={{ status_selecionado }}"
+                        class="btn btn-light"
+                    >
+                        <i class="bi bi-chevron-left"></i>
+                        Anterior
+                    </a>
+
+                {% endif %}
+
+
+                {% if pagina.has_next %}
+
+                    <a
+                        href="?page={{ pagina.next_page_number }}&busca={{ busca|urlencode }}&classificacao={{ classificacao_selecionada }}&status={{ status_selecionado }}"
+                        class="btn btn-light"
+                    >
+                        Próxima
+                        <i class="bi bi-chevron-right"></i>
+                    </a>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+    {% endif %}
 
 </div>
 

@@ -1,3 +1,5 @@
+import re
+
 from django.db import models
 
 
@@ -127,6 +129,30 @@ class Pessoa(models.Model):
         auto_now=True,
         verbose_name="Atualizado em",
     )
+
+    @property
+    def cpf_cnpj_formatado(self):
+        documento = re.sub(r"\D", "", self.cpf_cnpj or "")
+
+        if len(documento) == 11:
+            return (
+                f"{documento[:3]}."
+                f"{documento[3:6]}."
+                f"{documento[6:9]}-"
+                f"{documento[9:]}"
+            )
+
+        if len(documento) == 14:
+            return (
+                f"{documento[:2]}."
+                f"{documento[2:5]}."
+                f"{documento[5:8]}/"
+                f"{documento[8:12]}-"
+                f"{documento[12:]}"
+            )
+
+        return self.cpf_cnpj
+
 
     class Meta:
         verbose_name = "Pessoa"

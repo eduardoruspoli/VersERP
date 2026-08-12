@@ -8,6 +8,7 @@ app_name = "pessoas"
 
 urlpatterns = [
     path("", views.lista_pessoas, name="lista"),
+
     path("nova/", views.nova_pessoa, name="nova"),
 
     path(
@@ -21,6 +22,12 @@ urlpatterns = [
         views.editar_pessoa,
         name="editar",
     ),
+
+    path(
+            "<int:pk>/",
+            views.detalhe_pessoa,
+            name="detalhe",
+        ),
 
     path(
         "<int:pk>/status/",

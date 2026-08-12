@@ -1,9 +1,13 @@
 import re
 
+from django.core import paginator
+from django.core import paginator
 import requests
 
-from django.http import JsonResponse
+from django.http import JsonResponse, request
 from django.shortcuts import get_object_or_404, redirect, render
+from django.db.models import Q
+from django.core.paginator import Paginator
 
 from .forms import PessoaForm
 from .models import Pessoa
@@ -12,8 +16,41 @@ from .models import Pessoa
 def lista_pessoas(request):
     pessoas = Pessoa.objects.all()
 
+    busca = request.GET.get("busca", "").strip()
+    classificacao = request.GET.get("classificacao", "").strip()
+    status = request.GET.get("status", "").strip()
+
+    if busca:
+        pessoas = pessoas.filter(
+            Q(razao_social__icontains=busca)
+            | Q(nome_fantasia__icontains=busca)
+            | Q(cpf_cnpj__icontains=busca)
+            | Q(email__icontains=busca)
+        )
+
+    if classificacao:
+        pessoas = pessoas.filter(
+            classificacao=classificacao
+        )
+
+    if status == "ativo":
+        pessoas = pessoas.filter(ativo=True)
+
+    elif status == "inativo":
+        pessoas = pessoas.filter(ativo=False)
+
+    paginator = Paginator(pessoas, 10)
+    
+    numero_pagina = request.GET.get("page")
+    
+    pagina = paginator.get_page(numero_pagina)
+
     contexto = {
-        "pessoas": pessoas,
+        "pessoas": pagina,
+        "pagina": pagina,
+        "busca": busca,
+        "classificacao_selecionada": classificacao,
+        "status_selecionado": status,
     }
 
     return render(
@@ -21,7 +58,6 @@ def lista_pessoas(request):
         "pessoas/lista.html",
         contexto,
     )
-
 
 def nova_pessoa(request):
 
@@ -83,6 +119,20 @@ def alterar_status_pessoa(request, pk):
         pessoa.save(update_fields=["ativo"])
 
     return redirect("pessoas:lista")
+
+
+def detalhe_pessoa(request, pk):
+    pessoa = get_object_or_404(Pessoa, pk=pk)
+
+    contexto = {
+        "pessoa": pessoa,
+    }
+
+    return render(
+        request,
+        "pessoas/detalhe.html",
+        contexto,
+    )
 
 
 def consultar_cnpj(request):
