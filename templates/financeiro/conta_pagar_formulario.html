@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}
+Nova Conta a Pagar | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Nova Conta a Pagar</h1>
+        <p>Cadastre uma nova obrigação financeira</p>
+    </div>
+
+    <a
+        href="{% url 'financeiro:contas_pagar' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<form method="post" class="verserp-form">
+
+    {% csrf_token %}
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+            <h2>Dados do lançamento</h2>
+        </div>
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+                <label>Empresa</label>
+                {{ form.empresa }}
+                {{ form.empresa.errors }}
+            </div>
+
+            <div class="form-group form-group-wide">
+                <label>Fornecedor</label>
+                {{ form.pessoa }}
+                {{ form.pessoa.errors }}
+            </div>
+
+            <div class="form-group form-group-full">
+                <label>Descrição</label>
+                {{ form.descricao }}
+                {{ form.descricao.errors }}
+            </div>
+
+            <div class="form-group">
+                <label>Número do documento</label>
+                {{ form.numero_documento }}
+                {{ form.numero_documento.errors }}
+            </div>
+
+            <div class="form-group">
+                <label>Data de emissão</label>
+                {{ form.data_emissao }}
+                {{ form.data_emissao.errors }}
+            </div>
+
+            <div class="form-group">
+                <label>Competência</label>
+                {{ form.data_competencia }}
+                {{ form.data_competencia.errors }}
+            </div>
+
+            <div class="form-group">
+                <label>Valor total</label>
+                {{ form.valor_total }}
+                {{ form.valor_total.errors }}
+            </div>
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+            <h2>Condição de pagamento</h2>
+            <p>
+                Defina como o valor será distribuído nas parcelas.
+            </p>
+        </div>
+
+        <div class="form-grid">
+
+            <div class="form-group">
+                <label>
+                    {{ form.condicao_pagamento.label }}
+                </label>
+
+                {{ form.condicao_pagamento }}
+                {{ form.condicao_pagamento.errors }}
+            </div>
+
+            <div class="form-group">
+                <label>
+                    {{ form.quantidade_parcelas.label }}
+                </label>
+
+                {{ form.quantidade_parcelas }}
+                {{ form.quantidade_parcelas.errors }}
+            </div>
+
+            <div class="form-group">
+                <label>
+                    {{ form.primeiro_vencimento.label }}
+                </label>
+
+                {{ form.primeiro_vencimento }}
+                {{ form.primeiro_vencimento.errors }}
+            </div>
+
+        </div>
+
+    </section>        
+
+            <div class="form-group form-group-wide">
+                <label>Plano de contas</label>
+                {{ form.plano_conta }}
+                {{ form.plano_conta.errors }}
+            </div>
+
+            <div class="form-group form-group-full">
+                <label>Observações</label>
+                {{ form.observacoes }}
+                {{ form.observacoes.errors }}
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:contas_pagar' %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+        <button
+            type="submit"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-check-lg"></i>
+            Salvar Conta
+        </button>
+
+    </div>
+
+</form>
+
+{% endblock %}

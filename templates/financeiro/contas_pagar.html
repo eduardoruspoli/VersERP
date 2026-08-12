@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}
+Contas a Pagar | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Contas a Pagar</h1>
+        <p>Gerencie obrigações financeiras e pagamentos</p>
+    </div>
+
+    <a
+        href="{% url 'financeiro:nova_conta_pagar' %}"
+        class="btn btn-primary"
+    >
+        <i class="bi bi-plus-lg"></i>
+        Nova Conta a Pagar
+    </a>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Lançamentos</h2>
+
+            <span>
+                {{ lancamentos|length }}
+                registro{{ lancamentos|length|pluralize }}
+            </span>
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Descrição</th>
+                    <th>Fornecedor</th>
+                    <th>Documento</th>
+                    <th>Valor</th>
+                    <th>Status</th>
+                </tr>
+
+            </thead>
+
+            <tbody>
+
+                {% for lancamento in lancamentos %}
+
+                    <tr>
+
+                        <td>
+                            {{ lancamento.descricao }}
+                        </td>
+
+                        <td>
+                            {{ lancamento.pessoa.razao_social }}
+                        </td>
+
+                        <td>
+                            {{ lancamento.numero_documento|default:"—" }}
+                        </td>
+
+                        <td>
+                            R$ {{ lancamento.valor_total }}
+                        </td>
+
+                        <td>
+                            {{ lancamento.get_status_display }}
+                        </td>
+
+                    </tr>
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="5">
+
+                            <div class="empty-state">
+                                <i class="bi bi-cash-stack"></i>
+
+                                <h3>
+                                    Nenhuma conta a pagar cadastrada
+                                </h3>
+
+                                <p>
+                                    Cadastre o primeiro lançamento financeiro.
+                                </p>
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

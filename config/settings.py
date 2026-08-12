@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     # Seus Apps
     'core',
     'pessoas',
+    'financeiro',
 ]
 
 MIDDLEWARE = [
