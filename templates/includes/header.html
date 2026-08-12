@@ -1,16 +1,38 @@
 <header class="header">
 
     <div>
-
         <h2>Dashboard</h2>
-
     </div>
 
     <div class="user">
 
         <i class="bi bi-person-circle"></i>
 
-        <span>Eduardo</span>
+        <span>
+            {% if request.user.first_name %}
+                {{ request.user.first_name }}
+            {% else %}
+                {{ request.user.username }}
+            {% endif %}
+        </span>
+
+        <form
+            method="post"
+            action="{% url 'core:logout' %}"
+            class="logout-form"
+        >
+            {% csrf_token %}
+
+            <button
+                type="submit"
+                class="logout-button"
+                title="Sair do VersERP"
+            >
+                <i class="bi bi-box-arrow-right"></i>
+                <span>Sair</span>
+            </button>
+
+        </form>
 
     </div>
 

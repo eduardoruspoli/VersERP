@@ -8,11 +8,12 @@ from django.http import JsonResponse, request
 from django.shortcuts import get_object_or_404, redirect, render
 from django.db.models import Q
 from django.core.paginator import Paginator
+from django.contrib.auth.decorators import login_required
 
 from .forms import PessoaForm
 from .models import Pessoa
 
-
+@login_required
 def lista_pessoas(request):
     pessoas = Pessoa.objects.all()
 
@@ -59,6 +60,7 @@ def lista_pessoas(request):
         contexto,
     )
 
+@login_required
 def nova_pessoa(request):
 
     if request.method == "POST":
@@ -82,6 +84,7 @@ def nova_pessoa(request):
         contexto,
     )
 
+@login_required
 def editar_pessoa(request, pk):
     pessoa = get_object_or_404(Pessoa, pk=pk)
 
@@ -111,16 +114,7 @@ def editar_pessoa(request, pk):
     )
 
 
-def alterar_status_pessoa(request, pk):
-    pessoa = get_object_or_404(Pessoa, pk=pk)
-
-    if request.method == "POST":
-        pessoa.ativo = not pessoa.ativo
-        pessoa.save(update_fields=["ativo"])
-
-    return redirect("pessoas:lista")
-
-
+@login_required
 def detalhe_pessoa(request, pk):
     pessoa = get_object_or_404(Pessoa, pk=pk)
 
@@ -135,6 +129,18 @@ def detalhe_pessoa(request, pk):
     )
 
 
+@login_required
+def alterar_status_pessoa(request, pk):
+    pessoa = get_object_or_404(Pessoa, pk=pk)
+
+    if request.method == "POST":
+        pessoa.ativo = not pessoa.ativo
+        pessoa.save(update_fields=["ativo"])
+
+    return redirect("pessoas:lista")
+
+
+@login_required
 def consultar_cnpj(request):
     cnpj = request.GET.get("cnpj", "")
     cnpj = re.sub(r"\D", "", cnpj)
