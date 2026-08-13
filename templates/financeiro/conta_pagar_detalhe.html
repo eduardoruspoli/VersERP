@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}
+Conta a Pagar | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        <h1>
+            {{ lancamento.descricao }}
+        </h1>
+
+        <p>
+            Detalhes da conta a pagar
+        </p>
+
+    </div>
+
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:contas_pagar' %}"
+            class="btn btn-light"
+        >
+            <i class="bi bi-arrow-left"></i>
+            Voltar
+        </a>
+
+
+        {% if perms.financeiro.change_lancamentofinanceiro %}
+
+            <a
+                href="{% url 'financeiro:editar_conta_pagar' lancamento.pk %}"
+                class="btn btn-light"
+            >
+                <i class="bi bi-pencil"></i>
+                Editar
+            </a>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>
+                Dados do lançamento
+            </h2>
+
+            <span>
+                {{ lancamento.get_status_display }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="form-grid">
+
+        <div class="form-group">
+
+            <label>
+                Empresa
+            </label>
+
+            <strong>
+                {{ lancamento.empresa }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Fornecedor
+            </label>
+
+            <strong>
+                {{ lancamento.pessoa.razao_social }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Documento
+            </label>
+
+            <strong>
+                {{ lancamento.numero_documento|default:"—" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Valor total
+            </label>
+
+            <strong>
+                R$ {{ lancamento.valor_total|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Total pago
+            </label>
+
+            <strong>
+                R$ {{ total_baixado|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Saldo
+            </label>
+
+            <strong>
+                R$ {{ saldo_total|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>
+                Parcelas
+            </h2>
+
+            <span>
+                {{ parcelas|length }}
+                parcela{{ parcelas|length|pluralize }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Parcela</th>
+                    <th>Vencimento</th>
+                    <th>Valor</th>
+                    <th>Pago</th>
+                    <th>Saldo</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for parcela in parcelas %}
+
+                    <tr>
+
+                        <td>
+                            {{ parcela.numero }}/{{ parcelas|length }}
+                        </td>
+
+
+                        <td>
+                            {{ parcela.vencimento|date:"d/m/Y" }}
+                        </td>
+
+
+                        <td>
+                            R$ {{ parcela.valor|floatformat:"2g" }}
+                        </td>
+
+
+                        <td>
+                            R$ {{ parcela.total_baixado|floatformat:"2g" }}
+                        </td>
+
+
+                        <td>
+                            <strong>
+                                R$ {{ parcela.saldo|floatformat:"2g" }}
+                            </strong>
+                        </td>
+
+
+                        <td>
+
+                            {% if parcela.status == "LIQUIDADA" %}
+
+                                <span
+                                    class="status-badge status-active"
+                                >
+                                    {{ parcela.get_status_display }}
+                                </span>
+
+                            {% elif parcela.status == "CANCELADA" %}
+
+                                <span
+                                    class="status-badge status-inactive"
+                                >
+                                    {{ parcela.get_status_display }}
+                                </span>
+
+                            {% else %}
+
+                                <span class="status-badge">
+                                    {{ parcela.get_status_display }}
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <td class="table-actions">
+
+                            {% if perms.financeiro.add_baixafinanceira %}
+
+                                {% if parcela.status != "LIQUIDADA" and parcela.status != "CANCELADA" %}
+
+                                    <a
+                                        href="{% url 'financeiro:baixar_parcela' parcela.pk %}"
+                                        class="btn btn-primary text-white"
+                                        title="Registrar pagamento"
+                                    >
+                                        <i class="bi bi-check2-circle"></i>
+                                        Baixar
+                                    </a>
+
+                                {% endif %}
+
+                            {% endif %}
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

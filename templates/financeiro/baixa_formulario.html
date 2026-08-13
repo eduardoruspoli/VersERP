@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+
+{% block title %}
+Baixar Parcela | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        <h1>
+            Registrar Pagamento
+        </h1>
+
+        <p>
+            Baixa da parcela
+            {{ parcela.numero }}
+            de {{ lancamento.descricao }}
+        </p>
+
+    </div>
+
+
+    <a
+        href="{% url 'financeiro:detalhe_conta_pagar' lancamento.pk %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>
+                Resumo da parcela
+            </h2>
+
+        </div>
+
+    </div>
+
+
+    <div class="form-grid">
+
+        <div class="form-group">
+
+            <label>
+                Fornecedor
+            </label>
+
+            <strong>
+                {{ lancamento.pessoa.razao_social }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Vencimento
+            </label>
+
+            <strong>
+                {{ parcela.vencimento|date:"d/m/Y" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Valor original
+            </label>
+
+            <strong>
+                R$ {{ parcela.valor|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Já pago
+            </label>
+
+            <strong>
+                R$ {{ parcela.total_baixado|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Saldo atual
+            </label>
+
+            <strong>
+                R$ {{ parcela.saldo|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<form
+    method="post"
+    class="verserp-form"
+>
+
+    {% csrf_token %}
+
+
+    {% if form.errors %}
+
+        <div class="alert alert-danger">
+
+            <strong>
+                Verifique os dados informados.
+            </strong>
+
+            {{ form.non_field_errors }}
+
+        </div>
+
+    {% endif %}
+
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+
+            <div>
+
+                <h2>
+                    Dados do pagamento
+                </h2>
+
+                <p>
+                    Informe como o pagamento foi realizado.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label>
+                    Conta bancária
+                </label>
+
+                {{ form.conta_bancaria }}
+                {{ form.conta_bancaria.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>
+                    Data do pagamento
+                </label>
+
+                {{ form.data }}
+                {{ form.data.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>
+                    Valor principal
+                </label>
+
+                {{ form.valor }}
+                {{ form.valor.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>
+                    Juros
+                </label>
+
+                {{ form.juros }}
+                {{ form.juros.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>
+                    Multa
+                </label>
+
+                {{ form.multa }}
+                {{ form.multa.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label>
+                    Desconto
+                </label>
+
+                {{ form.desconto }}
+                {{ form.desconto.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-full">
+
+                <label>
+                    Observações
+                </label>
+
+                {{ form.observacoes }}
+                {{ form.observacoes.errors }}
+
+            </div>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Movimento bancário
+            </label>
+
+            <strong id="valor-movimento">
+                R$ 0,00
+            </strong>
+
+        </div>
+
+    </section>
+
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:detalhe_conta_pagar' lancamento.pk %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+
+        <button
+            type="submit"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-check-lg"></i>
+            Confirmar Baixa
+        </button>
+
+    </div>
+
+</form>
+
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+
+        const campos = [
+            document.getElementById("id_valor"),
+            document.getElementById("id_juros"),
+            document.getElementById("id_multa"),
+            document.getElementById("id_desconto"),
+        ];
+
+        const movimento =
+            document.getElementById(
+                "valor-movimento"
+            );
+
+
+        function moedaParaCentavos(valor) {
+
+            if (!valor) {
+                return 0;
+            }
+
+            let texto =
+                String(valor)
+                    .trim()
+                    .replace(/[^\d,.-]/g, "");
+
+            if (texto.includes(",")) {
+
+                texto = texto
+                    .replace(/\./g, "")
+                    .replace(",", ".");
+
+            }
+
+            const numero =
+                Number.parseFloat(texto);
+
+            if (Number.isNaN(numero)) {
+                return 0;
+            }
+
+            return Math.round(
+                numero * 100
+            );
+
+        }
+
+
+        function formatarCampo(campo) {
+
+            if (!campo.value) {
+                return;
+            }
+
+            const centavos =
+                moedaParaCentavos(
+                    campo.value
+                );
+
+            campo.value =
+                (
+                    centavos / 100
+                ).toLocaleString(
+                    "pt-BR",
+                    {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                    }
+                );
+
+        }
+
+
+        function atualizarMovimento() {
+
+            const principal =
+                moedaParaCentavos(
+                    campos[0].value
+                );
+
+            const juros =
+                moedaParaCentavos(
+                    campos[1].value
+                );
+
+            const multa =
+                moedaParaCentavos(
+                    campos[2].value
+                );
+
+            const desconto =
+                moedaParaCentavos(
+                    campos[3].value
+                );
+
+            const total =
+                principal
+                + juros
+                + multa
+                - desconto;
+
+
+            movimento.textContent =
+                (
+                    total / 100
+                ).toLocaleString(
+                    "pt-BR",
+                    {
+                        style: "currency",
+                        currency: "BRL",
+                    }
+                );
+
+        }
+
+
+        campos.forEach(
+            function (campo) {
+
+                formatarCampo(campo);
+
+                campo.addEventListener(
+                    "input",
+                    atualizarMovimento
+                );
+
+                campo.addEventListener(
+                    "blur",
+                    function () {
+
+                        formatarCampo(campo);
+                        atualizarMovimento();
+
+                    }
+                );
+
+            }
+        );
+
+
+        atualizarMovimento();
+
+    }
+);
+
+</script>
+
+{% endblock %}

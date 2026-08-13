@@ -159,10 +159,54 @@ class ContaBancaria(models.Model):
         verbose_name_plural = "Contas bancárias"
         ordering = ["empresa", "banco", "agencia", "conta"]
 
-    def __str__(self):
-        identificacao = self.descricao or self.banco
-        return f"{self.empresa} - {identificacao}"
+    @property
+    def total_entradas(self):
+        total = Decimal("0.00")
 
+        baixas = self.baixas_financeiras.select_related(
+            "parcela__lancamento"
+        )
+
+        for baixa in baixas:
+            if baixa.parcela.lancamento.tipo == "RECEBER":
+                total += baixa.valor_movimento
+
+        return total
+
+
+    @property
+    def total_saidas(self):
+        total = Decimal("0.00")
+
+        baixas = self.baixas_financeiras.select_related(
+            "parcela__lancamento"
+        )
+
+        for baixa in baixas:
+            if baixa.parcela.lancamento.tipo == "PAGAR":
+                total += baixa.valor_movimento
+
+        return total
+
+
+    @property
+    def saldo_atual(self):
+        return (
+            self.saldo_inicial
+            + self.total_entradas
+            - self.total_saidas
+        )
+
+    def __str__(self):
+        partes = [self.banco]
+
+        if self.agencia:
+            partes.append(f"Ag. {self.agencia}")
+
+        if self.conta:
+            partes.append(f"Conta {self.conta}")
+
+        return " - ".join(partes)
 
 class PlanoConta(models.Model):
     TIPO_CHOICES = [

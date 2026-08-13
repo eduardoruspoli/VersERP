@@ -13,14 +13,26 @@ Contas a Pagar | VersERP
         <p>Gerencie obrigações financeiras e pagamentos</p>
     </div>
 
-    <a
-        href="{% url 'financeiro:nova_conta_pagar' %}"
-        class="btn btn-primary"
-    >
-        <i class="bi bi-plus-lg"></i>
-        Nova Conta a Pagar
-    </a>
+    <div class="form-actions">
 
+        <a
+            href="{% url 'financeiro:index' %}"
+            class="btn btn-light"
+        >
+            <i class="bi bi-arrow-left"></i>
+            Voltar
+        </a>
+
+        <a
+            href="{% url 'financeiro:nova_conta_pagar' %}"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-plus-lg"></i>
+            Nova Conta a Pagar
+        </a>
+
+    </div>
+    
 </div>
 
 
@@ -29,12 +41,14 @@ Contas a Pagar | VersERP
     <div class="panel-header">
 
         <div>
+
             <h2>Lançamentos</h2>
 
             <span>
                 {{ lancamentos|length }}
                 registro{{ lancamentos|length|pluralize }}
             </span>
+
         </div>
 
     </div>
@@ -47,14 +61,35 @@ Contas a Pagar | VersERP
             <thead>
 
                 <tr>
-                    <th>Descrição</th>
-                    <th>Fornecedor</th>
-                    <th>Documento</th>
-                    <th>Valor</th>
-                    <th>Status</th>
+
+                    <th>
+                        Descrição
+                    </th>
+
+                    <th>
+                        Fornecedor
+                    </th>
+
+                    <th>
+                        Documento
+                    </th>
+
+                    <th>
+                        Valor
+                    </th>
+
+                    <th>
+                        Status
+                    </th>
+
+                    <th>
+                        Ações
+                    </th>
+
                 </tr>
 
             </thead>
+
 
             <tbody>
 
@@ -63,34 +98,112 @@ Contas a Pagar | VersERP
                     <tr>
 
                         <td>
-                            {{ lancamento.descricao }}
+
+                            <strong>
+                                {{ lancamento.descricao }}
+                            </strong>
+
                         </td>
 
+
                         <td>
+
                             {{ lancamento.pessoa.razao_social }}
+
                         </td>
 
+
                         <td>
+
                             {{ lancamento.numero_documento|default:"—" }}
+
                         </td>
 
-                        <td>
-                            R$ {{ lancamento.valor_total }}
-                        </td>
 
                         <td>
-                            {{ lancamento.get_status_display }}
+
+                            <strong>
+                                R$ {{ lancamento.valor_total|floatformat:"2g" }}
+                            </strong>
+
+                        </td>
+
+
+                        <td>
+
+                            {% if lancamento.status == "ABERTO" %}
+
+                                <span class="status-badge">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% elif lancamento.status == "PARCIAL" %}
+
+                                <span class="status-badge">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% elif lancamento.status == "LIQUIDADO" %}
+
+                                <span class="status-badge status-active">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% elif lancamento.status == "CANCELADO" %}
+
+                                <span class="status-badge status-inactive">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% else %}
+
+                                {{ lancamento.get_status_display }}
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <td class="table-actions">
+
+                            <a
+                                href="{% url 'financeiro:detalhe_conta_pagar' lancamento.pk %}"
+                                title="Visualizar conta a pagar"
+                                class="btn btn-light"
+                            >
+
+                                <i class="bi bi-eye"></i>
+
+                            </a>
+
+
+                            {% if perms.financeiro.change_lancamentofinanceiro %}
+
+                                <a
+                                    href="{% url 'financeiro:editar_conta_pagar' lancamento.pk %}"
+                                    title="Editar conta a pagar"
+                                    class="btn btn-light"
+                                >
+
+                                    <i class="bi bi-pencil"></i>
+
+                                </a>
+
+                            {% endif %}
+
                         </td>
 
                     </tr>
+
 
                 {% empty %}
 
                     <tr>
 
-                        <td colspan="5">
+                        <td colspan="6">
 
                             <div class="empty-state">
+
                                 <i class="bi bi-cash-stack"></i>
 
                                 <h3>
@@ -100,6 +213,7 @@ Contas a Pagar | VersERP
                                 <p>
                                     Cadastre o primeiro lançamento financeiro.
                                 </p>
+
                             </div>
 
                         </td>

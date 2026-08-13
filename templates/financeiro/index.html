@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}
+Financeiro | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Financeiro</h1>
+        <p>
+            Gestão de contas, bancos e movimentações financeiras
+        </p>
+    </div>
+
+</div>
+
+
+<div class="dashboard-grid">
+
+
+    <!-- CONTAS A PAGAR -->
+
+    <a
+        href="{% url 'financeiro:contas_pagar' %}"
+        class="dashboard-card"
+    >
+
+        <div class="dashboard-card-icon">
+            <i class="bi bi-cash-stack"></i>
+        </div>
+
+        <div>
+
+            <h3>
+                Contas a Pagar
+            </h3>
+
+            <p>
+                Lançamentos, parcelas e pagamentos
+            </p>
+
+        </div>
+
+    </a>
+
+
+    <!-- CONTAS A RECEBER -->
+
+    <div class="dashboard-card dashboard-card-disabled">
+
+        <div class="dashboard-card-icon">
+            <i class="bi bi-wallet2"></i>
+        </div>
+
+        <div>
+
+            <h3>
+                Contas a Receber
+            </h3>
+
+            <p>
+                Recebimentos e notas emitidas
+            </p>
+
+            <small>
+                Em desenvolvimento
+            </small>
+
+        </div>
+
+    </div>
+
+
+    <!-- CONTAS BANCÁRIAS -->
+
+    <a
+        href="{% url 'financeiro:contas_bancarias' %}"
+        class="dashboard-card"
+    >
+
+        <div class="dashboard-card-icon">
+            <i class="bi bi-bank"></i>
+        </div>
+
+        <div>
+
+            <h3>
+                Contas Bancárias
+            </h3>
+
+            <p>
+                Bancos, saldos e movimentações
+            </p>
+
+        </div>
+
+    </a>
+
+
+    <!-- CONCILIAÇÃO BANCÁRIA -->
+
+    <div class="dashboard-card dashboard-card-disabled">
+
+        <div class="dashboard-card-icon">
+            <i class="bi bi-arrow-left-right"></i>
+        </div>
+
+        <div>
+
+            <h3>
+                Conciliação Bancária
+            </h3>
+
+            <p>
+                Conferência e importação de extratos
+            </p>
+
+            <small>
+                Em desenvolvimento
+            </small>
+
+        </div>
+
+    </div>
+
+
+    <!-- PLANO DE CONTAS -->
+
+    <div class="dashboard-card dashboard-card-disabled">
+
+        <div class="dashboard-card-icon">
+            <i class="bi bi-diagram-3"></i>
+        </div>
+
+        <div>
+
+            <h3>
+                Plano de Contas
+            </h3>
+
+            <p>
+                Classificação de receitas e despesas
+            </p>
+
+            <small>
+                Em desenvolvimento
+            </small>
+
+        </div>
+
+    </div>
+
+
+    <!-- CENTROS DE CUSTO -->
+
+    <div class="dashboard-card dashboard-card-disabled">
+
+        <div class="dashboard-card-icon">
+            <i class="bi bi-building"></i>
+        </div>
+
+        <div>
+
+            <h3>
+                Centros de Custo
+            </h3>
+
+            <p>
+                Obras, projetos e áreas administrativas
+            </p>
+
+            <small>
+                Em desenvolvimento
+            </small>
+
+        </div>
+
+    </div>
+
+
+</div>
+
+{% endblock %}

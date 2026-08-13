@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}
+Contas Bancárias | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Contas Bancárias</h1>
+        <p>
+            Acompanhe saldos e movimentações bancárias
+        </p>
+    </div>
+
+    <a
+        href="{% url 'financeiro:index' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>Contas</h2>
+
+            <span>
+                {{ contas|length }}
+                conta{{ contas|length|pluralize }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Banco</th>
+                    <th>Empresa</th>
+                    <th>Agência</th>
+                    <th>Conta</th>
+                    <th>Saldo inicial</th>
+                    <th>Entradas</th>
+                    <th>Saídas</th>
+                    <th>Saldo atual</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for conta in contas %}
+
+                    <tr>
+
+                        <td>
+                            <strong>
+                                {{ conta.banco }}
+                            </strong>
+                        </td>
+
+                        <td>
+                            {{ conta.empresa }}
+                        </td>
+
+                        <td>
+                            {{ conta.agencia|default:"—" }}
+                        </td>
+
+                        <td>
+                            {{ conta.conta|default:"—" }}
+                        </td>
+
+                        <td>
+                            R$ {{ conta.saldo_inicial|floatformat:"2g" }}
+                        </td>
+
+                        <td>
+                            R$ {{ conta.total_entradas|floatformat:"2g" }}
+                        </td>
+
+                        <td>
+                            R$ {{ conta.total_saidas|floatformat:"2g" }}
+                        </td>
+
+                        <td>
+
+                            <strong>
+                                R$ {{ conta.saldo_atual|floatformat:"2g" }}
+                            </strong>
+
+                        </td>
+
+                        <td class="table-actions">
+
+                            <a
+                                href="{% url 'financeiro:detalhe_conta_bancaria' conta.pk %}"
+                                class="btn btn-light"
+                                title="Ver movimentações"
+                            >
+                                <i class="bi bi-eye"></i>
+                            </a>
+
+                        </td>
+
+                    </tr>
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="9">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-bank"></i>
+
+                                <h3>
+                                    Nenhuma conta bancária cadastrada
+                                </h3>
+
+                                <p>
+                                    Cadastre as contas bancárias
+                                    utilizadas pelas empresas.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

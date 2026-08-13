@@ -24,10 +24,14 @@
             <span>Comercial</span>
         </a>
 
-        <a href="javascript:void(0);" class="sidebar-disabled">
-            <i class="bi bi-cash-stack"></i>
-            <span>Financeiro</span>
-        </a>
+        {% if perms.financeiro.view_lancamentofinanceiro %}
+
+            <a href="{% url 'financeiro:index' %}">
+                <i class="bi bi-cash-stack"></i>
+                <span>Financeiro</span>
+            </a>
+
+        {% endif %}
 
         <a href="javascript:void(0);" class="sidebar-disabled">
             <i class="bi bi-cart3"></i>

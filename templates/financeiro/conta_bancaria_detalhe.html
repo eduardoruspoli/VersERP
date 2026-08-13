@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}
+{{ conta.banco }} | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        <h1>
+            {{ conta.banco }}
+        </h1>
+
+        <p>
+
+            {% if conta.agencia %}
+                Ag. {{ conta.agencia }}
+            {% endif %}
+
+            {% if conta.conta %}
+                — Conta {{ conta.conta }}
+            {% endif %}
+
+        </p>
+
+    </div>
+
+    <a
+        href="{% url 'financeiro:contas_bancarias' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Resumo bancário</h2>
+            <span>{{ conta.empresa }}</span>
+        </div>
+
+    </div>
+
+
+    <div class="form-grid">
+
+        <div class="form-group">
+
+            <label>
+                Saldo inicial
+            </label>
+
+            <strong>
+                R$ {{ conta.saldo_inicial|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Entradas
+            </label>
+
+            <strong>
+                R$ {{ conta.total_entradas|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Saídas
+            </label>
+
+            <strong>
+                R$ {{ conta.total_saidas|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>
+                Saldo atual
+            </label>
+
+            <strong>
+                R$ {{ conta.saldo_atual|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>
+                Movimentações
+            </h2>
+
+            <span>
+                {{ movimentacoes|length }}
+                movimento{{ movimentacoes|length|pluralize }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Data</th>
+                    <th>Histórico</th>
+                    <th>Documento</th>
+                    <th>Tipo</th>
+                    <th>Principal</th>
+                    <th>Juros</th>
+                    <th>Multa</th>
+                    <th>Desconto</th>
+                    <th>Movimento</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for baixa in movimentacoes %}
+
+                    <tr>
+
+                        <td>
+                            {{ baixa.data|date:"d/m/Y" }}
+                        </td>
+
+
+                        <td>
+
+                            <strong>
+                                {{ baixa.parcela.lancamento.pessoa.razao_social }}
+                            </strong>
+
+                            <br>
+
+                            <small>
+                                {{ baixa.parcela.lancamento.descricao }}
+                            </small>
+
+                        </td>
+
+
+                        <td>
+
+                            {{ baixa.parcela.lancamento.numero_documento|default:"—" }}
+
+                        </td>
+
+
+                        <td>
+
+                            {% if baixa.parcela.lancamento.tipo == "PAGAR" %}
+
+                                Saída
+
+                            {% else %}
+
+                                Entrada
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <td>
+                            R$ {{ baixa.valor|floatformat:"2g" }}
+                        </td>
+
+
+                        <td>
+                            R$ {{ baixa.juros|floatformat:"2g" }}
+                        </td>
+
+
+                        <td>
+                            R$ {{ baixa.multa|floatformat:"2g" }}
+                        </td>
+
+
+                        <td>
+                            R$ {{ baixa.desconto|floatformat:"2g" }}
+                        </td>
+
+
+                        <td>
+
+                            <strong>
+
+                                {% if baixa.parcela.lancamento.tipo == "PAGAR" %}
+                                    −
+                                {% else %}
+                                    +
+                                {% endif %}
+
+                                R$ {{ baixa.valor_movimento|floatformat:"2g" }}
+
+                            </strong>
+
+                        </td>
+
+                    </tr>
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="9">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-receipt"></i>
+
+                                <h3>
+                                    Nenhuma movimentação registrada
+                                </h3>
+
+                                <p>
+                                    As baixas financeiras realizadas
+                                    nesta conta aparecerão aqui.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}
