@@ -1,148 +1,317 @@
+/* ==========================================
+   FORM
+========================================== */
+
 .verserp-form {
     display: flex;
+
     flex-direction: column;
+
     gap: 20px;
+
+    width: 100%;
+    min-width: 0;
 }
 
+
+/* ==========================================
+   SECTION
+========================================== */
+
 .form-section {
+    width: 100%;
+    min-width: 0;
+
     background: var(--surface);
+
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
+
     box-shadow: var(--shadow-sm);
+
     overflow: hidden;
 }
 
+
 .form-section-header {
     padding: 20px 24px;
+
     border-bottom: 1px solid var(--border);
 }
 
+
 .form-section-header h2 {
     margin: 0;
+
     font-size: 17px;
     font-weight: 600;
 }
 
+
 .form-section-header p {
     margin: 4px 0 0;
+
     font-size: 12px;
+
     color: var(--text-light);
 }
 
+
+/* ==========================================
+   GRID
+========================================== */
+
 .form-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+
+    grid-template-columns:
+        repeat(
+            4,
+            minmax(0, 1fr)
+        );
+
     gap: 20px;
+
     padding: 24px;
+
+    width: 100%;
+    min-width: 0;
 }
+
 
 .form-group {
     display: flex;
+
     flex-direction: column;
+
     gap: 7px;
+
+    min-width: 0;
 }
+
 
 .form-group-wide {
     grid-column: span 2;
 }
 
+
 .form-group-full {
     grid-column: 1 / -1;
 }
 
+
+/* ==========================================
+   LABEL
+========================================== */
+
 .form-group label {
     font-size: 13px;
     font-weight: 500;
+
     color: var(--text);
 }
 
+
+/* ==========================================
+   INPUT
+========================================== */
+
 .form-control,
 .form-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+
     min-height: 42px;
+
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+
+    font-family: inherit;
     font-size: 13px;
 }
+
 
 .form-control:focus,
 .form-select:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(31, 78, 121, 0.12);
+
+    box-shadow:
+        0 0 0 3px
+        rgba(31, 78, 121, 0.12);
 }
+
 
 textarea.form-control {
     resize: vertical;
 }
 
+
+/* ==========================================
+   VALIDATION
+========================================== */
+
 .required {
     color: var(--danger);
 }
 
+
 .errorlist {
     list-style: none;
+
     padding: 0;
     margin: 0;
+
     font-size: 11px;
+
     color: var(--danger);
 }
 
+
+/* ==========================================
+   ACTIONS
+========================================== */
+
 .form-actions {
     display: flex;
+
+    align-items: center;
     justify-content: flex-end;
+
     gap: 10px;
+
+    flex-wrap: wrap;
+
     padding: 20px 0;
 }
 
+
+/* ==========================================
+   CPF / CNPJ + ACTION
+========================================== */
+
+.input-with-action {
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+
+    width: 100%;
+    min-width: 0;
+}
+
+
+.input-with-action .form-control {
+    flex: 1 1 auto;
+
+    width: 100%;
+    min-width: 0;
+}
+
+
+.input-with-action .btn {
+    flex: 0 0 auto;
+
+    white-space: nowrap;
+}
+
+
+/* ==========================================
+   HELP TEXT
+========================================== */
+
+.form-text {
+    display: block;
+
+    margin-top: 5px;
+
+    font-size: 11px;
+
+    color: var(--text-light);
+}
+
+
+.form-text.success {
+    color: var(--success);
+}
+
+
+.form-text.error {
+    color: var(--danger);
+}
+
+
+/* ==========================================
+   NOTEBOOK
+========================================== */
+
 @media (max-width: 1100px) {
+
     .form-grid {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns:
+            repeat(
+                2,
+                minmax(0, 1fr)
+            );
     }
 }
 
+
+/* ==========================================
+   MOBILE
+========================================== */
+
 @media (max-width: 700px) {
+
     .form-grid {
         grid-template-columns: 1fr;
+
+        gap: 16px;
+
+        padding: 16px;
     }
 
     .form-group-wide,
     .form-group-full {
         grid-column: auto;
     }
+
+    .form-section-header {
+        padding: 16px;
+    }
+
+    .form-actions {
+        justify-content: flex-start;
+    }
+
+    .input-with-action {
+        flex-direction: column;
+
+        align-items: stretch;
+    }
+
+    .input-with-action .btn {
+        width: 100%;
+    }
 }
+
 
 /* ==========================================
-   CAMPO CPF / CNPJ + BOTÃO CONSULTAR
+   MOBILE PEQUENO
 ========================================== */
 
-.input-with-action {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-}
+@media (max-width: 480px) {
 
-.input-with-action .form-control {
-    flex: 1 1 auto;
-    width: 100%;
-    min-width: 180px;
-}
+    .form-actions {
+        display: grid;
 
-.input-with-action .btn {
-    flex: 0 0 auto;
-    white-space: nowrap;
-}
+        grid-template-columns: 1fr;
 
-.form-text {
-    display: block;
-    margin-top: 5px;
-    font-size: 11px;
-    color: var(--text-light);
-}
+        width: 100%;
+    }
 
-.form-text.success {
-    color: var(--success);
-}
-
-.form-text.error {
-    color: var(--danger);
+    .form-actions .btn {
+        width: 100%;
+    }
 }

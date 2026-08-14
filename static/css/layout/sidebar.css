@@ -1,46 +1,202 @@
+/* ==========================================
+   SIDEBAR
+========================================== */
+
 .sidebar {
     width: 250px;
     min-height: 100vh;
+
     background: #1F2937;
     color: white;
+
     position: fixed;
+
     left: 0;
     top: 0;
+    bottom: 0;
+
     padding: 20px;
+
+    overflow-y: auto;
+
+    z-index: 1000;
+
+    transition:
+        width 0.2s ease,
+        transform 0.2s ease;
 }
 
+
+/* ==========================================
+   LOGO
+========================================== */
+
 .sidebar .logo {
+    display: flex;
+    align-items: center;
+
+    gap: 10px;
+
     font-size: 24px;
     font-weight: bold;
+
     margin-bottom: 30px;
+
+    white-space: nowrap;
 }
+
+
+/* ==========================================
+   NAV
+========================================== */
 
 .sidebar nav {
     display: flex;
+
     flex-direction: column;
+
     gap: 10px;
 }
 
+
 .sidebar nav a {
-    color: white;
-    text-decoration: none;
-    padding: 12px 15px;
-    border-radius: 8px;
     display: flex;
+
     align-items: center;
+
     gap: 10px;
-    transition: .2s;
+
+    width: 100%;
+
+    padding: 12px 15px;
+
+    border-radius: 8px;
+
+    color: white;
+
+    text-decoration: none;
+
+    transition:
+        background-color 0.2s ease,
+        opacity 0.2s ease;
 }
+
 
 .sidebar nav a:hover {
     background: #374151;
 }
 
+
+.sidebar nav a i {
+    flex: 0 0 auto;
+
+    font-size: 17px;
+}
+
+
+.sidebar nav a span {
+    min-width: 0;
+
+    white-space: nowrap;
+}
+
+
+/* ==========================================
+   DISABLED
+========================================== */
+
 .sidebar-disabled {
     opacity: 0.45;
+
     cursor: not-allowed;
 }
 
+
 .sidebar-disabled:hover {
     background: transparent !important;
+}
+
+
+/* ==========================================
+   NOTEBOOK / TABLET
+========================================== */
+
+@media (max-width: 1100px) {
+
+    .sidebar {
+        width: 210px;
+
+        padding: 18px 14px;
+    }
+
+    .sidebar .logo {
+        font-size: 21px;
+    }
+
+    .sidebar nav a {
+        padding: 11px 12px;
+
+        font-size: 13px;
+    }
+
+    .main {
+        margin-left: 210px;
+    }
+}
+
+
+/* ==========================================
+   TABLET
+========================================== */
+
+@media (max-width: 900px) {
+
+    /*
+       Neste tamanho a sidebar deixa
+       de ocupar espaço fixo na página.
+
+       Por enquanto ela fica oculta.
+       Depois podemos implementar
+       um botão hambúrguer para abri-la.
+    */
+
+    .sidebar {
+        transform: translateX(-100%);
+
+        width: 250px;
+    }
+
+    .main {
+        margin-left: 0;
+    }
+}
+
+
+/* ==========================================
+   CELULAR
+========================================== */
+
+@media (max-width: 700px) {
+
+    .sidebar {
+        width: 240px;
+
+        padding: 16px;
+    }
+
+    .sidebar .logo {
+        font-size: 20px;
+
+        margin-bottom: 22px;
+    }
+
+    .sidebar nav {
+        gap: 7px;
+    }
+
+    .sidebar nav a {
+        padding: 10px 12px;
+
+        font-size: 13px;
+    }
 }

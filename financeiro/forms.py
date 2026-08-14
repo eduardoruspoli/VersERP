@@ -7,6 +7,7 @@ from .models import (
     BaixaFinanceira,
     ContaBancaria,
     LancamentoFinanceiro,
+    PlanoConta,
 )
 
 
@@ -34,14 +35,12 @@ class DecimalBRField(forms.DecimalField):
                     .replace(" ", "")
                 )
 
-                # Se existe vírgula, assumimos
-                # formatação brasileira.
-                if "," in value:
-                    value = (
-                        value
-                        .replace(".", "")
-                        .replace(",", ".")
-                    )
+            if "," in value:
+                value = (
+                    value
+                    .replace(".", "")
+                    .replace(",", ".")
+                )
 
         return super().to_python(value)
 
@@ -417,4 +416,177 @@ class BaixaFinanceiraForm(forms.ModelForm):
                 "desconto"
             ].initial = Decimal(
                 "0.00"
+            )
+
+
+class ImportacaoOFXForm(forms.Form):
+
+    conta_bancaria = forms.ModelChoiceField(
+        label="Conta bancária",
+        queryset=ContaBancaria.objects.none(),
+        empty_label="Selecione a conta bancária",
+        widget=forms.Select(
+            attrs={
+                "class": "form-select",
+            }
+        ),
+    )
+
+    arquivo = forms.FileField(
+        label="Arquivo OFX",
+        widget=forms.ClearableFileInput(
+            attrs={
+                "class": "form-control",
+                "accept": ".ofx,application/x-ofx",
+            }
+        ),
+        help_text=(
+            "Selecione o arquivo .ofx "
+            "exportado pelo internet banking."
+        ),
+    )
+
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            *args,
+            **kwargs,
+        )
+
+        self.fields[
+            "conta_bancaria"
+        ].queryset = (
+            ContaBancaria.objects
+            .filter(
+                ativa=True
+            )
+            .select_related(
+                "empresa"
+            )
+            .order_by(
+                "empresa",
+                "banco",
+                "agencia",
+                "conta",
+            )
+        )
+
+    def clean_arquivo(self):
+        arquivo = self.cleaned_data[
+            "arquivo"
+        ]
+
+        nome = (
+            arquivo.name
+            or ""
+        ).lower()
+
+        if not nome.endswith(".ofx"):
+            raise forms.ValidationError(
+                "Selecione um arquivo com extensão .ofx."
+            )
+
+        if arquivo.size <= 0:
+            raise forms.ValidationError(
+                "O arquivo OFX está vazio."
+            )
+
+        limite = (
+            10 * 1024 * 1024
+        )
+
+        if arquivo.size > limite:
+            raise forms.ValidationError(
+                "O arquivo OFX deve possuir no máximo 10 MB."
+            )
+
+        return arquivo
+
+class CriarLancamentoOFXForm(forms.ModelForm):
+
+    class Meta:
+        model = LancamentoFinanceiro
+
+        fields = [
+            "pessoa",
+            "descricao",
+            "numero_documento",
+            "plano_conta",
+            "observacoes",
+        ]
+
+        widgets = {
+            "pessoa": forms.Select(
+                attrs={
+                    "class": "form-select",
+                }
+            ),
+
+            "descricao": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                }
+            ),
+
+            "numero_documento": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                }
+            ),
+
+            "plano_conta": forms.Select(
+                attrs={
+                    "class": "form-select",
+                }
+            ),
+
+            "observacoes": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 4,
+                }
+            ),
+        }
+
+    def __init__(
+        self,
+        *args,
+        tipo=None,
+        **kwargs,
+    ):
+        super().__init__(
+            *args,
+            **kwargs,
+        )
+
+        if tipo == "PAGAR":
+            self.fields[
+                "pessoa"
+            ].label = "Fornecedor"
+
+            tipo_plano = "DESPESA"
+
+        else:
+            self.fields[
+                "pessoa"
+            ].label = "Cliente"
+
+            tipo_plano = "RECEITA"
+
+        if tipo is not None:
+            self.fields[
+                "plano_conta"
+            ].queryset = (
+                PlanoConta.objects
+                .filter(
+                    tipo=tipo_plano,
+                    ativo=True,
+                    aceita_lancamento=True,
+                )
+                .order_by(
+                    "codigo"
+                )
             )

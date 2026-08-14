@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}
+Contas a Receber | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Contas a Receber</h1>
+        <p>Gerencie recebimentos de clientes</p>
+    </div>
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:index' %}"
+            class="btn btn-light"
+        >
+            <i class="bi bi-arrow-left"></i>
+            Voltar
+        </a>
+
+        <a
+            href="{% url 'financeiro:nova_conta_receber' %}"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-plus-lg"></i>
+            Nova Conta a Receber
+        </a>
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>Lançamentos</h2>
+
+            <span>
+                {{ lancamentos|length }}
+                registro{{ lancamentos|length|pluralize }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Descrição</th>
+                    <th>Cliente</th>
+                    <th>Documento</th>
+                    <th>Valor</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for lancamento in lancamentos %}
+
+                    <tr>
+
+                        <td>
+                            <strong>
+                                {{ lancamento.descricao }}
+                            </strong>
+                        </td>
+
+
+                        <td>
+                            {{ lancamento.pessoa.razao_social }}
+                        </td>
+
+
+                        <td>
+                            {{ lancamento.numero_documento|default:"—" }}
+                        </td>
+
+
+                        <td>
+                            <strong>
+                                R$ {{ lancamento.valor_total|floatformat:"2g" }}
+                            </strong>
+                        </td>
+
+
+                        <td>
+
+                            {% if lancamento.status == "ABERTO" %}
+
+                                <span class="status-badge">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% elif lancamento.status == "PARCIAL" %}
+
+                                <span class="status-badge">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% elif lancamento.status == "LIQUIDADO" %}
+
+                                <span class="status-badge status-active">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% elif lancamento.status == "CANCELADO" %}
+
+                                <span class="status-badge status-inactive">
+                                    {{ lancamento.get_status_display }}
+                                </span>
+
+                            {% else %}
+
+                                {{ lancamento.get_status_display }}
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <td class="table-actions">
+
+                            <a
+                                href="{% url 'financeiro:detalhe_conta_receber' lancamento.pk %}"
+                                title="Visualizar conta a receber"
+                                class="btn btn-light"
+                            >
+                                <i class="bi bi-eye"></i>
+                            </a>
+
+
+                            {% if perms.financeiro.change_lancamentofinanceiro %}
+
+                                <a
+                                    href="{% url 'financeiro:editar_conta_receber' lancamento.pk %}"
+                                    title="Editar conta a receber"
+                                    class="btn btn-light"
+                                >
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+
+                            {% endif %}
+
+                        </td>
+
+                    </tr>
+
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="6">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-wallet2"></i>
+
+                                <h3>
+                                    Nenhuma conta a receber cadastrada
+                                </h3>
+
+                                <p>
+                                    Cadastre o primeiro recebimento.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

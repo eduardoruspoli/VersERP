@@ -1,0 +1,225 @@
+/* ==========================================
+   TABLE WRAPPER
+========================================== */
+
+.table-responsive {
+    width: 100%;
+    max-width: 100%;
+
+    overflow-x: auto;
+    overflow-y: hidden;
+
+    -webkit-overflow-scrolling: touch;
+}
+
+
+/* ==========================================
+   VERSERP TABLE
+========================================== */
+
+.verserp-table {
+    width: 100%;
+    min-width: 1100px;
+
+    border-collapse: collapse;
+
+    font-size: 13px;
+}
+
+
+/* ==========================================
+   CELLS
+========================================== */
+
+.verserp-table th,
+.verserp-table td {
+    padding: 14px 16px;
+
+    text-align: left;
+    vertical-align: middle;
+
+    border-bottom: 1px solid var(--border);
+}
+
+
+/* ==========================================
+   HEADER
+========================================== */
+
+.verserp-table th {
+    font-size: 12px;
+    font-weight: 600;
+
+    color: var(--text-light);
+
+    white-space: nowrap;
+}
+
+
+/* ==========================================
+   BODY
+========================================== */
+
+.verserp-table td {
+    white-space: nowrap;
+}
+
+
+.verserp-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+
+.verserp-table tbody tr:hover {
+    background: rgba(0, 0, 0, 0.015);
+}
+
+
+/* ==========================================
+   DESCRIÇÃO
+========================================== */
+
+.verserp-table th:nth-child(2),
+.verserp-table td:nth-child(2) {
+    min-width: 260px;
+    max-width: 360px;
+
+    white-space: normal;
+
+    overflow-wrap: break-word;
+}
+
+
+/* ==========================================
+   CORRESPONDÊNCIA NO VERSERP
+========================================== */
+
+.verserp-table th:nth-last-child(2),
+.verserp-table td:nth-last-child(2) {
+    min-width: 220px;
+    max-width: 300px;
+
+    white-space: normal;
+}
+
+
+/* ==========================================
+   ACTIONS
+========================================== */
+
+.table-actions {
+    min-width: 320px;
+
+    white-space: nowrap;
+}
+
+
+.table-actions form {
+    display: inline-block !important;
+
+    margin: 2px;
+}
+
+
+.table-actions .btn {
+    display: inline-flex;
+
+    align-items: center;
+    justify-content: center;
+
+    gap: 6px;
+
+    margin: 2px;
+
+    white-space: nowrap;
+}
+
+
+/* ==========================================
+   NOTEBOOK
+========================================== */
+
+@media (max-width: 1200px) {
+
+    .verserp-table {
+        min-width: 1080px;
+    }
+
+    .verserp-table th,
+    .verserp-table td {
+        padding: 12px 14px;
+    }
+}
+
+
+/* ==========================================
+   TABLET
+========================================== */
+
+@media (max-width: 900px) {
+
+    .verserp-table {
+        min-width: 1050px;
+
+        font-size: 12px;
+    }
+
+    .verserp-table th,
+    .verserp-table td {
+        padding: 11px 12px;
+    }
+
+    .table-actions {
+        min-width: 300px;
+    }
+}
+
+
+/* ==========================================
+   CELULAR
+========================================== */
+
+@media (max-width: 700px) {
+
+    .verserp-table {
+        min-width: 1000px;
+    }
+
+    .verserp-table th,
+    .verserp-table td {
+        padding: 10px;
+    }
+
+    .verserp-table th:nth-child(2),
+    .verserp-table td:nth-child(2) {
+        min-width: 230px;
+        max-width: 300px;
+    }
+
+    .verserp-table th:nth-last-child(2),
+    .verserp-table td:nth-last-child(2) {
+        min-width: 200px;
+        max-width: 260px;
+    }
+}
+
+
+/* ==========================================
+   SCROLLBAR
+========================================== */
+
+.table-responsive::-webkit-scrollbar {
+    height: 8px;
+}
+
+
+.table-responsive::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background: var(--border);
+
+    border-radius: 20px;
+}

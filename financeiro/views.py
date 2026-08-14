@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib import messages
@@ -5,7 +6,7 @@ from django.contrib.auth.decorators import (
     login_required,
     permission_required,
 )
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.shortcuts import (
     get_object_or_404,
     redirect,
@@ -15,19 +16,27 @@ from django.utils import timezone
 
 from .forms import (
     BaixaFinanceiraForm,
+    CriarLancamentoOFXForm,
+    ImportacaoOFXForm,
     LancamentoFinanceiroForm,
     ParcelaFormSet,
 )
 from .models import (
     BaixaFinanceira,
     ContaBancaria,
+    ImportacaoOFX,
     LancamentoFinanceiro,
+    MovimentoOFX,
     ParcelaFinanceira,
+)
+from .ofx import (
+    ErroOFX,
+    ler_ofx,
 )
 
 
 # ============================================================
-# FUNÇÕES AUXILIARES
+# FUNÇÕES AUXILIARES - LANÇAMENTOS
 # ============================================================
 
 
@@ -620,6 +629,149 @@ def registrar_baixa_financeira(
 
 
 # ============================================================
+# FUNÇÕES AUXILIARES - CONCILIAÇÃO
+# ============================================================
+
+
+def tipo_lancamento_para_movimento(
+    tipo_lancamento,
+):
+    if tipo_lancamento == "PAGAR":
+        return "SAIDA"
+
+    if tipo_lancamento == "RECEBER":
+        return "ENTRADA"
+
+    return None
+
+
+def baixa_ja_conciliada(
+    baixa,
+    ignorar_movimento_id=None,
+):
+    queryset = (
+        MovimentoOFX.objects
+        .filter(
+            baixa_conciliada=baixa,
+            status="CONCILIADO",
+        )
+    )
+
+    if ignorar_movimento_id:
+        queryset = queryset.exclude(
+            pk=ignorar_movimento_id
+        )
+
+    return queryset.exists()
+
+
+def encontrar_candidatos_movimento(
+    movimento,
+):
+    """
+    Primeira versão do motor de sugestão.
+
+    Critérios:
+    - mesma conta bancária
+    - mesma data
+    - mesmo sentido
+    - mesmo valor efetivamente movimentado
+    - baixa ainda não conciliada
+    """
+
+    baixas = (
+        BaixaFinanceira.objects
+        .filter(
+            conta_bancaria=(
+                movimento.conta_bancaria
+            ),
+            data=movimento.data,
+        )
+        .select_related(
+            "parcela",
+            "parcela__lancamento",
+            "parcela__lancamento__pessoa",
+        )
+        .order_by(
+            "id"
+        )
+    )
+
+    candidatos = []
+
+    for baixa in baixas:
+        lancamento = (
+            baixa.parcela.lancamento
+        )
+
+        tipo_movimento = (
+            tipo_lancamento_para_movimento(
+                lancamento.tipo
+            )
+        )
+
+        if (
+            tipo_movimento
+            != movimento.tipo
+        ):
+            continue
+
+        if (
+            baixa.valor_movimento
+            != movimento.valor
+        ):
+            continue
+
+        if baixa_ja_conciliada(
+            baixa,
+            ignorar_movimento_id=(
+                movimento.pk
+            ),
+        ):
+            continue
+
+        candidatos.append(
+            baixa
+        )
+
+    return candidatos
+
+
+def preparar_movimentos_para_tela(
+    movimentos,
+):
+    resultado = []
+
+    for movimento in movimentos:
+        candidatos = []
+
+        if (
+            movimento.status
+            == "PENDENTE"
+        ):
+            candidatos = (
+                encontrar_candidatos_movimento(
+                    movimento
+                )
+            )
+
+        resultado.append(
+            {
+                "movimento": movimento,
+                "candidatos": candidatos,
+                "quantidade_candidatos": (
+                    len(candidatos)
+                ),
+                "tem_candidato_unico": (
+                    len(candidatos) == 1
+                ),
+            }
+        )
+
+    return resultado
+
+
+# ============================================================
 # PÁGINA INICIAL DO FINANCEIRO
 # ============================================================
 
@@ -1030,6 +1182,1143 @@ def detalhe_conta_bancaria(
         (
             "financeiro/"
             "conta_bancaria_detalhe.html"
+        ),
+        contexto,
+    )
+
+
+# ============================================================
+# CONCILIAÇÃO BANCÁRIA
+# ============================================================
+
+
+@login_required
+@permission_required(
+    "financeiro.view_importacaoofx",
+    raise_exception=True,
+)
+def conciliacao_bancaria(request):
+    importacoes = (
+        ImportacaoOFX.objects
+        .select_related(
+            "conta_bancaria",
+            "conta_bancaria__empresa",
+        )
+        .prefetch_related(
+            "movimentos"
+        )
+        .order_by(
+            "-criado_em",
+            "-id",
+        )
+    )
+
+    contexto = {
+        "importacoes": importacoes,
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "conciliacao_bancaria.html"
+        ),
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.add_importacaoofx",
+    raise_exception=True,
+)
+def importar_ofx(request):
+    if request.method == "POST":
+        form = ImportacaoOFXForm(
+            request.POST,
+            request.FILES,
+        )
+
+        if form.is_valid():
+            conta_bancaria = (
+                form.cleaned_data[
+                    "conta_bancaria"
+                ]
+            )
+
+            arquivo = (
+                form.cleaned_data[
+                    "arquivo"
+                ]
+            )
+
+            try:
+                dados_ofx = ler_ofx(
+                    arquivo
+                )
+
+            except ErroOFX as exc:
+                form.add_error(
+                    "arquivo",
+                    str(exc),
+                )
+
+            except Exception:
+                form.add_error(
+                    "arquivo",
+                    (
+                        "Não foi possível processar "
+                        "o arquivo OFX."
+                    ),
+                )
+
+            else:
+                importacao = None
+
+                try:
+                    with transaction.atomic():
+                        importacao = (
+                            ImportacaoOFX.objects
+                            .create(
+                                conta_bancaria=(
+                                    conta_bancaria
+                                ),
+                                nome_arquivo=(
+                                    arquivo.name
+                                ),
+                                data_inicio=(
+                                    dados_ofx[
+                                        "data_inicio"
+                                    ]
+                                ),
+                                data_fim=(
+                                    dados_ofx[
+                                        "data_fim"
+                                    ]
+                                ),
+                                status=(
+                                    "PROCESSANDO"
+                                ),
+                            )
+                        )
+
+                        criados = 0
+                        duplicados = 0
+
+                        for dados_movimento in (
+                            dados_ofx[
+                                "movimentos"
+                            ]
+                        ):
+                            try:
+                                (
+                                    movimento,
+                                    criado,
+                                ) = (
+                                    MovimentoOFX.objects
+                                    .get_or_create(
+                                        conta_bancaria=(
+                                            conta_bancaria
+                                        ),
+                                        identificador=(
+                                            dados_movimento[
+                                                "identificador"
+                                            ]
+                                        ),
+                                        defaults={
+                                            "importacao": (
+                                                importacao
+                                            ),
+                                            "data": (
+                                                dados_movimento[
+                                                    "data"
+                                                ]
+                                            ),
+                                            "tipo": (
+                                                dados_movimento[
+                                                    "tipo"
+                                                ]
+                                            ),
+                                            "valor": (
+                                                dados_movimento[
+                                                    "valor"
+                                                ]
+                                            ),
+                                            "descricao": (
+                                                dados_movimento[
+                                                    "descricao"
+                                                ]
+                                            ),
+                                            "documento": (
+                                                dados_movimento[
+                                                    "documento"
+                                                ]
+                                            ),
+                                            "status": (
+                                                "PENDENTE"
+                                            ),
+                                        },
+                                    )
+                                )
+
+                            except IntegrityError:
+                                criado = False
+
+                            if criado:
+                                criados += 1
+                            else:
+                                duplicados += 1
+
+                        importacao.status = (
+                            "CONCLUIDA"
+                        )
+
+                        importacao.save(
+                            update_fields=[
+                                "status",
+                            ]
+                        )
+
+                except Exception as exc:
+                    if importacao is not None:
+                        (
+                            ImportacaoOFX.objects
+                            .filter(
+                                pk=importacao.pk
+                            )
+                            .update(
+                                status="ERRO",
+                                mensagem_erro=(
+                                    str(exc)[:2000]
+                                ),
+                            )
+                        )
+
+                    form.add_error(
+                        None,
+                        (
+                            "Ocorreu um erro ao "
+                            "gravar a importação."
+                        ),
+                    )
+
+                else:
+                    if duplicados:
+                        messages.warning(
+                            request,
+                            (
+                                f"{criados} movimento(s) "
+                                "importado(s) e "
+                                f"{duplicados} movimento(s) "
+                                "já existente(s) ignorado(s)."
+                            ),
+                        )
+
+                    else:
+                        messages.success(
+                            request,
+                            (
+                                f"{criados} movimento(s) "
+                                "OFX importado(s) "
+                                "com sucesso."
+                            ),
+                        )
+
+                    return redirect(
+                        (
+                            "financeiro:"
+                            "detalhe_importacao_ofx"
+                        ),
+                        pk=importacao.pk,
+                    )
+
+    else:
+        form = (
+            ImportacaoOFXForm()
+        )
+
+    contexto = {
+        "form": form,
+    }
+
+    return render(
+        request,
+        "financeiro/importar_ofx.html",
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.view_importacaoofx",
+    raise_exception=True,
+)
+def detalhe_importacao_ofx(
+    request,
+    pk,
+):
+    importacao = get_object_or_404(
+        ImportacaoOFX.objects
+        .select_related(
+            "conta_bancaria",
+            "conta_bancaria__empresa",
+        ),
+        pk=pk,
+    )
+
+    movimentos = (
+        importacao
+        .movimentos
+        .select_related(
+            "baixa_conciliada",
+            (
+                "baixa_conciliada__"
+                "parcela"
+            ),
+            (
+                "baixa_conciliada__"
+                "parcela__lancamento"
+            ),
+            (
+                "baixa_conciliada__"
+                "parcela__lancamento__pessoa"
+            ),
+        )
+        .order_by(
+            "data",
+            "id",
+        )
+    )
+
+    movimentos_tela = (
+        preparar_movimentos_para_tela(
+            movimentos
+        )
+    )
+
+    total_entradas = sum(
+        (
+            item["movimento"].valor
+            for item
+            in movimentos_tela
+            if (
+                item["movimento"].tipo
+                == "ENTRADA"
+            )
+        ),
+        Decimal("0.00"),
+    )
+
+    total_saidas = sum(
+        (
+            item["movimento"].valor
+            for item
+            in movimentos_tela
+            if (
+                item["movimento"].tipo
+                == "SAIDA"
+            )
+        ),
+        Decimal("0.00"),
+    )
+
+    contexto = {
+        "importacao": importacao,
+        "movimentos_tela": (
+            movimentos_tela
+        ),
+        "total_entradas": (
+            total_entradas
+        ),
+        "total_saidas": (
+            total_saidas
+        ),
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "importacao_ofx_detalhe.html"
+        ),
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_movimentoofx",
+    raise_exception=True,
+)
+def conciliar_movimento_ofx(
+    request,
+    pk,
+    baixa_pk,
+):
+    movimento = get_object_or_404(
+        MovimentoOFX.objects
+        .select_related(
+            "importacao",
+            "conta_bancaria",
+        ),
+        pk=pk,
+    )
+
+    baixa = get_object_or_404(
+        BaixaFinanceira.objects
+        .select_related(
+            "parcela",
+            "parcela__lancamento",
+        ),
+        pk=baixa_pk,
+    )
+
+    if request.method != "POST":
+        return redirect(
+            (
+                "financeiro:"
+                "detalhe_importacao_ofx"
+            ),
+            pk=movimento.importacao_id,
+        )
+
+    tipo_esperado = (
+        tipo_lancamento_para_movimento(
+            baixa.parcela.lancamento.tipo
+        )
+    )
+
+    if (
+        baixa.conta_bancaria_id
+        != movimento.conta_bancaria_id
+    ):
+        messages.error(
+            request,
+            (
+                "A baixa pertence a outra "
+                "conta bancária."
+            ),
+        )
+
+    elif (
+        tipo_esperado
+        != movimento.tipo
+    ):
+        messages.error(
+            request,
+            (
+                "O sentido da baixa não "
+                "corresponde ao movimento "
+                "do extrato."
+            ),
+        )
+
+    elif (
+        baixa.valor_movimento
+        != movimento.valor
+    ):
+        messages.error(
+            request,
+            (
+                "O valor da baixa não "
+                "corresponde ao movimento "
+                "do extrato."
+            ),
+        )
+
+    elif baixa_ja_conciliada(
+        baixa,
+        ignorar_movimento_id=(
+            movimento.pk
+        ),
+    ):
+        messages.error(
+            request,
+            (
+                "Esta baixa já foi conciliada "
+                "com outro movimento bancário."
+            ),
+        )
+
+    else:
+        with transaction.atomic():
+            movimento.baixa_conciliada = (
+                baixa
+            )
+
+            movimento.status = (
+                "CONCILIADO"
+            )
+
+            movimento.save(
+                update_fields=[
+                    "baixa_conciliada",
+                    "status",
+                    "atualizado_em",
+                ]
+            )
+
+        messages.success(
+            request,
+            (
+                "Movimento conciliado "
+                "com sucesso."
+            ),
+        )
+
+    return redirect(
+        (
+            "financeiro:"
+            "detalhe_importacao_ofx"
+        ),
+        pk=movimento.importacao_id,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_movimentoofx",
+    raise_exception=True,
+)
+def ignorar_movimento_ofx(
+    request,
+    pk,
+):
+    movimento = get_object_or_404(
+        MovimentoOFX.objects
+        .select_related(
+            "importacao"
+        ),
+        pk=pk,
+    )
+
+    if request.method == "POST":
+        movimento.status = (
+            "IGNORADO"
+        )
+
+        movimento.baixa_conciliada = (
+            None
+        )
+
+        movimento.save(
+            update_fields=[
+                "status",
+                "baixa_conciliada",
+                "atualizado_em",
+            ]
+        )
+
+        messages.success(
+            request,
+            (
+                "Movimento marcado "
+                "como ignorado."
+            ),
+        )
+
+    return redirect(
+        (
+            "financeiro:"
+            "detalhe_importacao_ofx"
+        ),
+        pk=movimento.importacao_id,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_movimentoofx",
+    raise_exception=True,
+)
+def reabrir_movimento_ofx(
+    request,
+    pk,
+):
+    movimento = get_object_or_404(
+        MovimentoOFX.objects
+        .select_related(
+            "importacao"
+        ),
+        pk=pk,
+    )
+
+    if request.method == "POST":
+        movimento.status = (
+            "PENDENTE"
+        )
+
+        movimento.baixa_conciliada = (
+            None
+        )
+
+        movimento.save(
+            update_fields=[
+                "status",
+                "baixa_conciliada",
+                "atualizado_em",
+            ]
+        )
+
+        messages.success(
+            request,
+            (
+                "Movimento reaberto "
+                "para conciliação."
+            ),
+        )
+
+    return redirect(
+        (
+            "financeiro:"
+            "detalhe_importacao_ofx"
+        ),
+        pk=movimento.importacao_id,
+    )
+
+# ============================================================
+# CONCILIAÇÃO - BUSCA E CRIAÇÃO A PARTIR DO OFX
+# ============================================================
+
+
+def tipo_movimento_para_lancamento(
+    tipo_movimento,
+):
+    if tipo_movimento == "ENTRADA":
+        return "RECEBER"
+
+    return "PAGAR"
+
+
+@login_required
+@permission_required(
+    "financeiro.view_movimentoofx",
+    raise_exception=True,
+)
+def buscar_movimento_ofx(
+    request,
+    pk,
+):
+    movimento = get_object_or_404(
+        MovimentoOFX.objects
+        .select_related(
+            "importacao",
+            "conta_bancaria",
+            "conta_bancaria__empresa",
+        ),
+        pk=pk,
+    )
+
+    if movimento.status != "PENDENTE":
+        messages.info(
+            request,
+            (
+                "Somente movimentos pendentes "
+                "podem ser pesquisados."
+            ),
+        )
+
+        return redirect(
+            "financeiro:detalhe_importacao_ofx",
+            pk=movimento.importacao_id,
+        )
+
+    tipo_lancamento = (
+        tipo_movimento_para_lancamento(
+            movimento.tipo
+        )
+    )
+
+    data_inicial = (
+        movimento.data
+        - timedelta(days=30)
+    )
+
+    data_final = (
+        movimento.data
+        + timedelta(days=30)
+    )
+
+    # --------------------------------------------------------
+    # BAIXAS JÁ EXISTENTES
+    # --------------------------------------------------------
+
+    baixas_possiveis = (
+        BaixaFinanceira.objects
+        .filter(
+            conta_bancaria=(
+                movimento.conta_bancaria
+            ),
+            parcela__lancamento__tipo=(
+                tipo_lancamento
+            ),
+            data__range=(
+                data_inicial,
+                data_final,
+            ),
+        )
+        .select_related(
+            "parcela",
+            "parcela__lancamento",
+            "parcela__lancamento__pessoa",
+        )
+        .order_by(
+            "-data",
+            "-id",
+        )
+    )
+
+    baixas_compativeis = []
+
+    for baixa in baixas_possiveis:
+        if (
+            baixa.valor_movimento
+            != movimento.valor
+        ):
+            continue
+
+        if baixa_ja_conciliada(
+            baixa,
+            ignorar_movimento_id=(
+                movimento.pk
+            ),
+        ):
+            continue
+
+        baixas_compativeis.append(
+            baixa
+        )
+
+    # --------------------------------------------------------
+    # PARCELAS QUE AINDA NÃO POSSUEM A BAIXA
+    # --------------------------------------------------------
+
+    parcelas_possiveis = (
+        ParcelaFinanceira.objects
+        .filter(
+            lancamento__empresa=(
+                movimento
+                .conta_bancaria
+                .empresa
+            ),
+            lancamento__tipo=(
+                tipo_lancamento
+            ),
+            status__in=[
+                "ABERTA",
+                "PARCIAL",
+            ],
+        )
+        .select_related(
+            "lancamento",
+            "lancamento__pessoa",
+            "lancamento__plano_conta",
+        )
+        .order_by(
+            "vencimento",
+            "numero",
+        )
+    )
+
+    parcelas_compativeis = []
+
+    for parcela in parcelas_possiveis:
+        if (
+            parcela.saldo
+            == movimento.valor
+        ):
+            parcelas_compativeis.append(
+                parcela
+            )
+
+        if (
+            len(parcelas_compativeis)
+            >= 100
+        ):
+            break
+
+    contexto = {
+        "movimento": movimento,
+        "tipo_lancamento": (
+            tipo_lancamento
+        ),
+        "baixas_compativeis": (
+            baixas_compativeis
+        ),
+        "parcelas_compativeis": (
+            parcelas_compativeis
+        ),
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "buscar_movimento_ofx.html"
+        ),
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    (
+        "financeiro.add_baixafinanceira",
+        "financeiro.change_movimentoofx",
+    ),
+    raise_exception=True,
+)
+def baixar_parcela_movimento_ofx(
+    request,
+    pk,
+    parcela_pk,
+):
+    movimento = get_object_or_404(
+        MovimentoOFX.objects
+        .select_related(
+            "importacao",
+            "conta_bancaria",
+            "conta_bancaria__empresa",
+        ),
+        pk=pk,
+    )
+
+    parcela = get_object_or_404(
+        ParcelaFinanceira.objects
+        .select_related(
+            "lancamento",
+            "lancamento__empresa",
+            "lancamento__pessoa",
+        ),
+        pk=parcela_pk,
+    )
+
+    if request.method != "POST":
+        return redirect(
+            "financeiro:buscar_movimento_ofx",
+            pk=movimento.pk,
+        )
+
+    if movimento.status != "PENDENTE":
+        messages.error(
+            request,
+            "Este movimento não está mais pendente."
+        )
+
+        return redirect(
+            "financeiro:detalhe_importacao_ofx",
+            pk=movimento.importacao_id,
+        )
+
+    tipo_esperado = (
+        tipo_movimento_para_lancamento(
+            movimento.tipo
+        )
+    )
+
+    if (
+        parcela.lancamento.tipo
+        != tipo_esperado
+    ):
+        messages.error(
+            request,
+            (
+                "O tipo do lançamento não "
+                "corresponde ao movimento bancário."
+            ),
+        )
+
+    elif (
+        parcela.lancamento.empresa_id
+        != movimento.conta_bancaria.empresa_id
+    ):
+        messages.error(
+            request,
+            (
+                "O lançamento pertence "
+                "a outra empresa."
+            ),
+        )
+
+    elif (
+        parcela.status
+        not in (
+            "ABERTA",
+            "PARCIAL",
+        )
+    ):
+        messages.error(
+            request,
+            (
+                "Esta parcela não está "
+                "disponível para baixa."
+            ),
+        )
+
+    elif (
+        parcela.saldo
+        != movimento.valor
+    ):
+        messages.error(
+            request,
+            (
+                "O saldo da parcela não "
+                "corresponde ao valor do extrato."
+            ),
+        )
+
+    else:
+        with transaction.atomic():
+            baixa = BaixaFinanceira(
+                parcela=parcela,
+                conta_bancaria=(
+                    movimento.conta_bancaria
+                ),
+                data=movimento.data,
+                valor=movimento.valor,
+                juros=Decimal("0.00"),
+                multa=Decimal("0.00"),
+                desconto=Decimal("0.00"),
+                observacoes=(
+                    "Baixa criada pela "
+                    "conciliação bancária OFX. "
+                    f"FITID: {movimento.identificador}"
+                ),
+            )
+
+            baixa.save()
+
+            movimento.baixa_conciliada = (
+                baixa
+            )
+
+            movimento.status = (
+                "CONCILIADO"
+            )
+
+            movimento.save(
+                update_fields=[
+                    "baixa_conciliada",
+                    "status",
+                    "atualizado_em",
+                ]
+            )
+
+        messages.success(
+            request,
+            (
+                "Baixa registrada e movimento "
+                "conciliado com sucesso."
+            ),
+        )
+
+        return redirect(
+            "financeiro:detalhe_importacao_ofx",
+            pk=movimento.importacao_id,
+        )
+
+    return redirect(
+        "financeiro:buscar_movimento_ofx",
+        pk=movimento.pk,
+    )
+
+
+@login_required
+@permission_required(
+    (
+        "financeiro.add_lancamentofinanceiro",
+        "financeiro.add_baixafinanceira",
+        "financeiro.change_movimentoofx",
+    ),
+    raise_exception=True,
+)
+def criar_lancamento_movimento_ofx(
+    request,
+    pk,
+):
+    movimento = get_object_or_404(
+        MovimentoOFX.objects
+        .select_related(
+            "importacao",
+            "conta_bancaria",
+            "conta_bancaria__empresa",
+        ),
+        pk=pk,
+    )
+
+    if movimento.status != "PENDENTE":
+        messages.info(
+            request,
+            (
+                "Este movimento já foi "
+                "tratado na conciliação."
+            ),
+        )
+
+        return redirect(
+            "financeiro:detalhe_importacao_ofx",
+            pk=movimento.importacao_id,
+        )
+
+    tipo_lancamento = (
+        tipo_movimento_para_lancamento(
+            movimento.tipo
+        )
+    )
+
+    if request.method == "POST":
+        form = CriarLancamentoOFXForm(
+            request.POST,
+            tipo=tipo_lancamento,
+        )
+
+        if form.is_valid():
+            with transaction.atomic():
+                lancamento = form.save(
+                    commit=False
+                )
+
+                lancamento.empresa = (
+                    movimento
+                    .conta_bancaria
+                    .empresa
+                )
+
+                lancamento.tipo = (
+                    tipo_lancamento
+                )
+
+                lancamento.origem = (
+                    "CONCILIACAO"
+                )
+
+                lancamento.data_emissao = (
+                    movimento.data
+                )
+
+                lancamento.data_competencia = (
+                    movimento.data
+                )
+
+                lancamento.valor_total = (
+                    movimento.valor
+                )
+
+                lancamento.status = (
+                    "ABERTO"
+                )
+
+                lancamento.full_clean()
+
+                lancamento.save()
+
+                parcela = ParcelaFinanceira(
+                    lancamento=lancamento,
+                    numero=1,
+                    vencimento=(
+                        movimento.data
+                    ),
+                    valor=(
+                        movimento.valor
+                    ),
+                    status="ABERTA",
+                )
+
+                parcela.full_clean()
+
+                parcela.save()
+
+                baixa = BaixaFinanceira(
+                    parcela=parcela,
+                    conta_bancaria=(
+                        movimento
+                        .conta_bancaria
+                    ),
+                    data=movimento.data,
+                    valor=movimento.valor,
+                    juros=Decimal("0.00"),
+                    multa=Decimal("0.00"),
+                    desconto=Decimal("0.00"),
+                    observacoes=(
+                        "Lançamento e baixa "
+                        "criados pela conciliação "
+                        "bancária OFX. "
+                        f"FITID: {movimento.identificador}"
+                    ),
+                )
+
+                baixa.save()
+
+                movimento.baixa_conciliada = (
+                    baixa
+                )
+
+                movimento.status = (
+                    "CONCILIADO"
+                )
+
+                movimento.save(
+                    update_fields=[
+                        "baixa_conciliada",
+                        "status",
+                        "atualizado_em",
+                    ]
+                )
+
+            if (
+                tipo_lancamento
+                == "PAGAR"
+            ):
+                mensagem = (
+                    "Conta a pagar criada, "
+                    "baixada e conciliada "
+                    "com sucesso."
+                )
+            else:
+                mensagem = (
+                    "Conta a receber criada, "
+                    "recebida e conciliada "
+                    "com sucesso."
+                )
+
+            messages.success(
+                request,
+                mensagem,
+            )
+
+            return redirect(
+                "financeiro:detalhe_importacao_ofx",
+                pk=movimento.importacao_id,
+            )
+
+    else:
+        form = CriarLancamentoOFXForm(
+            tipo=tipo_lancamento,
+            initial={
+                "descricao": (
+                    movimento
+                    .descricao[:250]
+                ),
+                "numero_documento": (
+                    movimento
+                    .documento[:50]
+                ),
+            },
+        )
+
+    contexto = {
+        "form": form,
+        "movimento": movimento,
+        "tipo_lancamento": (
+            tipo_lancamento
+        ),
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "criar_lancamento_ofx.html"
         ),
         contexto,
     )

@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}
+Importar OFX | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        <h1>Importar OFX</h1>
+
+        <p>
+            Selecione a conta bancária e o arquivo exportado pelo banco
+        </p>
+
+    </div>
+
+    <a
+        href="{% url 'financeiro:conciliacao_bancaria' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<form
+    method="post"
+    enctype="multipart/form-data"
+    class="verserp-form"
+>
+
+    {% csrf_token %}
+
+
+    {% if form.errors %}
+
+        <div class="alert alert-danger">
+
+            <strong>
+                Verifique os dados informados.
+            </strong>
+
+            {{ form.non_field_errors }}
+
+        </div>
+
+    {% endif %}
+
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+
+            <div>
+
+                <h2>Dados da importação</h2>
+
+                <p>
+                    O extrato será vinculado à conta bancária selecionada.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="form-grid">
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.conta_bancaria.id_for_label }}">
+                    Conta bancária
+                </label>
+
+                {{ form.conta_bancaria }}
+                {{ form.conta_bancaria.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.arquivo.id_for_label }}">
+                    Arquivo OFX
+                </label>
+
+                {{ form.arquivo }}
+                {{ form.arquivo.errors }}
+
+                {% if form.arquivo.help_text %}
+
+                    <small>
+                        {{ form.arquivo.help_text }}
+                    </small>
+
+                {% endif %}
+
+            </div>
+
+
+        </div>
+
+    </section>
+
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:conciliacao_bancaria' %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+
+        <button
+            type="submit"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-upload"></i>
+            Importar Extrato
+        </button>
+
+    </div>
+
+</form>
+
+{% endblock %}

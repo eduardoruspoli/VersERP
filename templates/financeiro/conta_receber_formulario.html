@@ -1,0 +1,1156 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {% if modo_edicao %}
+        Editar Conta a Receber | VersERP
+    {% else %}
+        Nova Conta a Receber | VersERP
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        {% if modo_edicao %}
+
+            <h1>Editar Conta a Receber</h1>
+            <p>Atualize os dados do recebimento</p>
+
+        {% else %}
+
+            <h1>Nova Conta a Receber</h1>
+            <p>Cadastre um novo valor a receber</p>
+
+        {% endif %}
+
+    </div>
+
+    <a
+        href="{% url 'financeiro:contas_receber' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<form method="post" class="verserp-form">
+
+    {% csrf_token %}
+
+    {{ parcela_formset.management_form }}
+
+
+    {% if form.errors %}
+
+        <div class="alert alert-danger">
+
+            <strong>
+                Verifique os campos abaixo.
+            </strong>
+
+            {{ form.non_field_errors }}
+
+        </div>
+
+    {% endif %}
+
+
+    {% if parcela_formset.non_form_errors %}
+
+        <div class="alert alert-danger">
+            {{ parcela_formset.non_form_errors }}
+        </div>
+
+    {% endif %}
+
+
+    {% if possui_baixas %}
+
+        <div class="alert alert-warning">
+
+            <strong>
+                Este lançamento já possui recebimentos.
+            </strong>
+
+            Os valores e parcelas não podem ser alterados
+            livremente.
+
+        </div>
+
+    {% endif %}
+
+
+    <!-- DADOS DO LANÇAMENTO -->
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+
+            <div>
+
+                <h2>Dados do lançamento</h2>
+
+                <p>
+                    Informações principais da conta a receber
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.empresa.id_for_label }}">
+                    Empresa
+                </label>
+
+                {{ form.empresa }}
+                {{ form.empresa.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.pessoa.id_for_label }}">
+                    Cliente
+                </label>
+
+                {{ form.pessoa }}
+                {{ form.pessoa.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-full">
+
+                <label for="{{ form.descricao.id_for_label }}">
+                    Descrição
+                </label>
+
+                {{ form.descricao }}
+                {{ form.descricao.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.numero_documento.id_for_label }}">
+                    Número da NF / documento
+                </label>
+
+                {{ form.numero_documento }}
+                {{ form.numero_documento.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.data_emissao.id_for_label }}">
+                    Data de emissão
+                </label>
+
+                {{ form.data_emissao }}
+                {{ form.data_emissao.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.data_competencia.id_for_label }}">
+                    Competência
+                </label>
+
+                {{ form.data_competencia }}
+                {{ form.data_competencia.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.valor_total.id_for_label }}">
+                    Valor total
+                </label>
+
+                {{ form.valor_total }}
+                {{ form.valor_total.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.plano_conta.id_for_label }}">
+                    Plano de contas
+                </label>
+
+                {{ form.plano_conta }}
+                {{ form.plano_conta.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-full">
+
+                <label for="{{ form.observacoes.id_for_label }}">
+                    Observações
+                </label>
+
+                {{ form.observacoes }}
+                {{ form.observacoes.errors }}
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- CONDIÇÃO DE RECEBIMENTO -->
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+
+            <div>
+
+                <h2>Condição de recebimento</h2>
+
+                <p>
+                    Defina os vencimentos e confira as parcelas
+                    antes de salvar.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="form-grid">
+
+            <div class="form-group">
+
+                <label
+                    for="{{ form.condicao_pagamento.id_for_label }}"
+                >
+                    Condição
+                </label>
+
+                {{ form.condicao_pagamento }}
+                {{ form.condicao_pagamento.errors }}
+
+            </div>
+
+
+            <div
+                class="form-group"
+                id="grupo-quantidade-parcelas"
+            >
+
+                <label
+                    for="{{ form.quantidade_parcelas.id_for_label }}"
+                >
+                    {{ form.quantidade_parcelas.label }}
+                </label>
+
+                {{ form.quantidade_parcelas }}
+                {{ form.quantidade_parcelas.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label
+                    for="{{ form.primeiro_vencimento.id_for_label }}"
+                >
+                    {{ form.primeiro_vencimento.label }}
+                </label>
+
+                {{ form.primeiro_vencimento }}
+                {{ form.primeiro_vencimento.errors }}
+
+            </div>
+
+        </div>
+
+
+        {% if not possui_baixas %}
+
+            <div class="form-actions">
+
+                <button
+                    type="button"
+                    class="btn btn-light"
+                    id="btn-gerar-parcelas"
+                >
+                    <i class="bi bi-calculator"></i>
+                    Gerar parcelas
+                </button>
+
+            </div>
+
+        {% endif %}
+
+    </section>
+
+
+    <!-- PARCELAS -->
+
+    <section
+        class="form-section"
+        id="secao-parcelas"
+        data-modo-edicao="{% if modo_edicao %}1{% else %}0{% endif %}"
+        {% if not modo_edicao %}
+            style="display: none;"
+        {% endif %}
+    >
+
+        <div class="form-section-header">
+
+            <div>
+
+                <h2>Parcelas</h2>
+
+                <p>
+                    Confira os vencimentos e valores antes de salvar.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="table-responsive">
+
+            <table class="verserp-table">
+
+                <thead>
+
+                    <tr>
+                        <th>Parcela</th>
+                        <th>Vencimento</th>
+                        <th>Valor</th>
+                    </tr>
+
+                </thead>
+
+
+                <tbody id="parcelas-body">
+
+                    {% if modo_edicao %}
+
+                        {% for parcela_form in parcela_formset %}
+
+                            <tr>
+
+                                <td>
+
+                                    {{ forloop.counter }}/{{ parcela_formset.total_form_count }}
+
+                                    {{ parcela_form.numero }}
+
+                                </td>
+
+                                <td>
+
+                                    {{ parcela_form.vencimento }}
+                                    {{ parcela_form.vencimento.errors }}
+
+                                </td>
+
+                                <td>
+
+                                    {{ parcela_form.valor }}
+                                    {{ parcela_form.valor.errors }}
+
+                                </td>
+
+                            </tr>
+
+                        {% endfor %}
+
+                    {% endif %}
+
+                </tbody>
+
+
+                <tfoot>
+
+                    <tr>
+
+                        <td colspan="2">
+
+                            <strong>
+                                Total das parcelas
+                            </strong>
+
+                        </td>
+
+                        <td>
+
+                            <strong id="total-parcelas">
+                                R$ 0,00
+                            </strong>
+
+                        </td>
+
+                    </tr>
+
+                </tfoot>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:contas_receber' %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+
+        {% if not possui_baixas %}
+
+            <button
+                type="submit"
+                class="btn btn-primary"
+            >
+
+                <i class="bi bi-check-lg"></i>
+
+                {% if modo_edicao %}
+                    Salvar Alterações
+                {% else %}
+                    Salvar Conta
+                {% endif %}
+
+            </button>
+
+        {% endif %}
+
+    </div>
+
+</form>
+
+
+<script>
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+
+        const condicao =
+            document.getElementById(
+                "id_condicao_pagamento"
+            );
+
+        const quantidade =
+            document.getElementById(
+                "id_quantidade_parcelas"
+            );
+
+        const primeiroVencimento =
+            document.getElementById(
+                "id_primeiro_vencimento"
+            );
+
+        const valorTotal =
+            document.getElementById(
+                "id_valor_total"
+            );
+
+        const botaoGerar =
+            document.getElementById(
+                "btn-gerar-parcelas"
+            );
+
+        const secaoParcelas =
+            document.getElementById(
+                "secao-parcelas"
+            );
+
+        const parcelasBody =
+            document.getElementById(
+                "parcelas-body"
+            );
+
+        const totalParcelas =
+            document.getElementById(
+                "total-parcelas"
+            );
+
+        const grupoQuantidade =
+            document.getElementById(
+                "grupo-quantidade-parcelas"
+            );
+
+        const modoEdicao =
+            secaoParcelas.dataset.modoEdicao === "1";
+
+
+        function moedaParaCentavos(valor) {
+
+            if (!valor) {
+                return 0;
+            }
+
+            let texto =
+                String(valor).trim();
+
+            texto = texto.replace(
+                /[^\d,.-]/g,
+                ""
+            );
+
+            if (texto.includes(",")) {
+
+                texto = texto
+                    .replace(/\./g, "")
+                    .replace(",", ".");
+
+            }
+
+            const numero =
+                Number.parseFloat(texto);
+
+            if (Number.isNaN(numero)) {
+                return 0;
+            }
+
+            return Math.round(
+                numero * 100
+            );
+        }
+
+
+        function centavosParaCampo(
+            valorCentavos
+        ) {
+
+            return (
+                valorCentavos / 100
+            ).toLocaleString(
+                "pt-BR",
+                {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                }
+            );
+        }
+
+
+        function centavosParaMoeda(
+            valorCentavos
+        ) {
+
+            return (
+                valorCentavos / 100
+            ).toLocaleString(
+                "pt-BR",
+                {
+                    style: "currency",
+                    currency: "BRL"
+                }
+            );
+        }
+
+
+        function formatarCampoMoeda(campo) {
+
+            const texto =
+                String(
+                    campo.value || ""
+                ).trim();
+
+            if (!texto) {
+                return;
+            }
+
+            const centavos =
+                moedaParaCentavos(texto);
+
+            campo.value =
+                centavosParaCampo(
+                    centavos
+                );
+        }
+
+
+        function atualizarCondicao() {
+
+            if (
+                condicao.value === "AVISTA"
+            ) {
+
+                quantidade.value = 1;
+
+                grupoQuantidade.style.display =
+                    "none";
+
+            } else {
+
+                grupoQuantidade.style.display =
+                    "";
+
+            }
+        }
+
+
+        function adicionarMes(
+            data,
+            meses
+        ) {
+
+            const ano =
+                data.getUTCFullYear();
+
+            const mes =
+                data.getUTCMonth();
+
+            const dia =
+                data.getUTCDate();
+
+            const primeiroDiaDestino =
+                new Date(
+                    Date.UTC(
+                        ano,
+                        mes + meses,
+                        1
+                    )
+                );
+
+            const ultimoDiaDestino =
+                new Date(
+                    Date.UTC(
+                        primeiroDiaDestino.getUTCFullYear(),
+                        primeiroDiaDestino.getUTCMonth() + 1,
+                        0
+                    )
+                ).getUTCDate();
+
+            const diaDestino =
+                Math.min(
+                    dia,
+                    ultimoDiaDestino
+                );
+
+            return new Date(
+                Date.UTC(
+                    primeiroDiaDestino.getUTCFullYear(),
+                    primeiroDiaDestino.getUTCMonth(),
+                    diaDestino
+                )
+            );
+        }
+
+
+        function formatarData(data) {
+
+            return data
+                .toISOString()
+                .split("T")[0];
+        }
+
+
+        function atualizarTotalVisual() {
+
+            const campos =
+                parcelasBody.querySelectorAll(
+                    ".parcela-valor"
+                );
+
+            let totalCentavos = 0;
+
+            campos.forEach(
+                function (campo) {
+
+                    totalCentavos +=
+                        moedaParaCentavos(
+                            campo.value
+                        );
+                }
+            );
+
+            totalParcelas.textContent =
+                centavosParaMoeda(
+                    totalCentavos
+                );
+        }
+
+
+        function redistribuirParcelasAPartir(
+            indiceAlterado
+        ) {
+
+            const campos =
+                Array.from(
+                    parcelasBody.querySelectorAll(
+                        ".parcela-valor"
+                    )
+                );
+
+            if (!campos.length) {
+                return;
+            }
+
+            const valorTotalCentavos =
+                moedaParaCentavos(
+                    valorTotal.value
+                );
+
+            let totalFixadoCentavos = 0;
+
+            for (
+                let indice = 0;
+                indice <= indiceAlterado;
+                indice++
+            ) {
+
+                totalFixadoCentavos +=
+                    moedaParaCentavos(
+                        campos[indice].value
+                    );
+            }
+
+            const quantidadeRestante =
+                campos.length -
+                indiceAlterado -
+                1;
+
+            if (
+                quantidadeRestante <= 0
+            ) {
+
+                atualizarTotalVisual();
+                return;
+            }
+
+            const saldoRestanteCentavos =
+                valorTotalCentavos -
+                totalFixadoCentavos;
+
+            if (
+                saldoRestanteCentavos < 0
+            ) {
+
+                atualizarTotalVisual();
+                return;
+            }
+
+            const valorBaseCentavos =
+                Math.floor(
+                    saldoRestanteCentavos /
+                    quantidadeRestante
+                );
+
+            const diferenca =
+                saldoRestanteCentavos -
+                (
+                    valorBaseCentavos *
+                    quantidadeRestante
+                );
+
+            for (
+                let indice =
+                    indiceAlterado + 1;
+
+                indice < campos.length;
+
+                indice++
+            ) {
+
+                let valorParcela =
+                    valorBaseCentavos;
+
+                if (
+                    indice ===
+                    campos.length - 1
+                ) {
+
+                    valorParcela +=
+                        diferenca;
+                }
+
+                campos[indice].value =
+                    centavosParaCampo(
+                        valorParcela
+                    );
+            }
+
+            atualizarTotalVisual();
+        }
+
+
+        function gerarParcelas() {
+
+            const valorTotalCentavos =
+                moedaParaCentavos(
+                    valorTotal.value
+                );
+
+            let qtd =
+                Number.parseInt(
+                    quantidade.value,
+                    10
+                );
+
+            if (
+                condicao.value === "AVISTA"
+            ) {
+
+                qtd = 1;
+                quantidade.value = 1;
+            }
+
+            if (
+                valorTotalCentavos <= 0 ||
+                !qtd ||
+                qtd <= 0 ||
+                !primeiroVencimento.value
+            ) {
+
+                alert(
+                    "Informe o valor total, " +
+                    "a quantidade de parcelas " +
+                    "e o primeiro vencimento."
+                );
+
+                return;
+            }
+
+            const valorBaseCentavos =
+                Math.floor(
+                    valorTotalCentavos /
+                    qtd
+                );
+
+            const diferenca =
+                valorTotalCentavos -
+                (
+                    valorBaseCentavos *
+                    qtd
+                );
+
+            const dataBase =
+                new Date(
+                    primeiroVencimento.value +
+                    "T00:00:00Z"
+                );
+
+            parcelasBody.innerHTML = "";
+
+            for (
+                let indice = 0;
+                indice < qtd;
+                indice++
+            ) {
+
+                let valorParcela =
+                    valorBaseCentavos;
+
+                if (
+                    indice === qtd - 1
+                ) {
+
+                    valorParcela +=
+                        diferenca;
+                }
+
+                const vencimento =
+                    adicionarMes(
+                        dataBase,
+                        indice
+                    );
+
+                const linha =
+                    document.createElement(
+                        "tr"
+                    );
+
+                linha.innerHTML = `
+
+                    <td>
+
+                        ${indice + 1}/${qtd}
+
+                        <input
+                            type="hidden"
+                            name="parcelas-${indice}-numero"
+                            value="${indice + 1}"
+                        >
+
+                    </td>
+
+                    <td>
+
+                        <input
+                            type="date"
+                            name="parcelas-${indice}-vencimento"
+                            value="${formatarData(vencimento)}"
+                            class="form-control"
+                            required
+                        >
+
+                    </td>
+
+                    <td>
+
+                        <input
+                            type="text"
+                            name="parcelas-${indice}-valor"
+                            value="${centavosParaCampo(valorParcela)}"
+                            class="form-control parcela-valor campo-moeda"
+                            inputmode="decimal"
+                            autocomplete="off"
+                            required
+                        >
+
+                    </td>
+                `;
+
+                parcelasBody.appendChild(
+                    linha
+                );
+            }
+
+            secaoParcelas.style.display =
+                "";
+
+            atualizarTotalVisual();
+        }
+
+
+        condicao.addEventListener(
+            "change",
+            atualizarCondicao
+        );
+
+
+        if (botaoGerar) {
+
+            botaoGerar.addEventListener(
+                "click",
+                gerarParcelas
+            );
+        }
+
+
+        valorTotal.addEventListener(
+            "blur",
+            function () {
+
+                formatarCampoMoeda(
+                    valorTotal
+                );
+            }
+        );
+
+
+        valorTotal.addEventListener(
+            "keydown",
+            function (event) {
+
+                if (
+                    event.key !== "Enter"
+                ) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                formatarCampoMoeda(
+                    valorTotal
+                );
+
+                primeiroVencimento.focus();
+            }
+        );
+
+
+        parcelasBody.addEventListener(
+            "input",
+            function (event) {
+
+                if (
+                    event.target
+                        .classList
+                        .contains(
+                            "parcela-valor"
+                        )
+                ) {
+
+                    atualizarTotalVisual();
+                }
+            }
+        );
+
+
+        parcelasBody.addEventListener(
+            "focusout",
+            function (event) {
+
+                if (
+                    !event.target
+                        .classList
+                        .contains(
+                            "parcela-valor"
+                        )
+                ) {
+
+                    return;
+                }
+
+                const campos =
+                    Array.from(
+                        parcelasBody
+                            .querySelectorAll(
+                                ".parcela-valor"
+                            )
+                    );
+
+                const indiceAlterado =
+                    campos.indexOf(
+                        event.target
+                    );
+
+                formatarCampoMoeda(
+                    event.target
+                );
+
+                if (
+                    indiceAlterado >= 0
+                ) {
+
+                    redistribuirParcelasAPartir(
+                        indiceAlterado
+                    );
+                }
+            }
+        );
+
+
+        parcelasBody.addEventListener(
+            "keydown",
+            function (event) {
+
+                if (
+                    !event.target
+                        .classList
+                        .contains(
+                            "parcela-valor"
+                        )
+                ) {
+
+                    return;
+                }
+
+                if (
+                    event.key !== "Enter"
+                ) {
+
+                    return;
+                }
+
+                event.preventDefault();
+
+                const campos =
+                    Array.from(
+                        parcelasBody
+                            .querySelectorAll(
+                                ".parcela-valor"
+                            )
+                    );
+
+                const indiceAtual =
+                    campos.indexOf(
+                        event.target
+                    );
+
+                if (
+                    indiceAtual < 0
+                ) {
+
+                    return;
+                }
+
+                if (
+                    indiceAtual <
+                    campos.length - 1
+                ) {
+
+                    campos[
+                        indiceAtual + 1
+                    ].focus();
+
+                    campos[
+                        indiceAtual + 1
+                    ].select();
+
+                } else {
+
+                    event.target.blur();
+                }
+            }
+        );
+
+
+        atualizarCondicao();
+
+
+        if (
+            valorTotal.value
+        ) {
+
+            formatarCampoMoeda(
+                valorTotal
+            );
+        }
+
+
+        if (
+            modoEdicao
+        ) {
+
+            secaoParcelas.style.display =
+                "";
+
+            parcelasBody
+                .querySelectorAll(
+                    ".parcela-valor"
+                )
+                .forEach(
+                    function (campo) {
+
+                        formatarCampoMoeda(
+                            campo
+                        );
+                    }
+                );
+
+            atualizarTotalVisual();
+        }
+
+    }
+);
+</script>
+
+{% endblock %}

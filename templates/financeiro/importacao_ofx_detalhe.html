@@ -1,0 +1,487 @@
+{% extends "base.html" %}
+
+{% block title %}
+Importação OFX | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        <h1>Importação OFX</h1>
+
+        <p>
+            {{ importacao.conta_bancaria }}
+            — {{ importacao.nome_arquivo }}
+        </p>
+
+    </div>
+
+    <a
+        href="{% url 'financeiro:conciliacao_bancaria' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>Resumo do extrato</h2>
+
+            <span>
+                {{ importacao.get_status_display }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="form-grid">
+
+        <div class="form-group">
+
+            <label>Empresa</label>
+
+            <strong>
+                {{ importacao.conta_bancaria.empresa }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Conta bancária</label>
+
+            <strong>
+                {{ importacao.conta_bancaria }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Período</label>
+
+            <strong>
+
+                {% if importacao.data_inicio and importacao.data_fim %}
+
+                    {{ importacao.data_inicio|date:"d/m/Y" }}
+                    até
+                    {{ importacao.data_fim|date:"d/m/Y" }}
+
+                {% else %}
+
+                    —
+
+                {% endif %}
+
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Total de movimentos</label>
+
+            <strong>
+                {{ importacao.total_movimentos }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Entradas</label>
+
+            <strong>
+                R$ {{ total_entradas|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Saídas</label>
+
+            <strong>
+                R$ {{ total_saidas|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Conciliados</label>
+
+            <strong>
+                {{ importacao.total_conciliados }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Pendentes</label>
+
+            <strong>
+                {{ importacao.total_pendentes }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>Movimentos do extrato</h2>
+
+            <span>
+                Conferência bancária
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Data</th>
+                    <th>Descrição</th>
+                    <th>Documento</th>
+                    <th>Tipo</th>
+                    <th>Valor</th>
+                    <th>Status</th>
+                    <th>Correspondência no VersERP</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for item in movimentos_tela %}
+
+                    {% with movimento=item.movimento %}
+
+                        <tr>
+
+                            <td>
+                                {{ movimento.data|date:"d/m/Y" }}
+                            </td>
+
+
+                            <td>
+                                {{ movimento.descricao|default:"—" }}
+                            </td>
+
+
+                            <td>
+                                {{ movimento.documento|default:"—" }}
+                            </td>
+
+
+                            <td>
+
+                                {% if movimento.tipo == "ENTRADA" %}
+
+                                    Entrada
+
+                                {% else %}
+
+                                    Saída
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td>
+
+                                <strong>
+
+                                    {% if movimento.tipo == "ENTRADA" %}
+                                        +
+                                    {% else %}
+                                        −
+                                    {% endif %}
+
+                                    R$ {{ movimento.valor|floatformat:"2g" }}
+
+                                </strong>
+
+                            </td>
+
+
+                            <td>
+
+                                {% if movimento.status == "CONCILIADO" %}
+
+                                    <span class="status-badge status-active">
+                                        Conciliado
+                                    </span>
+
+                                {% elif movimento.status == "IGNORADO" %}
+
+                                    <span class="status-badge status-inactive">
+                                        Ignorado
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="status-badge">
+                                        Pendente
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td>
+
+                                {% if movimento.status == "CONCILIADO" %}
+
+                                    {% if movimento.baixa_conciliada %}
+
+                                        <strong>
+                                            {{ movimento.baixa_conciliada.parcela.lancamento.descricao }}
+                                        </strong>
+
+                                        <br>
+
+                                        <small>
+                                            {{ movimento.baixa_conciliada.parcela.lancamento.pessoa.razao_social }}
+                                            —
+                                            R$ {{ movimento.baixa_conciliada.valor_movimento|floatformat:"2g" }}
+                                        </small>
+
+                                    {% endif %}
+
+
+                                {% elif movimento.status == "PENDENTE" %}
+
+                                    {% if item.quantidade_candidatos == 0 %}
+
+                                        <span>
+                                            Nenhuma correspondência encontrada
+                                        </span>
+
+
+                                    {% elif item.quantidade_candidatos == 1 %}
+
+                                        {% with baixa=item.candidatos.0 %}
+
+                                            <strong>
+                                                {{ baixa.parcela.lancamento.descricao }}
+                                            </strong>
+
+                                            <br>
+
+                                            <small>
+                                                {{ baixa.parcela.lancamento.pessoa.razao_social }}
+                                                —
+                                                R$ {{ baixa.valor_movimento|floatformat:"2g" }}
+                                            </small>
+
+                                        {% endwith %}
+
+
+                                    {% else %}
+
+                                        <strong>
+                                            {{ item.quantidade_candidatos }}
+                                            correspondências possíveis
+                                        </strong>
+
+                                        <br>
+
+                                        <small>
+                                            Revise antes de conciliar
+                                        </small>
+
+                                    {% endif %}
+
+                                {% else %}
+
+                                    —
+
+                                {% endif %}
+
+                            </td>
+
+
+                            <td class="table-actions">
+
+                                {% if perms.financeiro.change_movimentoofx %}
+
+                                    {% if movimento.status == "PENDENTE" %}
+
+                                        {% if item.quantidade_candidatos == 1 %}
+
+                                            {% with baixa=item.candidatos.0 %}
+
+                                                <form
+                                                    method="post"
+                                                    action="{% url 'financeiro:conciliar_movimento_ofx' movimento.pk baixa.pk %}"
+                                                    style="display: inline;"
+                                                >
+                                                    {% csrf_token %}
+
+                                                    <button
+                                                        type="submit"
+                                                        class="btn btn-primary text-white"
+                                                        title="Confirmar conciliação"
+                                                    >
+                                                        <i class="bi bi-check2-circle"></i>
+                                                        Conciliar
+                                                    </button>
+
+                                                </form>
+
+                                            {% endwith %}
+
+                                        {% endif %}
+
+
+                                        <a
+                                            href="{% url 'financeiro:buscar_movimento_ofx' movimento.pk %}"
+                                            class="btn btn-light"
+                                            title="Buscar lançamento ou baixa"
+                                        >
+                                            <i class="bi bi-search"></i>
+                                            Buscar
+                                        </a>
+
+
+                                        {% if perms.financeiro.add_lancamentofinanceiro and perms.financeiro.add_baixafinanceira %}
+
+                                            <a
+                                                href="{% url 'financeiro:criar_lancamento_movimento_ofx' movimento.pk %}"
+                                                class="btn btn-light"
+                                                title="Criar lançamento a partir do extrato"
+                                            >
+                                                <i class="bi bi-plus-circle"></i>
+                                                Criar lançamento
+                                            </a>
+
+                                        {% endif %}
+
+
+                                        <form
+                                            method="post"
+                                            action="{% url 'financeiro:ignorar_movimento_ofx' movimento.pk %}"
+                                            style="display: inline;"
+                                        >
+                                            {% csrf_token %}
+
+                                            <button
+                                                type="submit"
+                                                class="btn btn-light"
+                                                title="Ignorar movimento"
+                                            >
+                                                <i class="bi bi-x-circle"></i>
+                                                Ignorar
+                                            </button>
+
+                                        </form>
+
+
+                                    {% else %}
+
+                                        <form
+                                            method="post"
+                                            action="{% url 'financeiro:reabrir_movimento_ofx' movimento.pk %}"
+                                            style="display: inline;"
+                                        >
+                                            {% csrf_token %}
+
+                                            <button
+                                                type="submit"
+                                                class="btn btn-light"
+                                                title="Reabrir movimento"
+                                            >
+                                                <i class="bi bi-arrow-counterclockwise"></i>
+                                                Reabrir
+                                            </button>
+
+                                        </form>
+
+                                    {% endif %}
+
+                                {% endif %}
+
+                            </td>
+
+                        </tr>
+
+                    {% endwith %}
+
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="8">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-receipt"></i>
+
+                                <h3>
+                                    Nenhum movimento encontrado
+                                </h3>
+
+                                <p>
+                                    Esta importação não possui movimentos.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

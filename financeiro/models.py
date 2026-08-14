@@ -811,3 +811,240 @@ class BaixaFinanceira(models.Model):
             f"{self.parcela} - "
             f"R$ {self.valor}"
         )
+
+class ImportacaoOFX(models.Model):
+    STATUS_CHOICES = [
+        ("PROCESSANDO", "Processando"),
+        ("CONCLUIDA", "Concluída"),
+        ("ERRO", "Erro"),
+    ]
+
+    conta_bancaria = models.ForeignKey(
+        ContaBancaria,
+        on_delete=models.PROTECT,
+        related_name="importacoes_ofx",
+        verbose_name="Conta bancária",
+    )
+
+    nome_arquivo = models.CharField(
+        "Nome do arquivo",
+        max_length=255,
+    )
+
+    data_inicio = models.DateField(
+        "Data inicial do extrato",
+        null=True,
+        blank=True,
+    )
+
+    data_fim = models.DateField(
+        "Data final do extrato",
+        null=True,
+        blank=True,
+    )
+
+    status = models.CharField(
+        "Status",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PROCESSANDO",
+    )
+
+    mensagem_erro = models.TextField(
+        "Mensagem de erro",
+        blank=True,
+    )
+
+    criado_em = models.DateTimeField(
+        "Importado em",
+        auto_now_add=True,
+    )
+
+    class Meta:
+        verbose_name = "Importação OFX"
+        verbose_name_plural = "Importações OFX"
+        ordering = ["-criado_em", "-id"]
+
+    @property
+    def total_movimentos(self):
+        return self.movimentos.count()
+
+    @property
+    def total_conciliados(self):
+        return self.movimentos.filter(
+            status="CONCILIADO"
+        ).count()
+
+    @property
+    def total_pendentes(self):
+        return self.movimentos.filter(
+            status="PENDENTE"
+        ).count()
+
+    def __str__(self):
+        return (
+            f"{self.conta_bancaria} - "
+            f"{self.nome_arquivo}"
+        )
+
+
+class MovimentoOFX(models.Model):
+    TIPO_CHOICES = [
+        ("ENTRADA", "Entrada"),
+        ("SAIDA", "Saída"),
+    ]
+
+    STATUS_CHOICES = [
+        ("PENDENTE", "Pendente"),
+        ("CONCILIADO", "Conciliado"),
+        ("IGNORADO", "Ignorado"),
+    ]
+
+    importacao = models.ForeignKey(
+        ImportacaoOFX,
+        on_delete=models.CASCADE,
+        related_name="movimentos",
+        verbose_name="Importação",
+    )
+
+    conta_bancaria = models.ForeignKey(
+        ContaBancaria,
+        on_delete=models.PROTECT,
+        related_name="movimentos_ofx",
+        verbose_name="Conta bancária",
+    )
+
+    identificador = models.CharField(
+        "Identificador da transação",
+        max_length=255,
+    )
+
+    data = models.DateField(
+        "Data",
+    )
+
+    tipo = models.CharField(
+        "Tipo",
+        max_length=10,
+        choices=TIPO_CHOICES,
+    )
+
+    valor = models.DecimalField(
+        "Valor",
+        max_digits=15,
+        decimal_places=2,
+    )
+
+    descricao = models.CharField(
+        "Descrição",
+        max_length=500,
+        blank=True,
+    )
+
+    documento = models.CharField(
+        "Documento / referência",
+        max_length=100,
+        blank=True,
+    )
+
+    status = models.CharField(
+        "Status",
+        max_length=15,
+        choices=STATUS_CHOICES,
+        default="PENDENTE",
+    )
+
+    baixa_conciliada = models.ForeignKey(
+        BaixaFinanceira,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimentos_ofx_conciliados",
+        verbose_name="Baixa conciliada",
+    )
+
+    criado_em = models.DateTimeField(
+        "Criado em",
+        auto_now_add=True,
+    )
+
+    atualizado_em = models.DateTimeField(
+        "Atualizado em",
+        auto_now=True,
+    )
+
+    class Meta:
+        verbose_name = "Movimento OFX"
+        verbose_name_plural = "Movimentos OFX"
+        ordering = ["-data", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "conta_bancaria",
+                    "identificador",
+                ],
+                name=(
+                    "unique_movimento_ofx_"
+                    "por_conta"
+                ),
+            ),
+        ]
+
+    @property
+    def valor_assinado(self):
+        if self.tipo == "SAIDA":
+            return -self.valor
+
+        return self.valor
+
+    def clean(self):
+        super().clean()
+
+        errors = {}
+
+        if (
+            self.valor is not None
+            and self.valor <= Decimal("0.00")
+        ):
+            errors["valor"] = (
+                "O valor do movimento deve "
+                "ser maior que zero."
+            )
+
+        if (
+            self.importacao_id
+            and self.conta_bancaria_id
+            and self.importacao.conta_bancaria_id
+            != self.conta_bancaria_id
+        ):
+            errors["conta_bancaria"] = (
+                "A conta bancária do movimento "
+                "deve ser a mesma da importação."
+            )
+
+        if (
+            self.baixa_conciliada_id
+            and self.conta_bancaria_id
+            and self.baixa_conciliada.conta_bancaria_id
+            != self.conta_bancaria_id
+        ):
+            errors["baixa_conciliada"] = (
+                "A baixa conciliada deve pertencer "
+                "à mesma conta bancária do extrato."
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        sinal = (
+            "-"
+            if self.tipo == "SAIDA"
+            else "+"
+        )
+
+        return (
+            f"{self.data:%d/%m/%Y} - "
+            f"{sinal} R$ {self.valor} - "
+            f"{self.descricao}"
+        )

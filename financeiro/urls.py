@@ -103,4 +103,63 @@ urlpatterns = [
         views.detalhe_conta_bancaria,
         name="detalhe_conta_bancaria",
     ),
+
+
+    # -------------------------------------------------
+    # CONCILIAÇÃO BANCÁRIA
+    # -------------------------------------------------
+
+    path(
+        "conciliacao/",
+        views.conciliacao_bancaria,
+        name="conciliacao_bancaria",
+    ),
+
+    path(
+        "conciliacao/importar/",
+        views.importar_ofx,
+        name="importar_ofx",
+    ),
+
+    path(
+        "conciliacao/importacoes/<int:pk>/",
+        views.detalhe_importacao_ofx,
+        name="detalhe_importacao_ofx",
+    ),
+
+    path(
+        "conciliacao/movimentos/<int:pk>/buscar/",
+        views.buscar_movimento_ofx,
+        name="buscar_movimento_ofx",
+    ),
+
+    path(
+        "conciliacao/movimentos/<int:pk>/criar-lancamento/",
+        views.criar_lancamento_movimento_ofx,
+        name="criar_lancamento_movimento_ofx",
+    ),
+
+    path(
+        "conciliacao/movimentos/<int:pk>/baixar-parcela/<int:parcela_pk>/",
+        views.baixar_parcela_movimento_ofx,
+        name="baixar_parcela_movimento_ofx",
+    ),
+
+    path(
+        "conciliacao/movimentos/<int:pk>/conciliar/<int:baixa_pk>/",
+        views.conciliar_movimento_ofx,
+        name="conciliar_movimento_ofx",
+    ),
+
+    path(
+        "conciliacao/movimentos/<int:pk>/ignorar/",
+        views.ignorar_movimento_ofx,
+        name="ignorar_movimento_ofx",
+    ),
+
+    path(
+        "conciliacao/movimentos/<int:pk>/reabrir/",
+        views.reabrir_movimento_ofx,
+        name="reabrir_movimento_ofx",
+    ),
 ]

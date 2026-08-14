@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}
+Criar Lançamento pela Conciliação | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        {% if tipo_lancamento == "PAGAR" %}
+
+            <h1>Criar Conta a Pagar</h1>
+
+            <p>
+                Crie o lançamento financeiro a partir do movimento bancário.
+            </p>
+
+        {% else %}
+
+            <h1>Criar Conta a Receber</h1>
+
+            <p>
+                Crie o lançamento financeiro a partir do movimento bancário.
+            </p>
+
+        {% endif %}
+
+    </div>
+
+    <a
+        href="{% url 'financeiro:detalhe_importacao_ofx' movimento.importacao_id %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Movimento do extrato</h2>
+            <span>
+                Dados importados do OFX
+            </span>
+        </div>
+
+    </div>
+
+
+    <div class="form-grid">
+
+        <div class="form-group">
+
+            <label>Tipo</label>
+
+            <strong>
+
+                {% if movimento.tipo == "ENTRADA" %}
+                    Entrada
+                {% else %}
+                    Saída
+                {% endif %}
+
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Data</label>
+
+            <strong>
+                {{ movimento.data|date:"d/m/Y" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Valor</label>
+
+            <strong>
+                R$ {{ movimento.valor|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Conta bancária</label>
+
+            <strong>
+                {{ movimento.conta_bancaria }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group form-group-wide">
+
+            <label>Descrição bancária</label>
+
+            <strong>
+                {{ movimento.descricao|default:"—" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Documento</label>
+
+            <strong>
+                {{ movimento.documento|default:"—" }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<form
+    method="post"
+    class="verserp-form"
+>
+
+    {% csrf_token %}
+
+
+    {% if form.errors %}
+
+        <div class="alert alert-danger">
+
+            <strong>
+                Verifique os campos abaixo.
+            </strong>
+
+            {{ form.non_field_errors }}
+
+        </div>
+
+    {% endif %}
+
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+
+            <div>
+
+                {% if tipo_lancamento == "PAGAR" %}
+
+                    <h2>Dados da Conta a Pagar</h2>
+
+                    <p>
+                        Complete os dados necessários para criar e baixar
+                        o lançamento.
+                    </p>
+
+                {% else %}
+
+                    <h2>Dados da Conta a Receber</h2>
+
+                    <p>
+                        Complete os dados necessários para criar e receber
+                        o lançamento.
+                    </p>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.pessoa.id_for_label }}">
+                    {{ form.pessoa.label }}
+                </label>
+
+                {{ form.pessoa }}
+                {{ form.pessoa.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.plano_conta.id_for_label }}">
+                    Plano de contas
+                </label>
+
+                {{ form.plano_conta }}
+                {{ form.plano_conta.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-full">
+
+                <label for="{{ form.descricao.id_for_label }}">
+                    Descrição
+                </label>
+
+                {{ form.descricao }}
+                {{ form.descricao.errors }}
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="{{ form.numero_documento.id_for_label }}">
+                    Número do documento
+                </label>
+
+                {{ form.numero_documento }}
+                {{ form.numero_documento.errors }}
+
+            </div>
+
+
+            <div class="form-group form-group-full">
+
+                <label for="{{ form.observacoes.id_for_label }}">
+                    Observações
+                </label>
+
+                {{ form.observacoes }}
+                {{ form.observacoes.errors }}
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:detalhe_importacao_ofx' movimento.importacao_id %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+
+        <button
+            type="submit"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-check-lg"></i>
+
+            {% if tipo_lancamento == "PAGAR" %}
+                Criar, Baixar e Conciliar
+            {% else %}
+                Criar, Receber e Conciliar
+            {% endif %}
+
+        </button>
+
+    </div>
+
+</form>
+
+{% endblock %}

@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+
+{% block title %}
+Buscar Correspondência OFX | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Buscar Correspondência</h1>
+        <p>
+            Localize uma baixa existente ou uma parcela em aberto
+            para o movimento bancário.
+        </p>
+    </div>
+
+    <a
+        href="{% url 'financeiro:detalhe_importacao_ofx' movimento.importacao_id %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Movimento do extrato</h2>
+            <span>
+                {{ movimento.data|date:"d/m/Y" }}
+            </span>
+        </div>
+
+    </div>
+
+
+    <div class="form-grid">
+
+        <div class="form-group">
+
+            <label>Tipo</label>
+
+            <strong>
+                {% if movimento.tipo == "ENTRADA" %}
+                    Entrada
+                {% else %}
+                    Saída
+                {% endif %}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Valor</label>
+
+            <strong>
+                R$ {{ movimento.valor|floatformat:"2g" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group form-group-wide">
+
+            <label>Descrição</label>
+
+            <strong>
+                {{ movimento.descricao|default:"—" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group">
+
+            <label>Documento</label>
+
+            <strong>
+                {{ movimento.documento|default:"—" }}
+            </strong>
+
+        </div>
+
+
+        <div class="form-group form-group-wide">
+
+            <label>Conta bancária</label>
+
+            <strong>
+                {{ movimento.conta_bancaria }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Baixas já registradas</h2>
+
+            <span>
+                {{ baixas_compativeis|length }}
+                encontrada{{ baixas_compativeis|length|pluralize }}
+            </span>
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Data</th>
+                    <th>Descrição</th>
+                    <th>Pessoa</th>
+                    <th>Documento</th>
+                    <th>Valor</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for baixa in baixas_compativeis %}
+
+                    <tr>
+
+                        <td>
+                            {{ baixa.data|date:"d/m/Y" }}
+                        </td>
+
+
+                        <td>
+                            <strong>
+                                {{ baixa.parcela.lancamento.descricao }}
+                            </strong>
+                        </td>
+
+
+                        <td>
+                            {{ baixa.parcela.lancamento.pessoa.razao_social }}
+                        </td>
+
+
+                        <td>
+                            {{ baixa.parcela.lancamento.numero_documento|default:"—" }}
+                        </td>
+
+
+                        <td>
+                            <strong>
+                                R$ {{ baixa.valor_movimento|floatformat:"2g" }}
+                            </strong>
+                        </td>
+
+
+                        <td class="table-actions">
+
+                            <form
+                                method="post"
+                                action="{% url 'financeiro:conciliar_movimento_ofx' movimento.pk baixa.pk %}"
+                            >
+                                {% csrf_token %}
+
+                                <button
+                                    type="submit"
+                                    class="btn btn-primary text-white"
+                                >
+                                    <i class="bi bi-check2-circle"></i>
+                                    Conciliar
+                                </button>
+
+                            </form>
+
+                        </td>
+
+                    </tr>
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="6">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-search"></i>
+
+                                <h3>
+                                    Nenhuma baixa compatível encontrada
+                                </h3>
+
+                                <p>
+                                    Não encontramos uma baixa já registrada
+                                    com o mesmo valor e conta bancária.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Parcelas em aberto</h2>
+
+            <span>
+                {{ parcelas_compativeis|length }}
+                encontrada{{ parcelas_compativeis|length|pluralize }}
+            </span>
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Vencimento</th>
+                    <th>Descrição</th>
+                    <th>Pessoa</th>
+                    <th>Parcela</th>
+                    <th>Saldo</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for parcela in parcelas_compativeis %}
+
+                    <tr>
+
+                        <td>
+                            {{ parcela.vencimento|date:"d/m/Y" }}
+                        </td>
+
+
+                        <td>
+                            <strong>
+                                {{ parcela.lancamento.descricao }}
+                            </strong>
+                        </td>
+
+
+                        <td>
+                            {{ parcela.lancamento.pessoa.razao_social }}
+                        </td>
+
+
+                        <td>
+                            {{ parcela.numero }}
+                        </td>
+
+
+                        <td>
+                            <strong>
+                                R$ {{ parcela.saldo|floatformat:"2g" }}
+                            </strong>
+                        </td>
+
+
+                        <td class="table-actions">
+
+                            <form
+                                method="post"
+                                action="{% url 'financeiro:baixar_parcela_movimento_ofx' movimento.pk parcela.pk %}"
+                            >
+                                {% csrf_token %}
+
+                                <button
+                                    type="submit"
+                                    class="btn btn-primary text-white"
+                                >
+                                    <i class="bi bi-check2-circle"></i>
+
+                                    {% if tipo_lancamento == "PAGAR" %}
+                                        Baixar e Conciliar
+                                    {% else %}
+                                        Receber e Conciliar
+                                    {% endif %}
+
+                                </button>
+
+                            </form>
+
+                        </td>
+
+                    </tr>
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="6">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-receipt"></i>
+
+                                <h3>
+                                    Nenhuma parcela compatível encontrada
+                                </h3>
+
+                                <p>
+                                    Não encontramos parcela em aberto
+                                    com saldo igual ao valor do extrato.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+
+<div class="form-actions">
+
+    <a
+        href="{% url 'financeiro:criar_lancamento_movimento_ofx' movimento.pk %}"
+        class="btn btn-primary"
+    >
+        <i class="bi bi-plus-circle"></i>
+
+        {% if tipo_lancamento == "PAGAR" %}
+            Criar Conta a Pagar
+        {% else %}
+            Criar Conta a Receber
+        {% endif %}
+    </a>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,138 @@
+/* ==========================================
+   BUTTON BASE
+========================================== */
+
+.btn {
+    display: inline-flex;
+
+    align-items: center;
+    justify-content: center;
+
+    gap: 7px;
+
+    min-height: 40px;
+
+    padding: 9px 14px;
+
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+
+    line-height: 1;
+
+    text-decoration: none;
+
+    cursor: pointer;
+
+    white-space: nowrap;
+
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+.btn i {
+    flex: 0 0 auto;
+}
+
+
+/* ==========================================
+   PRIMARY
+========================================== */
+
+.btn-primary {
+    background: var(--primary);
+    border-color: var(--primary);
+
+    color: #ffffff;
+}
+
+.btn-primary:hover {
+    opacity: 0.92;
+
+    color: #ffffff;
+}
+
+
+/* ==========================================
+   LIGHT
+========================================== */
+
+.btn-light {
+    background: var(--surface);
+
+    border-color: var(--border);
+
+    color: var(--text);
+}
+
+.btn-light:hover {
+    background: var(--background);
+
+    color: var(--text);
+}
+
+
+/* ==========================================
+   ACTION GROUPS
+========================================== */
+
+.form-actions {
+    display: flex;
+
+    align-items: center;
+    justify-content: flex-end;
+
+    gap: 10px;
+
+    flex-wrap: wrap;
+}
+
+
+/* ==========================================
+   MOBILE
+========================================== */
+
+@media (max-width: 700px) {
+
+    .form-actions {
+        width: 100%;
+    }
+
+    .page-header .form-actions {
+        justify-content: flex-start;
+    }
+
+    .table-actions .btn {
+        min-height: 36px;
+
+        padding: 8px 10px;
+
+        font-size: 12px;
+    }
+}
+
+
+/* ==========================================
+   MOBILE PEQUENO
+========================================== */
+
+@media (max-width: 480px) {
+
+    .page-header .form-actions {
+        display: grid;
+
+        grid-template-columns: 1fr;
+
+        gap: 8px;
+    }
+
+    .page-header .form-actions .btn {
+        width: 100%;
+    }
+}

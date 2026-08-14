@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}
+Conciliação Bancária | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Conciliação Bancária</h1>
+        <p>
+            Importe extratos OFX e confronte com os lançamentos do VersERP
+        </p>
+    </div>
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:index' %}"
+            class="btn btn-light"
+        >
+            <i class="bi bi-arrow-left"></i>
+            Voltar
+        </a>
+
+        {% if perms.financeiro.add_importacaoofx %}
+
+            <a
+                href="{% url 'financeiro:importar_ofx' %}"
+                class="btn btn-primary"
+            >
+                <i class="bi bi-upload"></i>
+                Importar OFX
+            </a>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>Importações</h2>
+
+            <span>
+                {{ importacoes|length }}
+                importação{{ importacoes|length|pluralize:"ões" }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Data</th>
+                    <th>Conta bancária</th>
+                    <th>Arquivo</th>
+                    <th>Período</th>
+                    <th>Movimentos</th>
+                    <th>Conciliados</th>
+                    <th>Pendentes</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for importacao in importacoes %}
+
+                    <tr>
+
+                        <td>
+                            {{ importacao.criado_em|date:"d/m/Y H:i" }}
+                        </td>
+
+
+                        <td>
+
+                            <strong>
+                                {{ importacao.conta_bancaria }}
+                            </strong>
+
+                            <br>
+
+                            <small>
+                                {{ importacao.conta_bancaria.empresa }}
+                            </small>
+
+                        </td>
+
+
+                        <td>
+                            {{ importacao.nome_arquivo }}
+                        </td>
+
+
+                        <td>
+
+                            {% if importacao.data_inicio and importacao.data_fim %}
+
+                                {{ importacao.data_inicio|date:"d/m/Y" }}
+                                até
+                                {{ importacao.data_fim|date:"d/m/Y" }}
+
+                            {% else %}
+
+                                —
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <td>
+                            {{ importacao.total_movimentos }}
+                        </td>
+
+
+                        <td>
+                            {{ importacao.total_conciliados }}
+                        </td>
+
+
+                        <td>
+                            {{ importacao.total_pendentes }}
+                        </td>
+
+
+                        <td>
+
+                            {% if importacao.status == "CONCLUIDA" %}
+
+                                <span class="status-badge status-active">
+                                    {{ importacao.get_status_display }}
+                                </span>
+
+                            {% elif importacao.status == "ERRO" %}
+
+                                <span class="status-badge status-inactive">
+                                    {{ importacao.get_status_display }}
+                                </span>
+
+                            {% else %}
+
+                                <span class="status-badge">
+                                    {{ importacao.get_status_display }}
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+
+                        <td class="table-actions">
+
+                            <a
+                                href="{% url 'financeiro:detalhe_importacao_ofx' importacao.pk %}"
+                                class="btn btn-light"
+                                title="Abrir importação"
+                            >
+                                <i class="bi bi-eye"></i>
+                            </a>
+
+                        </td>
+
+                    </tr>
+
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="9">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-arrow-left-right"></i>
+
+                                <h3>
+                                    Nenhum extrato OFX importado
+                                </h3>
+
+                                <p>
+                                    Importe o primeiro extrato bancário
+                                    para iniciar a conciliação.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

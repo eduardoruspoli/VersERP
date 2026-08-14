@@ -49,29 +49,28 @@ Financeiro | VersERP
 
     <!-- CONTAS A RECEBER -->
 
-    <div class="dashboard-card dashboard-card-disabled">
+    <a
+        href="{% url 'financeiro:contas_receber' %}"
+        class="dashboard-card"
+    >
 
         <div class="dashboard-card-icon">
             <i class="bi bi-wallet2"></i>
         </div>
 
-        <div>
+            <div>
 
-            <h3>
-                Contas a Receber
-            </h3>
+                <h3>
+                    Contas a Receber
+                </h3>
 
-            <p>
-                Recebimentos e notas emitidas
-            </p>
+                <p>
+                    Recebimentos e notas emitidas
+                </p>
 
-            <small>
-                Em desenvolvimento
-            </small>
+            </div>
 
-        </div>
-
-    </div>
+    </a>
 
 
     <!-- CONTAS BANCÁRIAS -->
@@ -102,7 +101,10 @@ Financeiro | VersERP
 
     <!-- CONCILIAÇÃO BANCÁRIA -->
 
-    <div class="dashboard-card dashboard-card-disabled">
+    <a
+        href="{% url 'financeiro:conciliacao_bancaria' %}"
+        class="dashboard-card"
+    >
 
         <div class="dashboard-card-icon">
             <i class="bi bi-arrow-left-right"></i>
@@ -115,16 +117,12 @@ Financeiro | VersERP
             </h3>
 
             <p>
-                Conferência e importação de extratos
+                Importação OFX e conferência de extratos
             </p>
 
-            <small>
-                Em desenvolvimento
-            </small>
+         </div>
 
-        </div>
-
-    </div>
+    </a>
 
 
     <!-- PLANO DE CONTAS -->
