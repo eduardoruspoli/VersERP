@@ -7,12 +7,14 @@ from django.contrib.auth.decorators import (
     permission_required,
 )
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.shortcuts import (
     get_object_or_404,
     redirect,
     render,
 )
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from .forms import (
     BaixaFinanceiraForm,
@@ -1213,8 +1215,134 @@ def conciliacao_bancaria(request):
         )
     )
 
+    contas = (
+        ContaBancaria.objects
+        .filter(
+            ativa=True
+        )
+        .select_related(
+            "empresa"
+        )
+        .order_by(
+            "empresa",
+            "banco",
+            "agencia",
+            "conta",
+        )
+    )
+
+    busca = (
+        request.GET.get(
+            "q",
+            "",
+        )
+        .strip()
+    )
+
+    conta_id = (
+        request.GET.get(
+            "conta",
+            "",
+        )
+        .strip()
+    )
+
+    status = (
+        request.GET.get(
+            "status",
+            "",
+        )
+        .strip()
+    )
+
+    data_de_texto = (
+        request.GET.get(
+            "data_de",
+            "",
+        )
+        .strip()
+    )
+
+    data_ate_texto = (
+        request.GET.get(
+            "data_ate",
+            "",
+        )
+        .strip()
+    )
+
+    if busca:
+        importacoes = (
+            importacoes.filter(
+                Q(
+                    nome_arquivo__icontains=busca
+                )
+                | Q(
+                    conta_bancaria__banco__icontains=busca
+                )
+                | Q(
+                    conta_bancaria__agencia__icontains=busca
+                )
+                | Q(
+                    conta_bancaria__conta__icontains=busca
+                )
+                | Q(
+                    conta_bancaria__empresa__razao_social__icontains=busca
+                )
+                | Q(
+                    conta_bancaria__empresa__nome_fantasia__icontains=busca
+                )
+            )
+        )
+
+    if conta_id:
+        importacoes = (
+            importacoes.filter(
+                conta_bancaria_id=conta_id
+            )
+        )
+
+    if status in (
+        "PROCESSANDO",
+        "CONCLUIDA",
+        "ERRO",
+    ):
+        importacoes = (
+            importacoes.filter(
+                status=status
+            )
+        )
+
+    data_de = parse_date(
+        data_de_texto
+    )
+
+    data_ate = parse_date(
+        data_ate_texto
+    )
+
+    if data_de:
+        importacoes = (
+            importacoes.filter(
+                criado_em__date__gte=data_de
+            )
+        )
+
+    if data_ate:
+        importacoes = (
+            importacoes.filter(
+                criado_em__date__lte=data_ate
+            )
+        )
+
     contexto = {
         "importacoes": importacoes,
+        "contas": contas,
+        "filtro_busca": busca,
+        "filtro_conta": conta_id,
+        "filtro_status": status,
+        "filtro_data_de": data_de_texto,
+        "filtro_data_ate": data_ate_texto,
     }
 
     return render(
@@ -1466,7 +1594,7 @@ def detalhe_importacao_ofx(
         pk=pk,
     )
 
-    movimentos = (
+    movimentos_base = (
         importacao
         .movimentos
         .select_related(
@@ -1484,10 +1612,148 @@ def detalhe_importacao_ofx(
                 "parcela__lancamento__pessoa"
             ),
         )
-        .order_by(
+    )
+
+    total_entradas = sum(
+        (
+            movimento.valor
+            for movimento
+            in movimentos_base.filter(
+                tipo="ENTRADA"
+            )
+        ),
+        Decimal("0.00"),
+    )
+
+    total_saidas = sum(
+        (
+            movimento.valor
+            for movimento
+            in movimentos_base.filter(
+                tipo="SAIDA"
+            )
+        ),
+        Decimal("0.00"),
+    )
+
+    busca = (
+        request.GET.get(
+            "q",
+            "",
+        )
+        .strip()
+    )
+
+    status = (
+        request.GET.get(
+            "status",
+            "",
+        )
+        .strip()
+    )
+
+    tipo = (
+        request.GET.get(
+            "tipo",
+            "",
+        )
+        .strip()
+    )
+
+    data_de_texto = (
+        request.GET.get(
+            "data_de",
+            "",
+        )
+        .strip()
+    )
+
+    data_ate_texto = (
+        request.GET.get(
+            "data_ate",
+            "",
+        )
+        .strip()
+    )
+
+    movimentos = movimentos_base
+
+    if busca:
+        movimentos = (
+            movimentos.filter(
+                Q(
+                    descricao__icontains=busca
+                )
+                | Q(
+                    documento__icontains=busca
+                )
+                | Q(
+                    identificador__icontains=busca
+                )
+                | Q(
+                    baixa_conciliada__parcela__lancamento__descricao__icontains=busca
+                )
+                | Q(
+                    baixa_conciliada__parcela__lancamento__numero_documento__icontains=busca
+                )
+                | Q(
+                    baixa_conciliada__parcela__lancamento__pessoa__razao_social__icontains=busca
+                )
+            )
+        )
+
+    if status in (
+        "PENDENTE",
+        "CONCILIADO",
+        "IGNORADO",
+    ):
+        movimentos = (
+            movimentos.filter(
+                status=status
+            )
+        )
+
+    if tipo in (
+        "ENTRADA",
+        "SAIDA",
+    ):
+        movimentos = (
+            movimentos.filter(
+                tipo=tipo
+            )
+        )
+
+    data_de = parse_date(
+        data_de_texto
+    )
+
+    data_ate = parse_date(
+        data_ate_texto
+    )
+
+    if data_de:
+        movimentos = (
+            movimentos.filter(
+                data__gte=data_de
+            )
+        )
+
+    if data_ate:
+        movimentos = (
+            movimentos.filter(
+                data__lte=data_ate
+            )
+        )
+
+    movimentos = (
+        movimentos.order_by(
             "data",
             "id",
         )
+    )
+
+    total_filtrados = (
+        movimentos.count()
     )
 
     movimentos_tela = (
@@ -1496,43 +1762,17 @@ def detalhe_importacao_ofx(
         )
     )
 
-    total_entradas = sum(
-        (
-            item["movimento"].valor
-            for item
-            in movimentos_tela
-            if (
-                item["movimento"].tipo
-                == "ENTRADA"
-            )
-        ),
-        Decimal("0.00"),
-    )
-
-    total_saidas = sum(
-        (
-            item["movimento"].valor
-            for item
-            in movimentos_tela
-            if (
-                item["movimento"].tipo
-                == "SAIDA"
-            )
-        ),
-        Decimal("0.00"),
-    )
-
     contexto = {
         "importacao": importacao,
-        "movimentos_tela": (
-            movimentos_tela
-        ),
-        "total_entradas": (
-            total_entradas
-        ),
-        "total_saidas": (
-            total_saidas
-        ),
+        "movimentos_tela": movimentos_tela,
+        "total_entradas": total_entradas,
+        "total_saidas": total_saidas,
+        "total_filtrados": total_filtrados,
+        "filtro_busca": busca,
+        "filtro_status": status,
+        "filtro_tipo": tipo,
+        "filtro_data_de": data_de_texto,
+        "filtro_data_ate": data_ate_texto,
     }
 
     return render(

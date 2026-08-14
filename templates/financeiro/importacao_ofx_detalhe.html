@@ -30,6 +30,10 @@ Importação OFX | VersERP
 </div>
 
 
+<!-- ==========================================
+     RESUMO DO EXTRATO
+========================================== -->
+
 <div class="dashboard-panel">
 
     <div class="panel-header">
@@ -152,6 +156,211 @@ Importação OFX | VersERP
 
 </div>
 
+
+<!-- ==========================================
+     FILTROS
+========================================== -->
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>Filtrar movimentos</h2>
+
+            <span>
+                {{ total_filtrados }}
+                resultado{{ total_filtrados|pluralize }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <form
+        method="get"
+        class="verserp-form"
+    >
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label for="id_q">
+                    Pesquisar
+                </label>
+
+                <input
+                    type="text"
+                    name="q"
+                    id="id_q"
+                    value="{{ filtro_busca }}"
+                    class="form-control"
+                    placeholder="Descrição, documento, FITID, pessoa ou lançamento"
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_status">
+                    Status
+                </label>
+
+                <select
+                    name="status"
+                    id="id_status"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todos
+                    </option>
+
+                    <option
+                        value="PENDENTE"
+                        {% if filtro_status == "PENDENTE" %}
+                            selected
+                        {% endif %}
+                    >
+                        Pendente
+                    </option>
+
+                    <option
+                        value="CONCILIADO"
+                        {% if filtro_status == "CONCILIADO" %}
+                            selected
+                        {% endif %}
+                    >
+                        Conciliado
+                    </option>
+
+                    <option
+                        value="IGNORADO"
+                        {% if filtro_status == "IGNORADO" %}
+                            selected
+                        {% endif %}
+                    >
+                        Ignorado
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_tipo">
+                    Tipo
+                </label>
+
+                <select
+                    name="tipo"
+                    id="id_tipo"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todos
+                    </option>
+
+                    <option
+                        value="ENTRADA"
+                        {% if filtro_tipo == "ENTRADA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Entrada
+                    </option>
+
+                    <option
+                        value="SAIDA"
+                        {% if filtro_tipo == "SAIDA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Saída
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_de">
+                    Data inicial
+                </label>
+
+                <input
+                    type="date"
+                    name="data_de"
+                    id="id_data_de"
+                    value="{{ filtro_data_de }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_ate">
+                    Data final
+                </label>
+
+                <input
+                    type="date"
+                    name="data_ate"
+                    id="id_data_ate"
+                    value="{{ filtro_data_ate }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <div class="form-actions">
+
+                    <a
+                        href="{% url 'financeiro:detalhe_importacao_ofx' importacao.pk %}"
+                        class="btn btn-light"
+                    >
+                        <i class="bi bi-x-lg"></i>
+                        Limpar
+                    </a>
+
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        <i class="bi bi-search"></i>
+                        Filtrar
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<!-- ==========================================
+     MOVIMENTOS
+========================================== -->
 
 <div class="dashboard-panel">
 
@@ -458,14 +667,14 @@ Importação OFX | VersERP
 
                             <div class="empty-state">
 
-                                <i class="bi bi-receipt"></i>
+                                <i class="bi bi-search"></i>
 
                                 <h3>
                                     Nenhum movimento encontrado
                                 </h3>
 
                                 <p>
-                                    Esta importação não possui movimentos.
+                                    Não existem movimentos que correspondam aos filtros informados.
                                 </p>
 
                             </div>

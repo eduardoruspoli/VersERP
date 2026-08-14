@@ -9,11 +9,15 @@ Conciliação Bancária | VersERP
 <div class="page-header">
 
     <div>
+
         <h1>Conciliação Bancária</h1>
+
         <p>
             Importe extratos OFX e confronte com os lançamentos do VersERP
         </p>
+
     </div>
+
 
     <div class="form-actions">
 
@@ -24,6 +28,7 @@ Conciliação Bancária | VersERP
             <i class="bi bi-arrow-left"></i>
             Voltar
         </a>
+
 
         {% if perms.financeiro.add_importacaoofx %}
 
@@ -42,6 +47,209 @@ Conciliação Bancária | VersERP
 </div>
 
 
+<!-- ==========================================
+     FILTROS
+========================================== -->
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>Filtros</h2>
+
+            <span>
+                Localize uma importação
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <form
+        method="get"
+        class="verserp-form"
+    >
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label for="id_q">
+                    Pesquisar
+                </label>
+
+                <input
+                    type="text"
+                    name="q"
+                    id="id_q"
+                    value="{{ filtro_busca }}"
+                    class="form-control"
+                    placeholder="Arquivo, banco, agência, conta ou empresa"
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_conta">
+                    Conta bancária
+                </label>
+
+                <select
+                    name="conta"
+                    id="id_conta"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todas
+                    </option>
+
+
+                    {% for conta in contas %}
+
+                        <option
+                            value="{{ conta.pk }}"
+                            {% if filtro_conta == conta.pk|stringformat:"s" %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ conta }} — {{ conta.empresa }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_status">
+                    Status
+                </label>
+
+                <select
+                    name="status"
+                    id="id_status"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todos
+                    </option>
+
+
+                    <option
+                        value="CONCLUIDA"
+                        {% if filtro_status == "CONCLUIDA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Concluída
+                    </option>
+
+
+                    <option
+                        value="PROCESSANDO"
+                        {% if filtro_status == "PROCESSANDO" %}
+                            selected
+                        {% endif %}
+                    >
+                        Processando
+                    </option>
+
+
+                    <option
+                        value="ERRO"
+                        {% if filtro_status == "ERRO" %}
+                            selected
+                        {% endif %}
+                    >
+                        Erro
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_de">
+                    Importado de
+                </label>
+
+                <input
+                    type="date"
+                    name="data_de"
+                    id="id_data_de"
+                    value="{{ filtro_data_de }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_ate">
+                    Importado até
+                </label>
+
+                <input
+                    type="date"
+                    name="data_ate"
+                    id="id_data_ate"
+                    value="{{ filtro_data_ate }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <div class="form-actions">
+
+                    <a
+                        href="{% url 'financeiro:conciliacao_bancaria' %}"
+                        class="btn btn-light"
+                    >
+                        <i class="bi bi-x-lg"></i>
+                        Limpar
+                    </a>
+
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        <i class="bi bi-search"></i>
+                        Filtrar
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<!-- ==========================================
+     IMPORTAÇÕES
+========================================== -->
+
 <div class="dashboard-panel">
 
     <div class="panel-header">
@@ -52,7 +260,7 @@ Conciliação Bancária | VersERP
 
             <span>
                 {{ importacoes|length }}
-                importação{{ importacoes|length|pluralize:"ões" }}
+                resultado{{ importacoes|length|pluralize }}
             </span>
 
         </div>
@@ -67,15 +275,41 @@ Conciliação Bancária | VersERP
             <thead>
 
                 <tr>
+
                     <th>Data</th>
-                    <th>Conta bancária</th>
-                    <th>Arquivo</th>
-                    <th>Período</th>
-                    <th>Movimentos</th>
-                    <th>Conciliados</th>
-                    <th>Pendentes</th>
-                    <th>Status</th>
-                    <th>Ações</th>
+
+                    <th>
+                        Conta bancária
+                    </th>
+
+                    <th>
+                        Arquivo
+                    </th>
+
+                    <th>
+                        Período
+                    </th>
+
+                    <th>
+                        Movimentos
+                    </th>
+
+                    <th>
+                        Conciliados
+                    </th>
+
+                    <th>
+                        Pendentes
+                    </th>
+
+                    <th>
+                        Status
+                    </th>
+
+                    <th>
+                        Ações
+                    </th>
+
                 </tr>
 
             </thead>
@@ -88,7 +322,9 @@ Conciliação Bancária | VersERP
                     <tr>
 
                         <td>
+
                             {{ importacao.criado_em|date:"d/m/Y H:i" }}
+
                         </td>
 
 
@@ -108,7 +344,9 @@ Conciliação Bancária | VersERP
 
 
                         <td>
+
                             {{ importacao.nome_arquivo }}
+
                         </td>
 
 
@@ -130,17 +368,23 @@ Conciliação Bancária | VersERP
 
 
                         <td>
+
                             {{ importacao.total_movimentos }}
+
                         </td>
 
 
                         <td>
+
                             {{ importacao.total_conciliados }}
+
                         </td>
 
 
                         <td>
+
                             {{ importacao.total_pendentes }}
+
                         </td>
 
 
@@ -152,11 +396,13 @@ Conciliação Bancária | VersERP
                                     {{ importacao.get_status_display }}
                                 </span>
 
+
                             {% elif importacao.status == "ERRO" %}
 
                                 <span class="status-badge status-inactive">
                                     {{ importacao.get_status_display }}
                                 </span>
+
 
                             {% else %}
 
@@ -177,6 +423,7 @@ Conciliação Bancária | VersERP
                                 title="Abrir importação"
                             >
                                 <i class="bi bi-eye"></i>
+                                Abrir
                             </a>
 
                         </td>
@@ -192,15 +439,14 @@ Conciliação Bancária | VersERP
 
                             <div class="empty-state">
 
-                                <i class="bi bi-arrow-left-right"></i>
+                                <i class="bi bi-search"></i>
 
                                 <h3>
-                                    Nenhum extrato OFX importado
+                                    Nenhuma importação encontrada
                                 </h3>
 
                                 <p>
-                                    Importe o primeiro extrato bancário
-                                    para iniciar a conciliação.
+                                    Ajuste os filtros ou importe um novo arquivo OFX.
                                 </p>
 
                             </div>
