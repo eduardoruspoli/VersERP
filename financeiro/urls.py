@@ -106,6 +106,23 @@ urlpatterns = [
 
 
     # -------------------------------------------------
+    # TRANSFERÊNCIAS BANCÁRIAS
+    # -------------------------------------------------
+
+    path(
+        "transferencias/",
+        views.transferencias_bancarias,
+        name="transferencias_bancarias",
+    ),
+
+    path(
+        "transferencias/nova/",
+        views.nova_transferencia_bancaria,
+        name="nova_transferencia_bancaria",
+    ),
+
+
+    # -------------------------------------------------
     # CONCILIAÇÃO BANCÁRIA
     # -------------------------------------------------
 
@@ -149,6 +166,16 @@ urlpatterns = [
         "conciliacao/movimentos/<int:pk>/conciliar/<int:baixa_pk>/",
         views.conciliar_movimento_ofx,
         name="conciliar_movimento_ofx",
+    ),
+
+    path(
+        (
+            "conciliacao/movimentos/"
+            "<int:pk>/conciliar-transferencia/"
+            "<int:transferencia_pk>/"
+        ),
+        views.conciliar_transferencia_movimento_ofx,
+        name="conciliar_transferencia_movimento_ofx",
     ),
 
     path(

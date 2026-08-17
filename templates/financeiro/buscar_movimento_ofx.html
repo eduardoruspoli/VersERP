@@ -11,7 +11,7 @@ Buscar Correspondência OFX | VersERP
     <div>
         <h1>Buscar Correspondência</h1>
         <p>
-            Localize uma baixa existente ou uma parcela em aberto
+            Localize uma baixa, transferência ou parcela em aberto
             para o movimento bancário.
         </p>
     </div>
@@ -106,6 +106,168 @@ Buscar Correspondência OFX | VersERP
 </div>
 
 
+<!-- =====================================================
+     TRANSFERÊNCIAS BANCÁRIAS
+===================================================== -->
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>
+                Transferências bancárias
+            </h2>
+
+            <span>
+                {{ transferencias_compativeis|length }}
+                encontrada{{ transferencias_compativeis|length|pluralize }}
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Data</th>
+                    <th>Conta de origem</th>
+                    <th>Conta de destino</th>
+                    <th>Documento</th>
+                    <th>Valor</th>
+                    <th>Ações</th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for transferencia in transferencias_compativeis %}
+
+                    <tr>
+
+                        <td>
+                            {{ transferencia.data|date:"d/m/Y" }}
+                        </td>
+
+
+                        <td>
+
+                            <strong>
+                                {{ transferencia.conta_origem }}
+                            </strong>
+
+                            <br>
+
+                            <small>
+                                {{ transferencia.conta_origem.empresa }}
+                            </small>
+
+                        </td>
+
+
+                        <td>
+
+                            <strong>
+                                {{ transferencia.conta_destino }}
+                            </strong>
+
+                            <br>
+
+                            <small>
+                                {{ transferencia.conta_destino.empresa }}
+                            </small>
+
+                        </td>
+
+
+                        <td>
+                            {{ transferencia.documento|default:"—" }}
+                        </td>
+
+
+                        <td>
+
+                            <strong>
+                                R$ {{ transferencia.valor|floatformat:"2g" }}
+                            </strong>
+
+                        </td>
+
+
+                        <td class="table-actions">
+
+                            <form
+                                method="post"
+                                action="{% url 'financeiro:conciliar_transferencia_movimento_ofx' movimento.pk transferencia.pk %}"
+                            >
+
+                                {% csrf_token %}
+
+                                <button
+                                    type="submit"
+                                    class="btn btn-primary text-white"
+                                >
+                                    <i class="bi bi-check2-circle"></i>
+                                    Conciliar
+                                </button>
+
+                            </form>
+
+                        </td>
+
+                    </tr>
+
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="6">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-arrow-left-right"></i>
+
+                                <h3>
+                                    Nenhuma transferência compatível encontrada
+                                </h3>
+
+                                <p>
+                                    Não encontramos uma transferência efetivada
+                                    com a mesma conta, data, valor e sentido
+                                    do movimento bancário.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     BAIXAS JÁ REGISTRADAS
+===================================================== -->
+
 <div class="dashboard-panel">
 
     <div class="panel-header">
@@ -181,6 +343,7 @@ Buscar Correspondência OFX | VersERP
                                 method="post"
                                 action="{% url 'financeiro:conciliar_movimento_ofx' movimento.pk baixa.pk %}"
                             >
+
                                 {% csrf_token %}
 
                                 <button
@@ -196,6 +359,7 @@ Buscar Correspondência OFX | VersERP
                         </td>
 
                     </tr>
+
 
                 {% empty %}
 
@@ -232,6 +396,10 @@ Buscar Correspondência OFX | VersERP
 
 </div>
 
+
+<!-- =====================================================
+     PARCELAS EM ABERTO
+===================================================== -->
 
 <div class="dashboard-panel">
 
@@ -308,12 +476,14 @@ Buscar Correspondência OFX | VersERP
                                 method="post"
                                 action="{% url 'financeiro:baixar_parcela_movimento_ofx' movimento.pk parcela.pk %}"
                             >
+
                                 {% csrf_token %}
 
                                 <button
                                     type="submit"
                                     class="btn btn-primary text-white"
                                 >
+
                                     <i class="bi bi-check2-circle"></i>
 
                                     {% if tipo_lancamento == "PAGAR" %}
@@ -329,6 +499,7 @@ Buscar Correspondência OFX | VersERP
                         </td>
 
                     </tr>
+
 
                 {% empty %}
 
@@ -365,6 +536,10 @@ Buscar Correspondência OFX | VersERP
 
 </div>
 
+
+<!-- =====================================================
+     CRIAR NOVO LANÇAMENTO
+===================================================== -->
 
 <div class="form-actions">
 

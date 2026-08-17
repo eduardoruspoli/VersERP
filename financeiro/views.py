@@ -22,14 +22,17 @@ from .forms import (
     ImportacaoOFXForm,
     LancamentoFinanceiroForm,
     ParcelaFormSet,
+    TransferenciaBancariaForm,
 )
 from .models import (
     BaixaFinanceira,
     ContaBancaria,
     ImportacaoOFX,
     LancamentoFinanceiro,
+    MovimentacaoBancaria,
     MovimentoOFX,
     ParcelaFinanceira,
+    TransferenciaBancaria,
 )
 from .ofx import (
     ErroOFX,
@@ -667,6 +670,28 @@ def baixa_ja_conciliada(
     return queryset.exists()
 
 
+def transferencia_ja_conciliada(
+    transferencia,
+    conta_bancaria,
+    ignorar_movimento_id=None,
+):
+    queryset = (
+        MovimentoOFX.objects
+        .filter(
+            transferencia_conciliada=transferencia,
+            conta_bancaria=conta_bancaria,
+            status="CONCILIADO",
+        )
+    )
+
+    if ignorar_movimento_id:
+        queryset = queryset.exclude(
+            pk=ignorar_movimento_id
+        )
+
+    return queryset.exists()
+
+
 def encontrar_candidatos_movimento(
     movimento,
 ):
@@ -739,6 +764,81 @@ def encontrar_candidatos_movimento(
     return candidatos
 
 
+def encontrar_transferencias_movimento(
+    movimento,
+):
+    """
+    Procura transferências efetivadas compatíveis
+    com um movimento OFX.
+
+    Critérios:
+    - mesma conta bancária
+    - mesma data
+    - mesmo valor
+    - mesmo sentido
+    - transferência ainda não conciliada
+      nesta conta
+    """
+
+    if movimento.tipo == "SAIDA":
+        transferencias = (
+            TransferenciaBancaria.objects
+            .filter(
+                conta_origem=(
+                    movimento.conta_bancaria
+                ),
+                data=movimento.data,
+                valor=movimento.valor,
+                status="EFETIVADA",
+            )
+            .select_related(
+                "conta_origem",
+                "conta_destino",
+            )
+            .order_by(
+                "id"
+            )
+        )
+
+    else:
+        transferencias = (
+            TransferenciaBancaria.objects
+            .filter(
+                conta_destino=(
+                    movimento.conta_bancaria
+                ),
+                data=movimento.data,
+                valor=movimento.valor,
+                status="EFETIVADA",
+            )
+            .select_related(
+                "conta_origem",
+                "conta_destino",
+            )
+            .order_by(
+                "id"
+            )
+        )
+
+    candidatos = []
+
+    for transferencia in transferencias:
+        if transferencia_ja_conciliada(
+            transferencia,
+            movimento.conta_bancaria,
+            ignorar_movimento_id=(
+                movimento.pk
+            ),
+        ):
+            continue
+
+        candidatos.append(
+            transferencia
+        )
+
+    return candidatos
+
+
 def preparar_movimentos_para_tela(
     movimentos,
 ):
@@ -746,6 +846,7 @@ def preparar_movimentos_para_tela(
 
     for movimento in movimentos:
         candidatos = []
+        transferencias_candidatas = []
 
         if (
             movimento.status
@@ -757,15 +858,31 @@ def preparar_movimentos_para_tela(
                 )
             )
 
+            transferencias_candidatas = (
+                encontrar_transferencias_movimento(
+                    movimento
+                )
+            )
+
+        quantidade_total = (
+            len(candidatos)
+            + len(
+                transferencias_candidatas
+            )
+        )
+
         resultado.append(
             {
                 "movimento": movimento,
                 "candidatos": candidatos,
+                "transferencias_candidatas": (
+                    transferencias_candidatas
+                ),
                 "quantidade_candidatos": (
-                    len(candidatos)
+                    quantidade_total
                 ),
                 "tem_candidato_unico": (
-                    len(candidatos) == 1
+                    quantidade_total == 1
                 ),
             }
         )
@@ -1153,29 +1270,253 @@ def detalhe_conta_bancaria(
         ativa=True,
     )
 
-    movimentacoes = (
-        BaixaFinanceira.objects
+    # =========================================================
+    # MOVIMENTAÇÕES COMPLETAS DA CONTA
+    # =========================================================
+
+    movimentacoes = list(
+        MovimentacaoBancaria.objects
         .filter(
             conta_bancaria=conta
         )
         .select_related(
-            "parcela",
-            "parcela__lancamento",
+            "baixa_financeira",
             (
-                "parcela__"
-                "lancamento__pessoa"
+                "baixa_financeira__"
+                "parcela"
             ),
+            (
+                "baixa_financeira__"
+                "parcela__lancamento"
+            ),
+            (
+                "baixa_financeira__"
+                "parcela__lancamento__pessoa"
+            ),
+            "transferencia",
+            "transferencia__conta_origem",
+            "transferencia__conta_destino",
         )
         .order_by(
-            "-data",
-            "-id",
+            "data",
+            "id",
         )
     )
 
+    # =========================================================
+    # SALDO CORRENTE DO EXTRATO INTERNO
+    # =========================================================
+
+    saldo_corrente = (
+        conta.saldo_inicial
+        or Decimal("0.00")
+    )
+
+    total_entradas_extrato = Decimal(
+        "0.00"
+    )
+
+    total_saidas_extrato = Decimal(
+        "0.00"
+    )
+
+    for movimento in movimentacoes:
+
+        if movimento.tipo == "ENTRADA":
+
+            total_entradas_extrato += (
+                movimento.valor
+            )
+
+            saldo_corrente += (
+                movimento.valor
+            )
+
+        else:
+
+            total_saidas_extrato += (
+                movimento.valor
+            )
+
+            saldo_corrente -= (
+                movimento.valor
+            )
+
+        movimento.saldo_apos = (
+            saldo_corrente
+        )
+
+        # Campos prontos para apresentação no extrato.
+        # Mantêm a regra de negócio centralizada em MovimentacaoBancaria
+        # e evitam que o template precise inferir o sentido do movimento.
+        movimento.valor_entrada = (
+            movimento.valor
+            if movimento.tipo == "ENTRADA"
+            else None
+        )
+
+        movimento.valor_saida = (
+            movimento.valor
+            if movimento.tipo == "SAIDA"
+            else None
+        )
+
+        movimento.valor_extrato = (
+            movimento.valor
+            if movimento.tipo == "ENTRADA"
+            else -movimento.valor
+        )
+
+        movimento.historico_extrato = (
+            movimento.descricao
+            or ""
+        )
+
+        movimento.documento_extrato = (
+            movimento.documento
+            or ""
+        )
+
+        movimento.origem_extrato = (
+            movimento.get_origem_display()
+        )
+
+    saldo_extrato = saldo_corrente
+
+    # =========================================================
+    # FILTROS DA TELA
+    # =========================================================
+
+    busca = (
+        request.GET.get(
+            "q",
+            "",
+        )
+        .strip()
+    )
+
+    tipo = (
+        request.GET.get(
+            "tipo",
+            "",
+        )
+        .strip()
+    )
+
+    origem = (
+        request.GET.get(
+            "origem",
+            "",
+        )
+        .strip()
+    )
+
+    data_de_texto = (
+        request.GET.get(
+            "data_de",
+            "",
+        )
+        .strip()
+    )
+
+    data_ate_texto = (
+        request.GET.get(
+            "data_ate",
+            "",
+        )
+        .strip()
+    )
+
+    data_de = parse_date(
+        data_de_texto
+    )
+
+    data_ate = parse_date(
+        data_ate_texto
+    )
+
+    movimentacoes_filtradas = []
+
+    for movimento in movimentacoes:
+
+        if (
+            busca
+            and busca.lower()
+            not in (
+                (
+                    movimento.descricao
+                    or ""
+                )
+                + " "
+                + (
+                    movimento.documento
+                    or ""
+                )
+            ).lower()
+        ):
+            continue
+
+        if (
+            tipo
+            and movimento.tipo != tipo
+        ):
+            continue
+
+        if (
+            origem
+            and movimento.origem != origem
+        ):
+            continue
+
+        if (
+            data_de
+            and movimento.data < data_de
+        ):
+            continue
+
+        if (
+            data_ate
+            and movimento.data > data_ate
+        ):
+            continue
+
+        movimentacoes_filtradas.append(
+            movimento
+        )
+
+    # Exibe mais recente primeiro,
+    # mas mantém o saldo correto de cada movimento.
+    movimentacoes_filtradas.reverse()
+
     contexto = {
         "conta": conta,
+
         "movimentacoes": (
-            movimentacoes
+            movimentacoes_filtradas
+        ),
+
+        "total_entradas_extrato": (
+            total_entradas_extrato
+        ),
+
+        "total_saidas_extrato": (
+            total_saidas_extrato
+        ),
+
+        "saldo_extrato": (
+            saldo_extrato
+        ),
+
+        "filtro_busca": busca,
+        "filtro_tipo": tipo,
+        "filtro_origem": origem,
+
+        "filtro_data_de": (
+            data_de_texto
+        ),
+
+        "filtro_data_ate": (
+            data_ate_texto
         ),
     }
 
@@ -1184,6 +1525,241 @@ def detalhe_conta_bancaria(
         (
             "financeiro/"
             "conta_bancaria_detalhe.html"
+        ),
+        contexto,
+    )
+
+# ============================================================
+# TRANSFERÊNCIAS BANCÁRIAS
+# ============================================================
+
+
+@login_required
+@permission_required(
+    "financeiro.view_transferenciabancaria",
+    raise_exception=True,
+)
+def transferencias_bancarias(request):
+    transferencias = (
+        TransferenciaBancaria.objects
+        .select_related(
+            "conta_origem",
+            "conta_origem__empresa",
+            "conta_destino",
+            "conta_destino__empresa",
+        )
+        .order_by(
+            "-data",
+            "-id",
+        )
+    )
+
+    busca = (
+        request.GET.get(
+            "q",
+            "",
+        )
+        .strip()
+    )
+
+    status = (
+        request.GET.get(
+            "status",
+            "",
+        )
+        .strip()
+    )
+
+    conta_id = (
+        request.GET.get(
+            "conta",
+            "",
+        )
+        .strip()
+    )
+
+    data_de_texto = (
+        request.GET.get(
+            "data_de",
+            "",
+        )
+        .strip()
+    )
+
+    data_ate_texto = (
+        request.GET.get(
+            "data_ate",
+            "",
+        )
+        .strip()
+    )
+
+    if busca:
+        transferencias = (
+            transferencias.filter(
+                Q(
+                    documento__icontains=busca
+                )
+                | Q(
+                    observacoes__icontains=busca
+                )
+                | Q(
+                    conta_origem__banco__icontains=busca
+                )
+                | Q(
+                    conta_origem__agencia__icontains=busca
+                )
+                | Q(
+                    conta_origem__conta__icontains=busca
+                )
+                | Q(
+                    conta_destino__banco__icontains=busca
+                )
+                | Q(
+                    conta_destino__agencia__icontains=busca
+                )
+                | Q(
+                    conta_destino__conta__icontains=busca
+                )
+            )
+        )
+
+    if status in (
+        "EFETIVADA",
+        "CANCELADA",
+    ):
+        transferencias = (
+            transferencias.filter(
+                status=status
+            )
+        )
+
+    if conta_id:
+        transferencias = (
+            transferencias.filter(
+                Q(
+                    conta_origem_id=conta_id
+                )
+                | Q(
+                    conta_destino_id=conta_id
+                )
+            )
+        )
+
+    data_de = parse_date(
+        data_de_texto
+    )
+
+    data_ate = parse_date(
+        data_ate_texto
+    )
+
+    if data_de:
+        transferencias = (
+            transferencias.filter(
+                data__gte=data_de
+            )
+        )
+
+    if data_ate:
+        transferencias = (
+            transferencias.filter(
+                data__lte=data_ate
+            )
+        )
+
+    contas = (
+        ContaBancaria.objects
+        .filter(
+            ativa=True
+        )
+        .select_related(
+            "empresa"
+        )
+        .order_by(
+            "empresa",
+            "banco",
+            "agencia",
+            "conta",
+        )
+    )
+
+    contexto = {
+        "transferencias": transferencias,
+        "contas": contas,
+        "filtro_busca": busca,
+        "filtro_status": status,
+        "filtro_conta": conta_id,
+        "filtro_data_de": data_de_texto,
+        "filtro_data_ate": data_ate_texto,
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "transferencias_bancarias.html"
+        ),
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.add_transferenciabancaria",
+    raise_exception=True,
+)
+def nova_transferencia_bancaria(request):
+    if request.method == "POST":
+        form = TransferenciaBancariaForm(
+            request.POST
+        )
+
+        if form.is_valid():
+            with transaction.atomic():
+                transferencia = form.save(
+                    commit=False
+                )
+
+                transferencia.status = (
+                    "EFETIVADA"
+                )
+
+                transferencia.save()
+
+            messages.success(
+                request,
+                (
+                    "Transferência bancária "
+                    "registrada com sucesso."
+                ),
+            )
+
+            return redirect(
+                (
+                    "financeiro:"
+                    "transferencias_bancarias"
+                )
+            )
+
+    else:
+        form = TransferenciaBancariaForm(
+            initial={
+                "data": (
+                    timezone.localdate()
+                ),
+            }
+        )
+
+    contexto = {
+        "form": form,
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "transferencia_bancaria_formulario.html"
         ),
         contexto,
     )
@@ -1611,6 +2187,15 @@ def detalhe_importacao_ofx(
                 "baixa_conciliada__"
                 "parcela__lancamento__pessoa"
             ),
+            "transferencia_conciliada",
+            (
+                "transferencia_conciliada__"
+                "conta_origem"
+            ),
+            (
+                "transferencia_conciliada__"
+                "conta_destino"
+            ),
         )
     )
 
@@ -1920,6 +2505,166 @@ def conciliar_movimento_ofx(
     "financeiro.change_movimentoofx",
     raise_exception=True,
 )
+def conciliar_transferencia_movimento_ofx(
+    request,
+    pk,
+    transferencia_pk,
+):
+    movimento = get_object_or_404(
+        MovimentoOFX.objects
+        .select_related(
+            "importacao",
+            "conta_bancaria",
+        ),
+        pk=pk,
+    )
+
+    transferencia = get_object_or_404(
+        TransferenciaBancaria.objects
+        .select_related(
+            "conta_origem",
+            "conta_destino",
+        ),
+        pk=transferencia_pk,
+        status="EFETIVADA",
+    )
+
+    if request.method != "POST":
+        return redirect(
+            (
+                "financeiro:"
+                "detalhe_importacao_ofx"
+            ),
+            pk=movimento.importacao_id,
+        )
+
+    if movimento.status != "PENDENTE":
+        messages.error(
+            request,
+            (
+                "Este movimento não está "
+                "mais pendente."
+            ),
+        )
+
+    elif (
+        transferencia.valor
+        != movimento.valor
+    ):
+        messages.error(
+            request,
+            (
+                "O valor da transferência "
+                "não corresponde ao movimento "
+                "do extrato."
+            ),
+        )
+
+    elif (
+        transferencia.data
+        != movimento.data
+    ):
+        messages.error(
+            request,
+            (
+                "A data da transferência "
+                "não corresponde ao movimento "
+                "do extrato."
+            ),
+        )
+
+    elif (
+        movimento.tipo == "SAIDA"
+        and transferencia.conta_origem_id
+        != movimento.conta_bancaria_id
+    ):
+        messages.error(
+            request,
+            (
+                "Esta transferência não "
+                "corresponde à saída desta "
+                "conta bancária."
+            ),
+        )
+
+    elif (
+        movimento.tipo == "ENTRADA"
+        and transferencia.conta_destino_id
+        != movimento.conta_bancaria_id
+    ):
+        messages.error(
+            request,
+            (
+                "Esta transferência não "
+                "corresponde à entrada desta "
+                "conta bancária."
+            ),
+        )
+
+    elif transferencia_ja_conciliada(
+        transferencia,
+        movimento.conta_bancaria,
+        ignorar_movimento_id=(
+            movimento.pk
+        ),
+    ):
+        messages.error(
+            request,
+            (
+                "Esta transferência já foi "
+                "conciliada com outro movimento "
+                "OFX desta conta."
+            ),
+        )
+
+    else:
+        with transaction.atomic():
+            movimento.baixa_conciliada = (
+                None
+            )
+
+            movimento.transferencia_conciliada = (
+                transferencia
+            )
+
+            movimento.status = (
+                "CONCILIADO"
+            )
+
+            movimento.full_clean()
+
+            movimento.save(
+                update_fields=[
+                    "baixa_conciliada",
+                    "transferencia_conciliada",
+                    "status",
+                    "atualizado_em",
+                ]
+            )
+
+        messages.success(
+            request,
+            (
+                "Transferência conciliada "
+                "com o movimento bancário "
+                "com sucesso."
+            ),
+        )
+
+    return redirect(
+        (
+            "financeiro:"
+            "detalhe_importacao_ofx"
+        ),
+        pk=movimento.importacao_id,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_movimentoofx",
+    raise_exception=True,
+)
 def ignorar_movimento_ofx(
     request,
     pk,
@@ -1941,10 +2686,15 @@ def ignorar_movimento_ofx(
             None
         )
 
+        movimento.transferencia_conciliada = (
+            None
+        )
+
         movimento.save(
             update_fields=[
                 "status",
                 "baixa_conciliada",
+                "transferencia_conciliada",
                 "atualizado_em",
             ]
         )
@@ -1992,10 +2742,15 @@ def reabrir_movimento_ofx(
             None
         )
 
+        movimento.transferencia_conciliada = (
+            None
+        )
+
         movimento.save(
             update_fields=[
                 "status",
                 "baixa_conciliada",
+                "transferencia_conciliada",
                 "atualizado_em",
             ]
         )
@@ -2177,6 +2932,12 @@ def buscar_movimento_ofx(
         ):
             break
 
+    transferencias_compativeis = (
+        encontrar_transferencias_movimento(
+            movimento
+        )
+    )
+
     contexto = {
         "movimento": movimento,
         "tipo_lancamento": (
@@ -2184,6 +2945,9 @@ def buscar_movimento_ofx(
         ),
         "baixas_compativeis": (
             baixas_compativeis
+        ),
+        "transferencias_compativeis": (
+            transferencias_compativeis
         ),
         "parcelas_compativeis": (
             parcelas_compativeis

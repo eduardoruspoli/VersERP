@@ -161,32 +161,30 @@ class ContaBancaria(models.Model):
 
     @property
     def total_entradas(self):
-        total = Decimal("0.00")
-
-        baixas = self.baixas_financeiras.select_related(
-            "parcela__lancamento"
+        return (
+            self.movimentacoes_bancarias
+            .filter(
+                tipo="ENTRADA"
+            )
+            .aggregate(
+                total=Sum("valor")
+            )["total"]
+            or Decimal("0.00")
         )
-
-        for baixa in baixas:
-            if baixa.parcela.lancamento.tipo == "RECEBER":
-                total += baixa.valor_movimento
-
-        return total
 
 
     @property
     def total_saidas(self):
-        total = Decimal("0.00")
-
-        baixas = self.baixas_financeiras.select_related(
-            "parcela__lancamento"
+        return (
+            self.movimentacoes_bancarias
+            .filter(
+                tipo="SAIDA"
+            )
+            .aggregate(
+                total=Sum("valor")
+            )["total"]
+            or Decimal("0.00")
         )
-
-        for baixa in baixas:
-            if baixa.parcela.lancamento.tipo == "PAGAR":
-                total += baixa.valor_movimento
-
-        return total
 
 
     @property
@@ -207,6 +205,150 @@ class ContaBancaria(models.Model):
             partes.append(f"Conta {self.conta}")
 
         return " - ".join(partes)
+
+
+class TransferenciaBancaria(models.Model):
+    STATUS_CHOICES = [
+        ("EFETIVADA", "Efetivada"),
+        ("CANCELADA", "Cancelada"),
+    ]
+
+    conta_origem = models.ForeignKey(
+        ContaBancaria,
+        on_delete=models.PROTECT,
+        related_name="transferencias_enviadas",
+        verbose_name="Conta de origem",
+    )
+
+    conta_destino = models.ForeignKey(
+        ContaBancaria,
+        on_delete=models.PROTECT,
+        related_name="transferencias_recebidas",
+        verbose_name="Conta de destino",
+    )
+
+    data = models.DateField(
+        "Data da transferência",
+    )
+
+    valor = models.DecimalField(
+        "Valor",
+        max_digits=15,
+        decimal_places=2,
+    )
+
+    documento = models.CharField(
+        "Documento / referência",
+        max_length=100,
+        blank=True,
+    )
+
+    observacoes = models.TextField(
+        "Observações",
+        blank=True,
+    )
+
+    status = models.CharField(
+        "Status",
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default="EFETIVADA",
+    )
+
+    criado_em = models.DateTimeField(
+        "Criado em",
+        auto_now_add=True,
+    )
+
+    atualizado_em = models.DateTimeField(
+        "Atualizado em",
+        auto_now=True,
+    )
+
+    class Meta:
+        verbose_name = "Transferência bancária"
+        verbose_name_plural = "Transferências bancárias"
+        ordering = ["-data", "-id"]
+
+    def clean(self):
+        super().clean()
+
+        errors = {}
+
+        if (
+            self.valor is not None
+            and self.valor <= Decimal("0.00")
+        ):
+            errors["valor"] = (
+                "O valor da transferência deve ser maior que zero."
+            )
+
+        if (
+            self.conta_origem_id
+            and self.conta_destino_id
+            and self.conta_origem_id == self.conta_destino_id
+        ):
+            errors["conta_destino"] = (
+                "A conta de destino deve ser diferente da conta de origem."
+            )
+
+        if (
+            self.conta_origem_id
+            and self.conta_destino_id
+            and self.conta_origem.empresa_id
+            != self.conta_destino.empresa_id
+        ):
+            errors["conta_destino"] = (
+                "Nesta etapa, transferências só podem ocorrer entre "
+                "contas bancárias da mesma empresa."
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+        if self.status == "EFETIVADA":
+            MovimentacaoBancaria.objects.update_or_create(
+                transferencia=self,
+                conta_bancaria=self.conta_origem,
+                defaults={
+                    "data": self.data,
+                    "tipo": "SAIDA",
+                    "origem": "TRANSFERENCIA",
+                    "descricao": f"Transferência para {self.conta_destino}",
+                    "documento": self.documento,
+                    "valor": self.valor,
+                },
+            )
+            MovimentacaoBancaria.objects.update_or_create(
+                transferencia=self,
+                conta_bancaria=self.conta_destino,
+                defaults={
+                    "data": self.data,
+                    "tipo": "ENTRADA",
+                    "origem": "TRANSFERENCIA",
+                    "descricao": f"Transferência recebida de {self.conta_origem}",
+                    "documento": self.documento,
+                    "valor": self.valor,
+                },
+            )
+        else:
+            self.movimentacoes_bancarias.all().delete()
+
+    @property
+    def empresa(self):
+        return self.conta_origem.empresa
+
+    def __str__(self):
+        return (
+            f"{self.data:%d/%m/%Y} - "
+            f"{self.conta_origem} → {self.conta_destino} - "
+            f"R$ {self.valor}"
+        )
+
 
 class PlanoConta(models.Model):
     TIPO_CHOICES = [
@@ -796,6 +938,22 @@ class BaixaFinanceira(models.Model):
         self.parcela.atualizar_status()
         self.parcela.lancamento.atualizar_status()
 
+        lancamento = self.parcela.lancamento
+        recebimento = lancamento.tipo == "RECEBER"
+
+        MovimentacaoBancaria.objects.update_or_create(
+            baixa_financeira=self,
+            defaults={
+                "conta_bancaria": self.conta_bancaria,
+                "data": self.data,
+                "tipo": "ENTRADA" if recebimento else "SAIDA",
+                "origem": "RECEBIMENTO" if recebimento else "PAGAMENTO",
+                "descricao": lancamento.descricao,
+                "documento": lancamento.numero_documento,
+                "valor": self.valor_movimento,
+            },
+        )
+
 
     @property
     def valor_movimento(self):
@@ -810,6 +968,190 @@ class BaixaFinanceira(models.Model):
         return (
             f"{self.parcela} - "
             f"R$ {self.valor}"
+        )
+
+
+class MovimentacaoBancaria(models.Model):
+    TIPO_CHOICES = [
+        ("ENTRADA", "Entrada"),
+        ("SAIDA", "Saída"),
+    ]
+
+    ORIGEM_CHOICES = [
+        ("PAGAMENTO", "Pagamento"),
+        ("RECEBIMENTO", "Recebimento"),
+        ("TRANSFERENCIA", "Transferência"),
+        ("AJUSTE", "Ajuste"),
+    ]
+
+    conta_bancaria = models.ForeignKey(
+        ContaBancaria,
+        on_delete=models.PROTECT,
+        related_name="movimentacoes_bancarias",
+        verbose_name="Conta bancária",
+    )
+
+    data = models.DateField("Data")
+
+    tipo = models.CharField(
+        "Tipo",
+        max_length=10,
+        choices=TIPO_CHOICES,
+    )
+
+    origem = models.CharField(
+        "Origem",
+        max_length=20,
+        choices=ORIGEM_CHOICES,
+    )
+
+    descricao = models.CharField(
+        "Descrição",
+        max_length=500,
+        blank=True,
+    )
+
+    documento = models.CharField(
+        "Documento / referência",
+        max_length=100,
+        blank=True,
+    )
+
+    valor = models.DecimalField(
+        "Valor",
+        max_digits=15,
+        decimal_places=2,
+    )
+
+    baixa_financeira = models.OneToOneField(
+        BaixaFinanceira,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="movimentacao_bancaria",
+        verbose_name="Baixa financeira",
+    )
+
+    transferencia = models.ForeignKey(
+        TransferenciaBancaria,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="movimentacoes_bancarias",
+        verbose_name="Transferência bancária",
+    )
+
+    criado_em = models.DateTimeField(
+        "Criado em",
+        auto_now_add=True,
+    )
+
+    atualizado_em = models.DateTimeField(
+        "Atualizado em",
+        auto_now=True,
+    )
+
+    class Meta:
+        verbose_name = "Movimentação bancária"
+        verbose_name_plural = "Movimentações bancárias"
+        ordering = ["-data", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["transferencia", "conta_bancaria"],
+                name="unique_movimentacao_transferencia_conta",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["conta_bancaria", "data"],
+                name="mov_banc_conta_data_idx",
+            ),
+        ]
+
+    @property
+    def valor_assinado(self):
+        if self.tipo == "SAIDA":
+            return -self.valor
+        return self.valor
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if self.valor is not None and self.valor <= Decimal("0.00"):
+            errors["valor"] = "O valor da movimentação deve ser maior que zero."
+
+        if self.baixa_financeira_id and self.transferencia_id:
+            errors["transferencia"] = (
+                "A movimentação não pode estar vinculada simultaneamente "
+                "a uma baixa e a uma transferência."
+            )
+
+        if self.baixa_financeira_id:
+            baixa = self.baixa_financeira
+            lancamento = baixa.parcela.lancamento
+
+            if (
+                self.conta_bancaria_id
+                and self.conta_bancaria_id != baixa.conta_bancaria_id
+            ):
+                errors["conta_bancaria"] = (
+                    "A conta deve ser a mesma da baixa financeira."
+                )
+
+            tipo_esperado = (
+                "ENTRADA" if lancamento.tipo == "RECEBER" else "SAIDA"
+            )
+            origem_esperada = (
+                "RECEBIMENTO" if lancamento.tipo == "RECEBER" else "PAGAMENTO"
+            )
+
+            if self.tipo != tipo_esperado:
+                errors["tipo"] = "O tipo não corresponde à baixa financeira."
+
+            if self.origem != origem_esperada:
+                errors["origem"] = "A origem não corresponde à baixa financeira."
+
+        if self.transferencia_id and self.conta_bancaria_id:
+            transferencia = self.transferencia
+
+            if transferencia.status != "EFETIVADA":
+                errors["transferencia"] = (
+                    "Não é possível movimentar uma transferência cancelada."
+                )
+            elif self.conta_bancaria_id == transferencia.conta_origem_id:
+                if self.tipo != "SAIDA":
+                    errors["tipo"] = (
+                        "A conta de origem deve registrar uma saída."
+                    )
+            elif self.conta_bancaria_id == transferencia.conta_destino_id:
+                if self.tipo != "ENTRADA":
+                    errors["tipo"] = (
+                        "A conta de destino deve registrar uma entrada."
+                    )
+            else:
+                errors["conta_bancaria"] = (
+                    "A conta não pertence à transferência."
+                )
+
+            if self.origem != "TRANSFERENCIA":
+                errors["origem"] = (
+                    "Movimentação vinculada a transferência deve ter "
+                    "origem Transferência."
+                )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        sinal = "-" if self.tipo == "SAIDA" else "+"
+        return (
+            f"{self.data:%d/%m/%Y} - {self.conta_bancaria} - "
+            f"{sinal} R$ {self.valor} - {self.descricao}"
         )
 
 class ImportacaoOFX(models.Model):
@@ -963,6 +1305,15 @@ class MovimentoOFX(models.Model):
         verbose_name="Baixa conciliada",
     )
 
+    transferencia_conciliada = models.ForeignKey(
+        TransferenciaBancaria,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimentos_ofx_conciliados",
+        verbose_name="Transferência conciliada",
+    )
+
     criado_em = models.DateTimeField(
         "Criado em",
         auto_now_add=True,
@@ -1032,6 +1383,52 @@ class MovimentoOFX(models.Model):
                 "A baixa conciliada deve pertencer "
                 "à mesma conta bancária do extrato."
             )
+
+        if (
+            self.baixa_conciliada_id
+            and self.transferencia_conciliada_id
+        ):
+            errors["transferencia_conciliada"] = (
+                "O movimento OFX não pode estar conciliado "
+                "simultaneamente com uma baixa e uma transferência."
+            )
+
+        if (
+            self.transferencia_conciliada_id
+            and self.conta_bancaria_id
+        ):
+            transferencia = self.transferencia_conciliada
+
+            if transferencia.status != "EFETIVADA":
+                errors["transferencia_conciliada"] = (
+                    "Não é possível conciliar uma transferência cancelada."
+                )
+
+            elif (
+                self.conta_bancaria_id
+                == transferencia.conta_origem_id
+            ):
+                if self.tipo != "SAIDA":
+                    errors["transferencia_conciliada"] = (
+                        "Na conta de origem, a transferência deve "
+                        "corresponder a uma saída no extrato."
+                    )
+
+            elif (
+                self.conta_bancaria_id
+                == transferencia.conta_destino_id
+            ):
+                if self.tipo != "ENTRADA":
+                    errors["transferencia_conciliada"] = (
+                        "Na conta de destino, a transferência deve "
+                        "corresponder a uma entrada no extrato."
+                    )
+
+            else:
+                errors["transferencia_conciliada"] = (
+                    "A transferência não pertence à conta bancária "
+                    "deste movimento OFX."
+                )
 
         if errors:
             raise ValidationError(errors)

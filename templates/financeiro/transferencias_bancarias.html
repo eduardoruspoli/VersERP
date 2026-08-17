@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+
+{% block title %}
+Transferências Bancárias | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+        <h1>Transferências Bancárias</h1>
+        <p>
+            Movimente valores entre contas bancárias da mesma empresa
+        </p>
+    </div>
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:index' %}"
+            class="btn btn-light"
+        >
+            <i class="bi bi-arrow-left"></i>
+            Voltar
+        </a>
+
+        {% if perms.financeiro.add_transferenciabancaria %}
+
+            <a
+                href="{% url 'financeiro:nova_transferencia_bancaria' %}"
+                class="btn btn-primary"
+            >
+                <i class="bi bi-arrow-left-right"></i>
+                Nova Transferência
+            </a>
+
+        {% endif %}
+
+    </div>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Filtros</h2>
+            <span>
+                Localize transferências bancárias
+            </span>
+        </div>
+
+    </div>
+
+    <form
+        method="get"
+        class="verserp-form"
+    >
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label for="id_q">
+                    Pesquisar
+                </label>
+
+                <input
+                    type="text"
+                    name="q"
+                    id="id_q"
+                    value="{{ filtro_busca }}"
+                    class="form-control"
+                    placeholder="Documento, observação, banco, agência ou conta"
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_conta">
+                    Conta bancária
+                </label>
+
+                <select
+                    name="conta"
+                    id="id_conta"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todas
+                    </option>
+
+                    {% for conta in contas %}
+
+                        <option
+                            value="{{ conta.pk }}"
+                            {% if filtro_conta == conta.pk|stringformat:"s" %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ conta }} — {{ conta.empresa }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_status">
+                    Status
+                </label>
+
+                <select
+                    name="status"
+                    id="id_status"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todos
+                    </option>
+
+                    <option
+                        value="EFETIVADA"
+                        {% if filtro_status == "EFETIVADA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Efetivada
+                    </option>
+
+                    <option
+                        value="CANCELADA"
+                        {% if filtro_status == "CANCELADA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Cancelada
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_de">
+                    Data inicial
+                </label>
+
+                <input
+                    type="date"
+                    name="data_de"
+                    id="id_data_de"
+                    value="{{ filtro_data_de }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_ate">
+                    Data final
+                </label>
+
+                <input
+                    type="date"
+                    name="data_ate"
+                    id="id_data_ate"
+                    value="{{ filtro_data_ate }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <div class="form-actions">
+
+                    <a
+                        href="{% url 'financeiro:transferencias_bancarias' %}"
+                        class="btn btn-light"
+                    >
+                        <i class="bi bi-x-lg"></i>
+                        Limpar
+                    </a>
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        <i class="bi bi-search"></i>
+                        Filtrar
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+            <h2>Transferências</h2>
+
+            <span>
+                {{ transferencias|length }}
+                resultado{{ transferencias|length|pluralize }}
+            </span>
+        </div>
+
+    </div>
+
+    <div class="table-responsive">
+
+        <table class="verserp-table">
+
+            <thead>
+
+                <tr>
+                    <th>Data</th>
+                    <th>Origem</th>
+                    <th>Destino</th>
+                    <th>Documento</th>
+                    <th>Valor</th>
+                    <th>Status</th>
+                </tr>
+
+            </thead>
+
+            <tbody>
+
+                {% for transferencia in transferencias %}
+
+                    <tr>
+
+                        <td>
+                            {{ transferencia.data|date:"d/m/Y" }}
+                        </td>
+
+                        <td>
+
+                            <strong>
+                                {{ transferencia.conta_origem }}
+                            </strong>
+
+                            <br>
+
+                            <small>
+                                {{ transferencia.conta_origem.empresa }}
+                            </small>
+
+                        </td>
+
+                        <td>
+
+                            <strong>
+                                {{ transferencia.conta_destino }}
+                            </strong>
+
+                            <br>
+
+                            <small>
+                                {{ transferencia.conta_destino.empresa }}
+                            </small>
+
+                        </td>
+
+                        <td>
+                            {{ transferencia.documento|default:"—" }}
+                        </td>
+
+                        <td>
+                            <strong>
+                                R$ {{ transferencia.valor|floatformat:"2g" }}
+                            </strong>
+                        </td>
+
+                        <td>
+
+                            {% if transferencia.status == "EFETIVADA" %}
+
+                                <span class="status-badge status-active">
+                                    {{ transferencia.get_status_display }}
+                                </span>
+
+                            {% else %}
+
+                                <span class="status-badge status-inactive">
+                                    {{ transferencia.get_status_display }}
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+                    </tr>
+
+                {% empty %}
+
+                    <tr>
+
+                        <td colspan="6">
+
+                            <div class="empty-state">
+
+                                <i class="bi bi-arrow-left-right"></i>
+
+                                <h3>
+                                    Nenhuma transferência encontrada
+                                </h3>
+
+                                <p>
+                                    Cadastre uma transferência entre contas bancárias.
+                                </p>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+{% endblock %}

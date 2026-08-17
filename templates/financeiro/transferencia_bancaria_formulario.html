@@ -1,0 +1,445 @@
+{% extends "base.html" %}
+
+{% block title %}
+Nova Transferência Bancária | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+
+    <div>
+
+        <h1>
+            Nova Transferência Bancária
+        </h1>
+
+        <p>
+            Transfira valores entre contas bancárias da mesma empresa
+        </p>
+
+    </div>
+
+    <a
+        href="{% url 'financeiro:transferencias_bancarias' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+
+</div>
+
+
+<form
+    method="post"
+    class="verserp-form"
+    id="form-transferencia"
+>
+
+    {% csrf_token %}
+
+
+    {% if form.non_field_errors %}
+
+        <div class="alert alert-danger">
+
+            {% for erro in form.non_field_errors %}
+
+                <div>
+                    {{ erro }}
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+    {% endif %}
+
+
+    <section class="form-section">
+
+        <div class="form-section-header">
+
+            <h2>
+                Dados da transferência
+            </h2>
+
+            <p>
+                Informe a origem, destino e valor da movimentação.
+            </p>
+
+        </div>
+
+
+        <div class="form-grid">
+
+            <!-- CONTA DE ORIGEM -->
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.conta_origem.id_for_label }}">
+                    Conta de origem
+                </label>
+
+                {{ form.conta_origem }}
+
+                {% if form.conta_origem.errors %}
+
+                    {{ form.conta_origem.errors }}
+
+                {% endif %}
+
+            </div>
+
+
+            <!-- CONTA DE DESTINO -->
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.conta_destino.id_for_label }}">
+                    Conta de destino
+                </label>
+
+                {{ form.conta_destino }}
+
+                {% if form.conta_destino.errors %}
+
+                    {{ form.conta_destino.errors }}
+
+                {% endif %}
+
+            </div>
+
+
+            <!-- DATA -->
+
+            <div class="form-group">
+
+                <label for="{{ form.data.id_for_label }}">
+                    Data
+                </label>
+
+                {{ form.data }}
+
+                {% if form.data.errors %}
+
+                    {{ form.data.errors }}
+
+                {% endif %}
+
+            </div>
+
+
+            <!-- VALOR -->
+
+            <div class="form-group">
+
+                <label for="{{ form.valor.id_for_label }}">
+                    Valor
+                </label>
+
+                {{ form.valor }}
+
+                {% if form.valor.errors %}
+
+                    {{ form.valor.errors }}
+
+                {% endif %}
+
+            </div>
+
+
+            <!-- DOCUMENTO -->
+
+            <div class="form-group form-group-wide">
+
+                <label for="{{ form.documento.id_for_label }}">
+                    Documento / referência
+                </label>
+
+                {{ form.documento }}
+
+                {% if form.documento.errors %}
+
+                    {{ form.documento.errors }}
+
+                {% endif %}
+
+            </div>
+
+
+            <!-- OBSERVAÇÕES -->
+
+            <div class="form-group form-group-full">
+
+                <label for="{{ form.observacoes.id_for_label }}">
+                    Observações
+                </label>
+
+                {{ form.observacoes }}
+
+                {% if form.observacoes.errors %}
+
+                    {{ form.observacoes.errors }}
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <div class="form-actions">
+
+        <a
+            href="{% url 'financeiro:transferencias_bancarias' %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+
+        <button
+            type="submit"
+            class="btn btn-primary"
+        >
+            <i class="bi bi-check-lg"></i>
+            Efetivar Transferência
+        </button>
+
+    </div>
+
+</form>
+
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+
+        /* ==========================================
+           MOEDA BRASILEIRA
+        ========================================== */
+
+        function valorParaNumero(valor) {
+
+            if (!valor) {
+                return null;
+            }
+
+            valor = valor
+                .toString()
+                .trim()
+                .replace("R$", "")
+                .replace(/\s/g, "");
+
+
+            if (!valor) {
+                return null;
+            }
+
+
+            /*
+             * Valor no padrão brasileiro:
+             *
+             * 1.000,00
+             * 1000,00
+             * 10,50
+             */
+
+            if (valor.includes(",")) {
+
+                valor = valor
+                    .replace(/\./g, "")
+                    .replace(",", ".");
+
+            }
+
+            /*
+             * Caso exista somente ponto:
+             *
+             * 1000.50
+             */
+
+            else {
+
+                const partes =
+                    valor.split(".");
+
+
+                if (partes.length > 2) {
+
+                    valor =
+                        partes.join("");
+
+                }
+
+            }
+
+
+            const numero =
+                Number(valor);
+
+
+            if (
+                !Number.isFinite(numero)
+            ) {
+                return null;
+            }
+
+
+            return numero;
+        }
+
+
+        function formatarNumeroBR(numero) {
+
+            return numero.toLocaleString(
+                "pt-BR",
+                {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                }
+            );
+
+        }
+
+
+        function formatarCampoMoeda(campo) {
+
+            const numero =
+                valorParaNumero(
+                    campo.value
+                );
+
+
+            if (numero === null) {
+                return;
+            }
+
+
+            campo.value =
+                formatarNumeroBR(
+                    numero
+                );
+
+        }
+
+
+        /* ==========================================
+           CAMPOS DE MOEDA
+        ========================================== */
+
+        const camposMoeda =
+            document.querySelectorAll(
+                ".campo-moeda"
+            );
+
+
+        camposMoeda.forEach(
+            function (campo) {
+
+                /*
+                 * Formata valor vindo do Django,
+                 * quando houver.
+                 */
+
+                if (campo.value) {
+
+                    formatarCampoMoeda(
+                        campo
+                    );
+
+                }
+
+
+                /*
+                 * Ao sair do campo:
+                 *
+                 * 1000
+                 * vira
+                 * 1.000,00
+                 */
+
+                campo.addEventListener(
+                    "blur",
+                    function () {
+
+                        formatarCampoMoeda(
+                            campo
+                        );
+
+                    }
+                );
+
+
+                /*
+                 * Enter também formata.
+                 */
+
+                campo.addEventListener(
+                    "keydown",
+                    function (event) {
+
+                        if (
+                            event.key !== "Enter"
+                        ) {
+                            return;
+                        }
+
+
+                        event.preventDefault();
+
+
+                        formatarCampoMoeda(
+                            campo
+                        );
+
+                    }
+                );
+
+            }
+        );
+
+
+        /* ==========================================
+           SUBMIT
+        ========================================== */
+
+        const formulario =
+            document.getElementById(
+                "form-transferencia"
+            );
+
+
+        if (formulario) {
+
+            formulario.addEventListener(
+                "submit",
+                function () {
+
+                    camposMoeda.forEach(
+                        function (campo) {
+
+                            formatarCampoMoeda(
+                                campo
+                            );
+
+                        }
+                    );
+
+                }
+            );
+
+        }
+
+    }
+);
+
+</script>
+
+{% endblock %}

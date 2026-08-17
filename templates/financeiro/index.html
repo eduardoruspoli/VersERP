@@ -58,17 +58,17 @@ Financeiro | VersERP
             <i class="bi bi-wallet2"></i>
         </div>
 
-            <div>
+        <div>
 
-                <h3>
-                    Contas a Receber
-                </h3>
+            <h3>
+                Contas a Receber
+            </h3>
 
-                <p>
-                    Recebimentos e notas emitidas
-                </p>
+            <p>
+                Recebimentos e notas emitidas
+            </p>
 
-            </div>
+        </div>
 
     </a>
 
@@ -99,6 +99,36 @@ Financeiro | VersERP
     </a>
 
 
+    <!-- TRANSFERÊNCIAS BANCÁRIAS -->
+
+    {% if perms.financeiro.view_transferenciabancaria %}
+
+        <a
+            href="{% url 'financeiro:transferencias_bancarias' %}"
+            class="dashboard-card"
+        >
+
+            <div class="dashboard-card-icon">
+                <i class="bi bi-arrow-left-right"></i>
+            </div>
+
+            <div>
+
+                <h3>
+                    Transferências Bancárias
+                </h3>
+
+                <p>
+                    Movimentações entre contas bancárias
+                </p>
+
+            </div>
+
+        </a>
+
+    {% endif %}
+
+
     <!-- CONCILIAÇÃO BANCÁRIA -->
 
     <a
@@ -107,7 +137,7 @@ Financeiro | VersERP
     >
 
         <div class="dashboard-card-icon">
-            <i class="bi bi-arrow-left-right"></i>
+            <i class="bi bi-file-earmark-arrow-up"></i>
         </div>
 
         <div>
@@ -120,7 +150,7 @@ Financeiro | VersERP
                 Importação OFX e conferência de extratos
             </p>
 
-         </div>
+        </div>
 
     </a>
 

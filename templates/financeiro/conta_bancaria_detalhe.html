@@ -28,6 +28,7 @@
 
     </div>
 
+
     <a
         href="{% url 'financeiro:contas_bancarias' %}"
         class="btn btn-light"
@@ -39,13 +40,24 @@
 </div>
 
 
+<!-- ==========================================
+     RESUMO BANCÁRIO
+========================================== -->
+
 <div class="dashboard-panel">
 
     <div class="panel-header">
 
         <div>
-            <h2>Resumo bancário</h2>
-            <span>{{ conta.empresa }}</span>
+
+            <h2>
+                Resumo bancário
+            </h2>
+
+            <span>
+                {{ conta.empresa }}
+            </span>
+
         </div>
 
     </div>
@@ -73,7 +85,7 @@
             </label>
 
             <strong>
-                R$ {{ conta.total_entradas|floatformat:"2g" }}
+                R$ {{ total_entradas_extrato|floatformat:"2g" }}
             </strong>
 
         </div>
@@ -86,7 +98,7 @@
             </label>
 
             <strong>
-                R$ {{ conta.total_saidas|floatformat:"2g" }}
+                R$ {{ total_saidas_extrato|floatformat:"2g" }}
             </strong>
 
         </div>
@@ -99,7 +111,7 @@
             </label>
 
             <strong>
-                R$ {{ conta.saldo_atual|floatformat:"2g" }}
+                R$ {{ saldo_extrato|floatformat:"2g" }}
             </strong>
 
         </div>
@@ -109,6 +121,10 @@
 </div>
 
 
+<!-- ==========================================
+     FILTROS
+========================================== -->
+
 <div class="dashboard-panel">
 
     <div class="panel-header">
@@ -116,7 +132,218 @@
         <div>
 
             <h2>
-                Movimentações
+                Filtrar extrato
+            </h2>
+
+            <span>
+                Localize movimentações desta conta
+            </span>
+
+        </div>
+
+    </div>
+
+
+    <form
+        method="get"
+        class="verserp-form"
+    >
+
+        <div class="form-grid">
+
+            <div class="form-group form-group-wide">
+
+                <label for="id_q">
+                    Pesquisar
+                </label>
+
+                <input
+                    type="text"
+                    name="q"
+                    id="id_q"
+                    value="{{ filtro_busca }}"
+                    class="form-control"
+                    placeholder="Histórico ou documento"
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_tipo">
+                    Tipo
+                </label>
+
+                <select
+                    name="tipo"
+                    id="id_tipo"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todos
+                    </option>
+
+                    <option
+                        value="ENTRADA"
+                        {% if filtro_tipo == "ENTRADA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Entrada
+                    </option>
+
+                    <option
+                        value="SAIDA"
+                        {% if filtro_tipo == "SAIDA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Saída
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_origem">
+                    Origem
+                </label>
+
+                <select
+                    name="origem"
+                    id="id_origem"
+                    class="form-select"
+                >
+
+                    <option value="">
+                        Todas
+                    </option>
+
+                    <option
+                        value="PAGAMENTO"
+                        {% if filtro_origem == "PAGAMENTO" %}
+                            selected
+                        {% endif %}
+                    >
+                        Pagamento
+                    </option>
+
+                    <option
+                        value="RECEBIMENTO"
+                        {% if filtro_origem == "RECEBIMENTO" %}
+                            selected
+                        {% endif %}
+                    >
+                        Recebimento
+                    </option>
+
+                    <option
+                        value="TRANSFERENCIA"
+                        {% if filtro_origem == "TRANSFERENCIA" %}
+                            selected
+                        {% endif %}
+                    >
+                        Transferência
+                    </option>
+
+                    <option
+                        value="AJUSTE"
+                        {% if filtro_origem == "AJUSTE" %}
+                            selected
+                        {% endif %}
+                    >
+                        Ajuste
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_de">
+                    Data inicial
+                </label>
+
+                <input
+                    type="date"
+                    name="data_de"
+                    id="id_data_de"
+                    value="{{ filtro_data_de }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group">
+
+                <label for="id_data_ate">
+                    Data final
+                </label>
+
+                <input
+                    type="date"
+                    name="data_ate"
+                    id="id_data_ate"
+                    value="{{ filtro_data_ate }}"
+                    class="form-control"
+                >
+
+            </div>
+
+
+            <div class="form-group form-group-wide">
+
+                <div class="form-actions">
+
+                    <a
+                        href="{% url 'financeiro:detalhe_conta_bancaria' conta.pk %}"
+                        class="btn btn-light"
+                    >
+                        <i class="bi bi-x-lg"></i>
+                        Limpar
+                    </a>
+
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        <i class="bi bi-search"></i>
+                        Filtrar
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+
+<!-- ==========================================
+     EXTRATO DA CONTA
+========================================== -->
+
+<div class="dashboard-panel">
+
+    <div class="panel-header">
+
+        <div>
+
+            <h2>
+                Extrato da conta
             </h2>
 
             <span>
@@ -136,15 +363,35 @@
             <thead>
 
                 <tr>
-                    <th>Data</th>
-                    <th>Histórico</th>
-                    <th>Documento</th>
-                    <th>Tipo</th>
-                    <th>Principal</th>
-                    <th>Juros</th>
-                    <th>Multa</th>
-                    <th>Desconto</th>
-                    <th>Movimento</th>
+
+                    <th>
+                        Data
+                    </th>
+
+                    <th>
+                        Histórico
+                    </th>
+
+                    <th>
+                        Documento
+                    </th>
+
+                    <th>
+                        Origem
+                    </th>
+
+                    <th>
+                        Entrada
+                    </th>
+
+                    <th>
+                        Saída
+                    </th>
+
+                    <th>
+                        Saldo
+                    </th>
+
                 </tr>
 
             </thead>
@@ -152,83 +399,193 @@
 
             <tbody>
 
-                {% for baixa in movimentacoes %}
+                {% for movimento in movimentacoes %}
 
                     <tr>
 
+                        <!-- DATA -->
+
                         <td>
-                            {{ baixa.data|date:"d/m/Y" }}
+                            {{ movimento.data|date:"d/m/Y" }}
                         </td>
 
+
+                        <!-- HISTÓRICO -->
 
                         <td>
 
                             <strong>
-                                {{ baixa.parcela.lancamento.pessoa.razao_social }}
+
+                                {% if movimento.historico_extrato %}
+
+                                    {{ movimento.historico_extrato }}
+
+                                {% else %}
+
+                                    —
+
+                                {% endif %}
+
                             </strong>
 
-                            <br>
 
-                            <small>
-                                {{ baixa.parcela.lancamento.descricao }}
-                            </small>
+                            {% if movimento.baixa_financeira %}
 
-                        </td>
+                                {% with lancamento=movimento.baixa_financeira.parcela.lancamento %}
+
+                                    {% if lancamento.pessoa %}
+
+                                        <br>
+
+                                        <small>
+                                            {{ lancamento.pessoa.razao_social }}
+                                        </small>
+
+                                    {% endif %}
+
+                                {% endwith %}
+
+                            {% endif %}
 
 
-                        <td>
+                            {% if movimento.transferencia %}
 
-                            {{ baixa.parcela.lancamento.numero_documento|default:"—" }}
+                                <br>
 
-                        </td>
+                                <small>
 
+                                    {% if movimento.tipo == "SAIDA" %}
 
-                        <td>
+                                        Para:
+                                        {{ movimento.transferencia.conta_destino }}
 
-                            {% if baixa.parcela.lancamento.tipo == "PAGAR" %}
+                                    {% else %}
 
-                                Saída
+                                        De:
+                                        {{ movimento.transferencia.conta_origem }}
 
-                            {% else %}
+                                    {% endif %}
 
-                                Entrada
+                                </small>
 
                             {% endif %}
 
                         </td>
 
 
+                        <!-- DOCUMENTO -->
+
                         <td>
-                            R$ {{ baixa.valor|floatformat:"2g" }}
+
+                            {% if movimento.documento_extrato %}
+
+                                {{ movimento.documento_extrato }}
+
+                            {% else %}
+
+                                —
+
+                            {% endif %}
+
                         </td>
 
 
+                        <!-- ORIGEM -->
+
                         <td>
-                            R$ {{ baixa.juros|floatformat:"2g" }}
+
+                            {% if movimento.origem == "PAGAMENTO" %}
+
+                                <span class="status-badge">
+                                    Pagamento
+                                </span>
+
+
+                            {% elif movimento.origem == "RECEBIMENTO" %}
+
+                                <span class="status-badge status-active">
+                                    Recebimento
+                                </span>
+
+
+                            {% elif movimento.origem == "TRANSFERENCIA" %}
+
+                                <span class="status-badge">
+                                    Transferência
+                                </span>
+
+
+                            {% elif movimento.origem == "AJUSTE" %}
+
+                                <span class="status-badge">
+                                    Ajuste
+                                </span>
+
+
+                            {% else %}
+
+                                <span class="status-badge">
+                                    {{ movimento.origem_extrato }}
+                                </span>
+
+                            {% endif %}
+
                         </td>
 
 
+                        <!-- ENTRADA -->
+
                         <td>
-                            R$ {{ baixa.multa|floatformat:"2g" }}
+
+                            {% if movimento.valor_entrada %}
+
+                                <strong>
+                                    + R$ {{ movimento.valor_entrada|floatformat:"2g" }}
+                                </strong>
+
+                            {% else %}
+
+                                —
+
+                            {% endif %}
+
                         </td>
 
 
+                        <!-- SAÍDA -->
+
                         <td>
-                            R$ {{ baixa.desconto|floatformat:"2g" }}
+
+                            {% if movimento.valor_saida %}
+
+                                <strong>
+                                    − R$ {{ movimento.valor_saida|floatformat:"2g" }}
+                                </strong>
+
+                            {% else %}
+
+                                —
+
+                            {% endif %}
+
                         </td>
 
+
+                        <!-- SALDO -->
 
                         <td>
 
                             <strong>
 
-                                {% if baixa.parcela.lancamento.tipo == "PAGAR" %}
-                                    −
-                                {% else %}
-                                    +
-                                {% endif %}
+                                {% if movimento.saldo_apos < 0 %}
 
-                                R$ {{ baixa.valor_movimento|floatformat:"2g" }}
+                                    − R$ {{ movimento.saldo_apos|stringformat:"s"|cut:"-" }}
+
+                                {% else %}
+
+                                    R$ {{ movimento.saldo_apos|floatformat:"2g" }}
+
+                                {% endif %}
 
                             </strong>
 
@@ -236,23 +593,24 @@
 
                     </tr>
 
+
                 {% empty %}
 
                     <tr>
 
-                        <td colspan="9">
+                        <td colspan="7">
 
                             <div class="empty-state">
 
                                 <i class="bi bi-receipt"></i>
 
                                 <h3>
-                                    Nenhuma movimentação registrada
+                                    Nenhuma movimentação encontrada
                                 </h3>
 
                                 <p>
-                                    As baixas financeiras realizadas
-                                    nesta conta aparecerão aqui.
+                                    Não existem movimentações bancárias
+                                    correspondentes aos filtros informados.
                                 </p>
 
                             </div>

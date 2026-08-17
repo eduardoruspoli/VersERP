@@ -8,6 +8,7 @@ from .models import (
     ContaBancaria,
     LancamentoFinanceiro,
     PlanoConta,
+    TransferenciaBancaria,
 )
 
 
@@ -590,3 +591,154 @@ class CriarLancamentoOFXForm(forms.ModelForm):
                     "codigo"
                 )
             )
+
+class TransferenciaBancariaForm(forms.ModelForm):
+
+    valor = DecimalBRField(
+        label="Valor",
+        max_digits=15,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+        widget=forms.TextInput(
+            attrs={
+                "class": (
+                    "form-control "
+                    "campo-moeda"
+                ),
+                "inputmode": "decimal",
+                "autocomplete": "off",
+            }
+        ),
+    )
+
+    class Meta:
+        model = TransferenciaBancaria
+
+        fields = [
+            "conta_origem",
+            "conta_destino",
+            "data",
+            "valor",
+            "documento",
+            "observacoes",
+        ]
+
+        widgets = {
+            "conta_origem": forms.Select(
+                attrs={
+                    "class": "form-select",
+                }
+            ),
+
+            "conta_destino": forms.Select(
+                attrs={
+                    "class": "form-select",
+                }
+            ),
+
+            "data": forms.DateInput(
+                format="%Y-%m-%d",
+                attrs={
+                    "class": "form-control",
+                    "type": "date",
+                },
+            ),
+
+            "documento": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": (
+                        "TED, PIX, DOC, referência..."
+                    ),
+                }
+            ),
+
+            "observacoes": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 4,
+                }
+            ),
+        }
+
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            *args,
+            **kwargs,
+        )
+
+        contas = (
+            ContaBancaria.objects
+            .filter(
+                ativa=True
+            )
+            .select_related(
+                "empresa"
+            )
+            .order_by(
+                "empresa",
+                "banco",
+                "agencia",
+                "conta",
+            )
+        )
+
+        self.fields[
+            "conta_origem"
+        ].queryset = contas
+
+        self.fields[
+            "conta_destino"
+        ].queryset = contas
+
+        self.fields[
+            "data"
+        ].input_formats = [
+            "%Y-%m-%d",
+        ]
+
+    def clean(self):
+        cleaned_data = super().clean()
+
+        conta_origem = cleaned_data.get(
+            "conta_origem"
+        )
+
+        conta_destino = cleaned_data.get(
+            "conta_destino"
+        )
+
+        if (
+            conta_origem
+            and conta_destino
+            and conta_origem.pk
+            == conta_destino.pk
+        ):
+            self.add_error(
+                "conta_destino",
+                (
+                    "A conta de destino deve ser "
+                    "diferente da conta de origem."
+                ),
+            )
+
+        if (
+            conta_origem
+            and conta_destino
+            and conta_origem.empresa_id
+            != conta_destino.empresa_id
+        ):
+            self.add_error(
+                "conta_destino",
+                (
+                    "Nesta etapa, a conta de destino "
+                    "deve pertencer à mesma empresa "
+                    "da conta de origem."
+                ),
+            )
+
+        return cleaned_data
