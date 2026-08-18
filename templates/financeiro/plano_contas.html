@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+
+{% block title %}
+Plano de Contas | VersERP
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Plano de Contas</h1>
+        <p>
+            Estrutura contábil e gerencial de classificação financeira
+        </p>
+    </div>
+
+    <div class="form-actions">
+        <a
+            href="{% url 'financeiro:index' %}"
+            class="btn btn-light"
+        >
+            <i class="bi bi-arrow-left"></i>
+            Voltar
+        </a>
+
+        {% if perms.financeiro.add_planoconta %}
+            <a
+                href="{% url 'financeiro:nova_plano_conta' %}"
+                class="btn btn-primary"
+            >
+                <i class="bi bi-plus-lg"></i>
+                Nova Conta
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+
+<div class="dashboard-panel">
+    <div class="panel-header">
+        <div>
+            <h2>Resumo</h2>
+            <span>Estrutura atual do plano</span>
+        </div>
+    </div>
+
+    <div class="form-grid">
+        <div class="form-group">
+            <label>Total de contas</label>
+            <strong>{{ total_contas }}</strong>
+        </div>
+
+        <div class="form-group">
+            <label>Ativas</label>
+            <strong>{{ total_ativas }}</strong>
+        </div>
+
+        <div class="form-group">
+            <label>Inativas</label>
+            <strong>{{ total_inativas }}</strong>
+        </div>
+
+        <div class="form-group">
+            <label>Analíticas</label>
+            <strong>{{ total_analiticas }}</strong>
+        </div>
+    </div>
+</div>
+
+
+<div class="dashboard-panel">
+    <div class="panel-header">
+        <div>
+            <h2>Filtros</h2>
+            <span>Localize uma conta do plano</span>
+        </div>
+    </div>
+
+    <form method="get" class="verserp-form">
+        <div class="form-grid">
+            <div class="form-group form-group-wide">
+                <label for="id_q">Pesquisar</label>
+                <input
+                    type="text"
+                    name="q"
+                    id="id_q"
+                    value="{{ filtro_busca }}"
+                    class="form-control"
+                    placeholder="Código ou nome"
+                    autocomplete="off"
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="id_tipo">Grupo contábil</label>
+                <select
+                    name="tipo"
+                    id="id_tipo"
+                    class="form-select"
+                >
+                    <option value="">Todos</option>
+                    <option value="ATIVO" {% if filtro_tipo == "ATIVO" %}selected{% endif %}>Ativo</option>
+                    <option value="PASSIVO" {% if filtro_tipo == "PASSIVO" %}selected{% endif %}>Passivo</option>
+                    <option value="PATRIMONIO_LIQUIDO" {% if filtro_tipo == "PATRIMONIO_LIQUIDO" %}selected{% endif %}>Patrimônio Líquido</option>
+                    <option value="RECEITA" {% if filtro_tipo == "RECEITA" %}selected{% endif %}>Receita</option>
+                    <option value="CUSTO" {% if filtro_tipo == "CUSTO" %}selected{% endif %}>Custo</option>
+                    <option value="DESPESA" {% if filtro_tipo == "DESPESA" %}selected{% endif %}>Despesa</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="id_status">Status</label>
+                <select
+                    name="status"
+                    id="id_status"
+                    class="form-select"
+                >
+                    <option value="">Todos</option>
+                    <option value="ATIVO" {% if filtro_status == "ATIVO" %}selected{% endif %}>Ativo</option>
+                    <option value="INATIVO" {% if filtro_status == "INATIVO" %}selected{% endif %}>Inativo</option>
+                </select>
+            </div>
+
+            <div class="form-group form-group-wide">
+                <div class="form-actions">
+                    <a
+                        href="{% url 'financeiro:plano_contas' %}"
+                        class="btn btn-light"
+                    >
+                        <i class="bi bi-x-lg"></i>
+                        Limpar
+                    </a>
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                    >
+                        <i class="bi bi-search"></i>
+                        Filtrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+
+<div class="dashboard-panel">
+    <div class="panel-header">
+        <div>
+            <h2>Contas</h2>
+            <span>
+                {{ contas|length }}
+                conta{{ contas|length|pluralize }}
+            </span>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="verserp-table">
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Conta</th>
+                    <th>Grupo</th>
+                    <th>Natureza</th>
+                    <th>Classificação</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for conta in contas %}
+                    <tr>
+                        <td>
+                            <strong>{{ conta.codigo }}</strong>
+                        </td>
+
+                        <td>
+                            <div
+                                class="plano-conta-hierarquia plano-conta-nivel-{{ conta.nivel_hierarquia }}"
+                            >
+                                <strong>{{ conta.nome }}</strong>
+
+                                {% if conta.conta_pai %}
+                                    <br>
+                                    <small>
+                                        Superior:
+                                        {{ conta.conta_pai.codigo }}
+                                        —
+                                        {{ conta.conta_pai.nome }}
+                                    </small>
+                                {% endif %}
+
+                                {% if conta.estrutural %}
+                                    <br>
+                                    <small>Conta estrutural do plano</small>
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <td>{{ conta.get_tipo_display }}</td>
+
+                        <td>
+                            {{ conta.get_natureza_display }}
+                            {% if conta.conta_redutora %}
+                                <br>
+                                <small>Conta redutora</small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if conta.aceita_lancamento %}
+                                Analítica
+                                <br>
+                                <small>Aceita lançamentos</small>
+                            {% else %}
+                                Agrupadora
+                                <br>
+                                <small>Não recebe lançamentos</small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if conta.ativo %}
+                                <span class="status-badge status-active">
+                                    Ativa
+                                </span>
+                            {% else %}
+                                <span class="status-badge status-inactive">
+                                    Inativa
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td class="table-actions">
+                            {% if perms.financeiro.change_planoconta %}
+                                <a
+                                    href="{% url 'financeiro:editar_plano_conta' conta.pk %}"
+                                    class="btn btn-light"
+                                    title="Editar conta"
+                                >
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+
+                                <form
+                                    method="post"
+                                    action="{% url 'financeiro:alternar_status_plano_conta' conta.pk %}"
+                                >
+                                    {% csrf_token %}
+
+                                    <button
+                                        type="submit"
+                                        class="btn btn-light"
+                                        title="{% if conta.ativo %}Inativar conta{% else %}Ativar conta{% endif %}"
+                                    >
+                                        {% if conta.ativo %}
+                                            <i class="bi bi-pause-circle"></i>
+                                        {% else %}
+                                            <i class="bi bi-play-circle"></i>
+                                        {% endif %}
+                                    </button>
+                                </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7">
+                            <div class="empty-state">
+                                <i class="bi bi-diagram-3"></i>
+
+                                <h3>Nenhuma conta encontrada</h3>
+
+                                <p>
+                                    O plano de contas ainda não possui
+                                    contas cadastradas.
+                                </p>
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+
+{% endblock %}

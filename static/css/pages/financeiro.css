@@ -499,3 +499,23 @@
         min-width: 820px;
     }
 }
+
+.plano-conta-nivel-1 {
+    padding-left: 22px;
+}
+
+.plano-conta-nivel-2 {
+    padding-left: 44px;
+}
+
+.plano-conta-nivel-3 {
+    padding-left: 66px;
+}
+
+.plano-conta-nivel-4 {
+    padding-left: 88px;
+}
+
+.plano-conta-nivel-5 {
+    padding-left: 110px;
+}

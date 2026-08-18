@@ -352,13 +352,39 @@ class TransferenciaBancaria(models.Model):
 
 class PlanoConta(models.Model):
     TIPO_CHOICES = [
+        ("ATIVO", "Ativo"),
+        ("PASSIVO", "Passivo"),
+        (
+            "PATRIMONIO_LIQUIDO",
+            "Patrimônio Líquido",
+        ),
         ("RECEITA", "Receita"),
+        ("CUSTO", "Custo"),
         ("DESPESA", "Despesa"),
     ]
 
+    NATUREZA_CHOICES = [
+        ("DEVEDORA", "Devedora"),
+        ("CREDORA", "Credora"),
+    ]
+
+    NATUREZA_POR_TIPO = {
+        "ATIVO": "DEVEDORA",
+        "PASSIVO": "CREDORA",
+        "PATRIMONIO_LIQUIDO": "CREDORA",
+        "RECEITA": "CREDORA",
+        "CUSTO": "DEVEDORA",
+        "DESPESA": "DEVEDORA",
+    }
+
+    TIPOS_POR_LANCAMENTO = {
+        "PAGAR": ("CUSTO", "DESPESA"),
+        "RECEBER": ("RECEITA",),
+    }
+
     codigo = models.CharField(
         "Código",
-        max_length=20,
+        max_length=30,
         unique=True,
     )
 
@@ -368,9 +394,24 @@ class PlanoConta(models.Model):
     )
 
     tipo = models.CharField(
-        "Tipo",
-        max_length=10,
+        "Grupo contábil",
+        max_length=25,
         choices=TIPO_CHOICES,
+    )
+
+    natureza = models.CharField(
+        "Natureza contábil",
+        max_length=10,
+        choices=NATUREZA_CHOICES,
+    )
+
+    conta_redutora = models.BooleanField(
+        "Conta redutora",
+        default=False,
+        help_text=(
+            "Permite natureza inversa à padrão do grupo "
+            "para contas contábeis redutoras."
+        ),
     )
 
     conta_pai = models.ForeignKey(
@@ -385,6 +426,15 @@ class PlanoConta(models.Model):
     aceita_lancamento = models.BooleanField(
         "Aceita lançamento",
         default=True,
+    )
+
+    estrutural = models.BooleanField(
+        "Conta estrutural",
+        default=False,
+        help_text=(
+            "Identifica contas-base da estrutura "
+            "contábil do VersERP."
+        ),
     )
 
     ativo = models.BooleanField(
@@ -407,8 +457,114 @@ class PlanoConta(models.Model):
         verbose_name_plural = "Plano de contas"
         ordering = ["codigo"]
 
+    def clean(self):
+        super().clean()
+
+        errors = {}
+
+        natureza_esperada = self.natureza_esperada()
+
+        if (
+            natureza_esperada
+            and self.natureza != natureza_esperada
+        ):
+            errors["natureza"] = (
+                "Para este grupo contábil, utilize "
+                f"a natureza {dict(self.NATUREZA_CHOICES)[natureza_esperada]}"
+                f"{', pois esta é uma conta redutora' if self.conta_redutora else ''}."
+            )
+
+        if self.conta_pai_id:
+            if self.conta_pai_id == self.pk:
+                errors["conta_pai"] = (
+                    "Uma conta não pode ser "
+                    "superior a ela mesma."
+                )
+
+            elif self._possui_ciclo_hierarquico():
+                errors["conta_pai"] = (
+                    "A conta superior informada cria "
+                    "um ciclo na hierarquia."
+                )
+
+            elif self.conta_pai.tipo != self.tipo:
+                errors["conta_pai"] = (
+                    "A conta superior deve pertencer "
+                    "ao mesmo grupo contábil."
+                )
+
+            elif (
+                self.ativo
+                and not self.conta_pai.ativo
+            ):
+                errors["conta_pai"] = (
+                    "Uma conta ativa não pode ficar "
+                    "abaixo de uma conta inativa."
+                )
+
+        if (
+            self.estrutural
+            and self.aceita_lancamento
+        ):
+            errors["aceita_lancamento"] = (
+                "Uma conta estrutural não deve "
+                "receber lançamentos diretamente."
+            )
+
+        if errors:
+            raise ValidationError(
+                errors
+            )
+
+    def _possui_ciclo_hierarquico(self):
+        conta_atual = self.conta_pai
+        visitadas = set()
+
+        while conta_atual is not None:
+            if conta_atual.pk == self.pk:
+                return True
+
+            if conta_atual.pk in visitadas:
+                return True
+
+            visitadas.add(conta_atual.pk)
+            conta_atual = conta_atual.conta_pai
+
+        return False
+
+    @classmethod
+    def tipos_para_lancamento(cls, tipo_lancamento):
+        return cls.TIPOS_POR_LANCAMENTO.get(
+            tipo_lancamento,
+            (),
+        )
+
+    def natureza_esperada(self):
+        natureza = self.NATUREZA_POR_TIPO.get(
+            self.tipo
+        )
+
+        if not natureza or not self.conta_redutora:
+            return natureza
+
+        return (
+            "CREDORA"
+            if natureza == "DEVEDORA"
+            else "DEVEDORA"
+        )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(
+            *args,
+            **kwargs,
+        )
+
     def __str__(self):
-        return f"{self.codigo} - {self.nome}"
+        return (
+            f"{self.codigo} - "
+            f"{self.nome}"
+        )
 
 
 class CentroCusto(models.Model):
@@ -583,18 +739,25 @@ class LancamentoFinanceiro(models.Model):
 
             elif (
                 self.tipo == "PAGAR"
-                and self.plano_conta.tipo != "DESPESA"
+                and self.plano_conta.tipo
+                not in (
+                    "CUSTO",
+                    "DESPESA",
+                )
             ):
                 errors["plano_conta"] = (
-                    "Uma conta a pagar deve utilizar uma conta de despesa."
+                    "Uma conta a pagar deve utilizar "
+                    "uma conta de custo ou despesa."
                 )
 
             elif (
                 self.tipo == "RECEBER"
-                and self.plano_conta.tipo != "RECEITA"
+                and self.plano_conta.tipo
+                != "RECEITA"
             ):
                 errors["plano_conta"] = (
-                    "Uma conta a receber deve utilizar uma conta de receita."
+                    "Uma conta a receber deve utilizar "
+                    "uma conta de receita."
                 )
 
         if errors:

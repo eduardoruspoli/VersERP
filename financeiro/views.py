@@ -22,6 +22,7 @@ from .forms import (
     ImportacaoOFXForm,
     LancamentoFinanceiroForm,
     ParcelaFormSet,
+    PlanoContaForm,
     TransferenciaBancariaForm,
 )
 from .models import (
@@ -32,6 +33,7 @@ from .models import (
     MovimentacaoBancaria,
     MovimentoOFX,
     ParcelaFinanceira,
+    PlanoConta,
     TransferenciaBancaria,
 )
 from .ofx import (
@@ -199,6 +201,7 @@ def formulario_edicao_lancamento(
 
     return LancamentoFinanceiroForm(
         instance=lancamento,
+        tipo=lancamento.tipo,
         initial={
             "condicao_pagamento": (
                 "AVISTA"
@@ -250,7 +253,8 @@ def criar_lancamento_financeiro(
 ):
     if request.method == "POST":
         form = LancamentoFinanceiroForm(
-            request.POST
+            request.POST,
+            tipo=tipo,
         )
 
         parcela_formset = (
@@ -366,7 +370,9 @@ def criar_lancamento_financeiro(
 
     else:
         form = (
-            LancamentoFinanceiroForm()
+            LancamentoFinanceiroForm(
+                tipo=tipo
+            )
         )
 
         parcela_formset = (
@@ -420,6 +426,7 @@ def editar_lancamento_financeiro(
             LancamentoFinanceiroForm(
                 request.POST,
                 instance=lancamento,
+                tipo=tipo,
             )
         )
 
@@ -972,6 +979,392 @@ def financeiro_index(request):
     return render(
         request,
         "financeiro/index.html",
+    )
+
+
+# ============================================================
+# PLANO DE CONTAS
+# ============================================================
+
+
+def ordenar_plano_contas_hierarquia(
+    contas,
+):
+    por_pai = {}
+
+    for conta in contas:
+        por_pai.setdefault(
+            conta.conta_pai_id,
+            [],
+        ).append(
+            conta
+        )
+
+    resultado = []
+    visitados = set()
+
+    def adicionar(
+        conta,
+        nivel,
+    ):
+        if conta.pk in visitados:
+            return
+
+        visitados.add(
+            conta.pk
+        )
+
+        conta.nivel_hierarquia = nivel
+        conta.recuo_hierarquia = (
+            nivel * 22
+        )
+
+        resultado.append(
+            conta
+        )
+
+        for filha in por_pai.get(
+            conta.pk,
+            [],
+        ):
+            adicionar(
+                filha,
+                nivel + 1,
+            )
+
+    for conta in por_pai.get(
+        None,
+        [],
+    ):
+        adicionar(
+            conta,
+            0,
+        )
+
+    # Proteção para dados antigos/orfãos ou ciclos preexistentes.
+    for conta in contas:
+        if conta.pk not in visitados:
+            adicionar(
+                conta,
+                0,
+            )
+
+    return resultado
+
+
+@login_required
+@permission_required(
+    "financeiro.view_planoconta",
+    raise_exception=True,
+)
+def plano_contas(request):
+    contas = list(
+        PlanoConta.objects
+        .select_related(
+            "conta_pai"
+        )
+        .order_by(
+            "codigo"
+        )
+    )
+
+    busca = (
+        request.GET.get(
+            "q",
+            "",
+        )
+        .strip()
+    )
+
+    tipo = (
+        request.GET.get(
+            "tipo",
+            "",
+        )
+        .strip()
+    )
+
+    status = (
+        request.GET.get(
+            "status",
+            "",
+        )
+        .strip()
+    )
+
+    contas_filtradas = []
+
+    for conta in contas:
+        if (
+            busca
+            and busca.lower()
+            not in (
+                f"{conta.codigo} "
+                f"{conta.nome}"
+            ).lower()
+        ):
+            continue
+
+        if (
+            tipo in dict(
+                PlanoConta.TIPO_CHOICES
+            )
+            and conta.tipo != tipo
+        ):
+            continue
+
+        if (
+            status == "ATIVO"
+            and not conta.ativo
+        ):
+            continue
+
+        if (
+            status == "INATIVO"
+            and conta.ativo
+        ):
+            continue
+
+        contas_filtradas.append(
+            conta
+        )
+
+    contas_hierarquia = (
+        ordenar_plano_contas_hierarquia(
+            contas_filtradas
+        )
+    )
+
+    total_ativas = sum(
+        1
+        for conta in contas
+        if conta.ativo
+    )
+
+    total_inativas = (
+        len(contas)
+        - total_ativas
+    )
+
+    total_analiticas = sum(
+        1
+        for conta in contas
+        if conta.aceita_lancamento
+    )
+
+    contexto = {
+        "contas": contas_hierarquia,
+        "total_contas": len(contas),
+        "total_ativas": total_ativas,
+        "total_inativas": total_inativas,
+        "total_analiticas": (
+            total_analiticas
+        ),
+        "filtro_busca": busca,
+        "filtro_tipo": tipo,
+        "filtro_status": status,
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "plano_contas.html"
+        ),
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.add_planoconta",
+    raise_exception=True,
+)
+def nova_plano_conta(request):
+    if request.method == "POST":
+        form = PlanoContaForm(
+            request.POST
+        )
+
+        if form.is_valid():
+            conta = form.save()
+
+            messages.success(
+                request,
+                (
+                    f"Conta {conta.codigo} - "
+                    f"{conta.nome} cadastrada "
+                    "com sucesso."
+                ),
+            )
+
+            return redirect(
+                "financeiro:plano_contas"
+            )
+
+    else:
+        form = PlanoContaForm()
+
+    contexto = {
+        "form": form,
+        "modo_edicao": False,
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "plano_conta_formulario.html"
+        ),
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_planoconta",
+    raise_exception=True,
+)
+def editar_plano_conta(
+    request,
+    pk,
+):
+    conta = get_object_or_404(
+        PlanoConta,
+        pk=pk,
+    )
+
+    if request.method == "POST":
+        form = PlanoContaForm(
+            request.POST,
+            instance=conta,
+        )
+
+        if form.is_valid():
+            conta = form.save()
+
+            messages.success(
+                request,
+                (
+                    f"Conta {conta.codigo} - "
+                    f"{conta.nome} atualizada "
+                    "com sucesso."
+                ),
+            )
+
+            return redirect(
+                "financeiro:plano_contas"
+            )
+
+    else:
+        form = PlanoContaForm(
+            instance=conta
+        )
+
+    contexto = {
+        "form": form,
+        "conta": conta,
+        "modo_edicao": True,
+    }
+
+    return render(
+        request,
+        (
+            "financeiro/"
+            "plano_conta_formulario.html"
+        ),
+        contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_planoconta",
+    raise_exception=True,
+)
+def alternar_status_plano_conta(
+    request,
+    pk,
+):
+    conta = get_object_or_404(
+        PlanoConta,
+        pk=pk,
+    )
+
+    if request.method != "POST":
+        return redirect(
+            "financeiro:plano_contas"
+        )
+
+    if conta.ativo:
+        possui_subcontas_ativas = (
+            conta.subcontas
+            .filter(
+                ativo=True
+            )
+            .exists()
+        )
+
+        if possui_subcontas_ativas:
+            messages.error(
+                request,
+                (
+                    "Não é possível inativar esta "
+                    "conta enquanto existirem "
+                    "subcontas ativas."
+                ),
+            )
+
+            return redirect(
+                "financeiro:plano_contas"
+            )
+
+        conta.ativo = False
+
+        mensagem = (
+            f"Conta {conta.codigo} inativada "
+            "com sucesso."
+        )
+
+    else:
+        if (
+            conta.conta_pai_id
+            and not conta.conta_pai.ativo
+        ):
+            messages.error(
+                request,
+                (
+                    "Ative primeiro a conta "
+                    "superior antes de reativar "
+                    "esta conta."
+                ),
+            )
+
+            return redirect(
+                "financeiro:plano_contas"
+            )
+
+        conta.ativo = True
+
+        mensagem = (
+            f"Conta {conta.codigo} ativada "
+            "com sucesso."
+        )
+
+    conta.save(
+        update_fields=[
+            "ativo",
+            "atualizado_em",
+        ]
+    )
+
+    messages.success(
+        request,
+        mensagem,
+    )
+
+    return redirect(
+        "financeiro:plano_contas"
     )
 
 

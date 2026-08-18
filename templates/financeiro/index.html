@@ -157,29 +157,32 @@ Financeiro | VersERP
 
     <!-- PLANO DE CONTAS -->
 
-    <div class="dashboard-card dashboard-card-disabled">
+    {% if perms.financeiro.view_planoconta %}
 
-        <div class="dashboard-card-icon">
-            <i class="bi bi-diagram-3"></i>
-        </div>
+        <a
+            href="{% url 'financeiro:plano_contas' %}"
+            class="dashboard-card"
+        >
 
-        <div>
+            <div class="dashboard-card-icon">
+                <i class="bi bi-diagram-3"></i>
+            </div>
 
-            <h3>
-                Plano de Contas
-            </h3>
+            <div>
 
-            <p>
-                Classificação de receitas e despesas
-            </p>
+                <h3>
+                    Plano de Contas
+                </h3>
 
-            <small>
-                Em desenvolvimento
-            </small>
+                <p>
+                    Classificação de receitas e despesas
+                </p>
 
-        </div>
+            </div>
 
-    </div>
+        </a>
+
+    {% endif %}
 
 
     <!-- CENTROS DE CUSTO -->

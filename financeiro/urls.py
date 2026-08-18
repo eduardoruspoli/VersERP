@@ -19,6 +19,35 @@ urlpatterns = [
 
 
     # -------------------------------------------------
+    # PLANO DE CONTAS
+    # -------------------------------------------------
+
+    path(
+        "plano-de-contas/",
+        views.plano_contas,
+        name="plano_contas",
+    ),
+
+    path(
+        "plano-de-contas/nova/",
+        views.nova_plano_conta,
+        name="nova_plano_conta",
+    ),
+
+    path(
+        "plano-de-contas/<int:pk>/editar/",
+        views.editar_plano_conta,
+        name="editar_plano_conta",
+    ),
+
+    path(
+        "plano-de-contas/<int:pk>/alternar-status/",
+        views.alternar_status_plano_conta,
+        name="alternar_status_plano_conta",
+    ),
+
+
+    # -------------------------------------------------
     # CONTAS A PAGAR
     # -------------------------------------------------
 

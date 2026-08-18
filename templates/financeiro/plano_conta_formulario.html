@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block title %}
+{% if modo_edicao %}
+Editar Conta | Plano de Contas | VersERP
+{% else %}
+Nova Conta | Plano de Contas | VersERP
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        {% if modo_edicao %}
+            <h1>Editar Conta</h1>
+            <p>Atualize a classificação contábil da conta</p>
+        {% else %}
+            <h1>Nova Conta</h1>
+            <p>Cadastre uma nova conta na estrutura contábil</p>
+        {% endif %}
+    </div>
+
+    <a
+        href="{% url 'financeiro:plano_contas' %}"
+        class="btn btn-light"
+    >
+        <i class="bi bi-arrow-left"></i>
+        Voltar
+    </a>
+</div>
+
+
+<form method="post" class="verserp-form">
+    {% csrf_token %}
+
+    {% if form.errors %}
+        <div class="alert alert-danger">
+            <strong>Verifique os campos abaixo.</strong>
+            {{ form.non_field_errors }}
+        </div>
+    {% endif %}
+
+
+    <section class="form-section">
+        <div class="form-section-header">
+            <div>
+                <h2>Identificação contábil</h2>
+                <p>
+                    Defina a posição da conta dentro do plano
+                </p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="{{ form.codigo.id_for_label }}">
+                    {{ form.codigo.label }}
+                </label>
+                {{ form.codigo }}
+                {{ form.codigo.errors }}
+                <small>
+                    O código representa a posição hierárquica da conta.
+                </small>
+            </div>
+
+            <div class="form-group form-group-wide">
+                <label for="{{ form.nome.id_for_label }}">
+                    {{ form.nome.label }}
+                </label>
+                {{ form.nome }}
+                {{ form.nome.errors }}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.tipo.id_for_label }}">
+                    {{ form.tipo.label }}
+                </label>
+                {{ form.tipo }}
+                {{ form.tipo.errors }}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.natureza.id_for_label }}">
+                    {{ form.natureza.label }}
+                </label>
+                {{ form.natureza }}
+                {{ form.natureza.errors }}
+            </div>
+
+            <div class="form-group form-group-wide">
+                <label for="{{ form.conta_redutora.id_for_label }}">
+                    {{ form.conta_redutora }}
+                    Conta redutora
+                </label>
+                {{ form.conta_redutora.errors }}
+                <small>
+                    Use somente quando a conta possuir natureza inversa
+                    à natureza padrão do grupo contábil.
+                </small>
+            </div>
+
+            <div class="form-group form-group-wide">
+                <label for="{{ form.conta_pai.id_for_label }}">
+                    {{ form.conta_pai.label }}
+                </label>
+                {{ form.conta_pai }}
+                {{ form.conta_pai.errors }}
+                <small>
+                    A conta superior deve pertencer ao mesmo grupo contábil.
+                </small>
+            </div>
+        </div>
+    </section>
+
+
+    <section class="form-section">
+        <div class="form-section-header">
+            <div>
+                <h2>Comportamento</h2>
+                <p>
+                    Defina como a conta será utilizada pelo VersERP
+                </p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group form-group-wide">
+                <label for="{{ form.aceita_lancamento.id_for_label }}">
+                    {{ form.aceita_lancamento }}
+                    Aceita lançamento
+                </label>
+                {{ form.aceita_lancamento.errors }}
+                <small>
+                    Marque somente para contas analíticas.
+                </small>
+            </div>
+
+            <div class="form-group form-group-wide">
+                <label for="{{ form.estrutural.id_for_label }}">
+                    {{ form.estrutural }}
+                    Conta estrutural
+                </label>
+                {{ form.estrutural.errors }}
+                <small>
+                    Use para grupos e contas-base da estrutura contábil.
+                </small>
+            </div>
+
+            <div class="form-group form-group-wide">
+                <label for="{{ form.ativo.id_for_label }}">
+                    {{ form.ativo }}
+                    Conta ativa
+                </label>
+                {{ form.ativo.errors }}
+            </div>
+        </div>
+    </section>
+
+
+    <div class="form-actions">
+        <a
+            href="{% url 'financeiro:plano_contas' %}"
+            class="btn btn-light"
+        >
+            Cancelar
+        </a>
+
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg"></i>
+            {% if modo_edicao %}
+                Salvar Alterações
+            {% else %}
+                Salvar Conta
+            {% endif %}
+        </button>
+    </div>
+</form>
+
+
+<script>
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+        const tipo = document.getElementById("id_tipo");
+        const natureza = document.getElementById("id_natureza");
+        const contaRedutora = document.getElementById("id_conta_redutora");
+        const contaPai = document.getElementById("id_conta_pai");
+        const estrutural = document.getElementById("id_estrutural");
+        const aceita = document.getElementById("id_aceita_lancamento");
+
+        const naturezas = {
+            ATIVO: "DEVEDORA",
+            PASSIVO: "CREDORA",
+            PATRIMONIO_LIQUIDO: "CREDORA",
+            RECEITA: "CREDORA",
+            CUSTO: "DEVEDORA",
+            DESPESA: "DEVEDORA"
+        };
+
+        function aplicarNatureza() {
+            if (
+                tipo
+                && natureza
+                && naturezas[tipo.value]
+            ) {
+                const naturezaPadrao = naturezas[tipo.value];
+
+                natureza.value = contaRedutora && contaRedutora.checked
+                    ? (naturezaPadrao === "DEVEDORA" ? "CREDORA" : "DEVEDORA")
+                    : naturezaPadrao;
+            }
+        }
+
+        if (tipo) {
+            tipo.addEventListener(
+                "change",
+                function () {
+                    aplicarNatureza();
+
+                    if (contaPai) {
+                        contaPai.value = "";
+                    }
+                }
+            );
+        }
+
+        if (contaRedutora) {
+            contaRedutora.addEventListener(
+                "change",
+                aplicarNatureza
+            );
+        }
+
+        if (estrutural && aceita) {
+            estrutural.addEventListener(
+                "change",
+                function () {
+                    if (estrutural.checked) {
+                        aceita.checked = false;
+                    }
+                }
+            );
+        }
+
+        aplicarNatureza();
+    }
+);
+</script>
+
+{% endblock %}

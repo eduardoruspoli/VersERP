@@ -70,6 +70,8 @@ class PlanoContaAdmin(admin.ModelAdmin):
         "codigo",
         "nome",
         "tipo",
+        "natureza",
+        "conta_redutora",
         "conta_pai",
         "aceita_lancamento",
         "ativo",
@@ -77,6 +79,8 @@ class PlanoContaAdmin(admin.ModelAdmin):
 
     list_filter = (
         "tipo",
+        "natureza",
+        "conta_redutora",
         "aceita_lancamento",
         "ativo",
     )

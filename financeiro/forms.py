@@ -46,6 +46,147 @@ class DecimalBRField(forms.DecimalField):
         return super().to_python(value)
 
 
+class PlanoContaForm(forms.ModelForm):
+
+    class Meta:
+        model = PlanoConta
+
+        fields = [
+            "codigo",
+            "nome",
+            "tipo",
+            "natureza",
+            "conta_redutora",
+            "conta_pai",
+            "aceita_lancamento",
+            "estrutural",
+            "ativo",
+        ]
+
+        widgets = {
+            "codigo": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "Ex.: 6.01.04",
+                    "autocomplete": "off",
+                }
+            ),
+            "nome": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "Nome da conta",
+                    "autocomplete": "off",
+                }
+            ),
+            "tipo": forms.Select(
+                attrs={"class": "form-select"}
+            ),
+            "natureza": forms.Select(
+                attrs={"class": "form-select"}
+            ),
+            "conta_redutora": forms.CheckboxInput(
+                attrs={"class": "form-check-input"}
+            ),
+            "conta_pai": forms.Select(
+                attrs={"class": "form-select"}
+            ),
+            "aceita_lancamento": forms.CheckboxInput(
+                attrs={"class": "form-check-input"}
+            ),
+            "estrutural": forms.CheckboxInput(
+                attrs={"class": "form-check-input"}
+            ),
+            "ativo": forms.CheckboxInput(
+                attrs={"class": "form-check-input"}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        tipo = None
+
+        if self.is_bound:
+            tipo = self.data.get("tipo") or None
+        elif self.instance and self.instance.pk:
+            tipo = self.instance.tipo
+
+        queryset = PlanoConta.objects.all().order_by("codigo")
+
+        if tipo:
+            queryset = queryset.filter(tipo=tipo)
+
+        if self.instance and self.instance.pk:
+            ids_bloqueados = {self.instance.pk}
+            pendentes = [self.instance.pk]
+
+            while pendentes:
+                filhos = list(
+                    PlanoConta.objects.filter(
+                        conta_pai_id__in=pendentes
+                    ).values_list("pk", flat=True)
+                )
+                novos = [
+                    pk for pk in filhos
+                    if pk not in ids_bloqueados
+                ]
+                ids_bloqueados.update(novos)
+                pendentes = novos
+
+            queryset = queryset.exclude(
+                pk__in=ids_bloqueados
+            )
+
+        self.fields["conta_pai"].queryset = queryset
+        self.fields["conta_pai"].empty_label = (
+            "Nenhuma — conta de nível superior"
+        )
+
+    def clean_codigo(self):
+        return self.cleaned_data["codigo"].strip()
+
+    def clean_nome(self):
+        return self.cleaned_data["nome"].strip()
+
+    def clean(self):
+        cleaned_data = super().clean()
+
+        tipo = cleaned_data.get("tipo")
+        conta_pai = cleaned_data.get("conta_pai")
+        aceita_lancamento = cleaned_data.get(
+            "aceita_lancamento"
+        )
+        estrutural = cleaned_data.get("estrutural")
+        ativo = cleaned_data.get("ativo")
+
+        if conta_pai and tipo and conta_pai.tipo != tipo:
+            self.add_error(
+                "conta_pai",
+                "A conta superior deve pertencer "
+                "ao mesmo grupo contábil.",
+            )
+
+        if (
+            conta_pai
+            and ativo
+            and not conta_pai.ativo
+        ):
+            self.add_error(
+                "conta_pai",
+                "Uma conta ativa não pode ficar "
+                "abaixo de uma conta inativa.",
+            )
+
+        if estrutural and aceita_lancamento:
+            self.add_error(
+                "aceita_lancamento",
+                "Uma conta estrutural não deve "
+                "receber lançamentos diretamente.",
+            )
+
+        return cleaned_data
+
+
 class LancamentoFinanceiroForm(forms.ModelForm):
 
     condicao_pagamento = forms.ChoiceField(
@@ -184,6 +325,7 @@ class LancamentoFinanceiroForm(forms.ModelForm):
     def __init__(
         self,
         *args,
+        tipo=None,
         **kwargs,
     ):
         super().__init__(
@@ -202,6 +344,31 @@ class LancamentoFinanceiroForm(forms.ModelForm):
         ].input_formats = [
             "%Y-%m-%d",
         ]
+
+        tipo_lancamento = (
+            tipo
+            or getattr(
+                self.instance,
+                "tipo",
+                None,
+            )
+        )
+
+        self.fields[
+            "plano_conta"
+        ].queryset = (
+            PlanoConta.objects
+            .filter(
+                tipo__in=PlanoConta.tipos_para_lancamento(
+                    tipo_lancamento
+                ),
+                ativo=True,
+                aceita_lancamento=True,
+            )
+            .order_by(
+                "codigo"
+            )
+        )
 
 
 class ParcelaForm(forms.Form):
@@ -568,14 +735,10 @@ class CriarLancamentoOFXForm(forms.ModelForm):
                 "pessoa"
             ].label = "Fornecedor"
 
-            tipo_plano = "DESPESA"
-
         else:
             self.fields[
                 "pessoa"
             ].label = "Cliente"
-
-            tipo_plano = "RECEITA"
 
         if tipo is not None:
             self.fields[
@@ -583,7 +746,9 @@ class CriarLancamentoOFXForm(forms.ModelForm):
             ].queryset = (
                 PlanoConta.objects
                 .filter(
-                    tipo=tipo_plano,
+                    tipo__in=PlanoConta.tipos_para_lancamento(
+                        tipo
+                    ),
                     ativo=True,
                     aceita_lancamento=True,
                 )
