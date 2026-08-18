@@ -46,39 +46,8 @@ from .ofx import (
 
 
 def preparar_formset_parcelas(request):
-    quantidade = request.POST.get(
-        "quantidade_parcelas",
-        "1",
-    )
-
-    try:
-        quantidade = int(quantidade)
-    except (TypeError, ValueError):
-        quantidade = 1
-
-    if quantidade < 1:
-        quantidade = 1
-
-    dados_formset = request.POST.copy()
-
-    dados_formset[
-        "parcelas-TOTAL_FORMS"
-    ] = str(quantidade)
-
-    dados_formset[
-        "parcelas-INITIAL_FORMS"
-    ] = "0"
-
-    dados_formset[
-        "parcelas-MIN_NUM_FORMS"
-    ] = "0"
-
-    dados_formset[
-        "parcelas-MAX_NUM_FORMS"
-    ] = "1000"
-
     return ParcelaFormSet(
-        dados_formset,
+        request.POST,
         prefix="parcelas",
     )
 
@@ -86,13 +55,46 @@ def preparar_formset_parcelas(request):
 def total_formset_parcelas(
     parcela_formset,
 ):
-    return sum(
-        (
-            parcela.cleaned_data["valor"]
-            for parcela in parcela_formset
-        ),
-        Decimal("0.00"),
-    )
+    total = Decimal("0.00")
+
+    for parcela_form in parcela_formset:
+        dados = parcela_form.cleaned_data
+
+        valor = dados.get(
+            "valor"
+        )
+
+        if valor is None:
+            continue
+
+        total += valor
+
+    return total
+
+
+def formset_parcelas_completo(
+    parcela_formset,
+    quantidade_esperada,
+):
+    if len(parcela_formset.forms) != quantidade_esperada:
+        return False
+
+    for parcela_form in parcela_formset:
+        dados = parcela_form.cleaned_data
+
+        if not dados:
+            return False
+
+        if dados.get("numero") is None:
+            return False
+
+        if dados.get("vencimento") is None:
+            return False
+
+        if dados.get("valor") is None:
+            return False
+
+    return True
 
 
 def queryset_lancamentos(tipo):
@@ -222,28 +224,20 @@ def salvar_novas_parcelas(
     parcelas = []
 
     for parcela_form in parcela_formset:
-        dados = (
-            parcela_form.cleaned_data
-        )
+        dados = parcela_form.cleaned_data
 
         parcelas.append(
             ParcelaFinanceira(
                 lancamento=lancamento,
                 numero=dados["numero"],
-                vencimento=dados[
-                    "vencimento"
-                ],
+                vencimento=dados["vencimento"],
                 valor=dados["valor"],
                 status="ABERTA",
             )
         )
 
-    (
-        ParcelaFinanceira
-        .objects
-        .bulk_create(
-            parcelas
-        )
+    ParcelaFinanceira.objects.bulk_create(
+        parcelas
     )
 
 
@@ -273,65 +267,102 @@ def criar_lancamento_financeiro(
             parcela_formset.is_valid()
         )
 
+        quantidade_esperada = 1
+
+        if form_valido:
+            quantidade_esperada = (
+                form.cleaned_data[
+                    "quantidade_parcelas"
+                ]
+            )
+
+            if (
+                form.cleaned_data[
+                    "condicao_pagamento"
+                ]
+                == "AVISTA"
+            ):
+                quantidade_esperada = 1
+
+        parcelas_completas = False
+
+        if parcelas_validas:
+            parcelas_completas = (
+                formset_parcelas_completo(
+                    parcela_formset,
+                    quantidade_esperada,
+                )
+            )
+
         if (
             form_valido
             and parcelas_validas
         ):
-            valor_total = (
-                form.cleaned_data[
-                    "valor_total"
-                ]
-            )
-
-            total_parcelas = (
-                total_formset_parcelas(
-                    parcela_formset
-                )
-            )
-
-            if (
-                total_parcelas
-                != valor_total
-            ):
+            if not parcelas_completas:
                 form.add_error(
                     None,
                     (
-                        "A soma das parcelas "
-                        "deve ser igual ao valor "
-                        "total do lançamento."
+                        "Gere e confira todas as parcelas "
+                        "antes de salvar o lançamento."
                     ),
                 )
 
             else:
-                with transaction.atomic():
-                    lancamento = form.save(
-                        commit=False
-                    )
-
-                    lancamento.tipo = tipo
-                    lancamento.origem = (
-                        "MANUAL"
-                    )
-                    lancamento.status = (
-                        "ABERTO"
-                    )
-
-                    lancamento.save()
-
-                    salvar_novas_parcelas(
-                        lancamento,
-                        parcela_formset,
-                    )
-
-                messages.success(
-                    request,
-                    mensagem_sucesso,
+                valor_total = (
+                    form.cleaned_data[
+                        "valor_total"
+                    ]
                 )
 
-                return redirect(
-                    detalhe_url,
-                    pk=lancamento.pk,
+                total_parcelas = (
+                    total_formset_parcelas(
+                        parcela_formset
+                    )
                 )
+
+                if (
+                    total_parcelas
+                    != valor_total
+                ):
+                    form.add_error(
+                        None,
+                        (
+                            "A soma das parcelas "
+                            "deve ser igual ao valor "
+                            "total do lançamento."
+                        ),
+                    )
+
+                else:
+                    with transaction.atomic():
+                        lancamento = form.save(
+                            commit=False
+                        )
+
+                        lancamento.tipo = tipo
+                        lancamento.origem = (
+                            "MANUAL"
+                        )
+                        lancamento.status = (
+                            "ABERTO"
+                        )
+
+                        lancamento.save()
+
+                        salvar_novas_parcelas(
+                            lancamento,
+                            parcela_formset,
+                        )
+
+                    messages.success(
+                        request,
+                        mensagem_sucesso,
+                    )
+
+                    return redirect(
+                        detalhe_url,
+                        pk=lancamento.pk,
+                    )
 
     else:
         form = (
@@ -406,6 +437,33 @@ def editar_lancamento_financeiro(
             parcela_formset.is_valid()
         )
 
+        quantidade_esperada = 1
+
+        if form_valido:
+            quantidade_esperada = (
+                form.cleaned_data[
+                    "quantidade_parcelas"
+                ]
+            )
+
+            if (
+                form.cleaned_data[
+                    "condicao_pagamento"
+                ]
+                == "AVISTA"
+            ):
+                quantidade_esperada = 1
+
+        parcelas_completas = False
+
+        if parcelas_validas:
+            parcelas_completas = (
+                formset_parcelas_completo(
+                    parcela_formset,
+                    quantidade_esperada,
+                )
+            )
+
         if possui_baixas:
             form.add_error(
                 None,
@@ -422,66 +480,76 @@ def editar_lancamento_financeiro(
             form_valido
             and parcelas_validas
         ):
-            valor_total = (
-                form.cleaned_data[
-                    "valor_total"
-                ]
-            )
-
-            total_parcelas = (
-                total_formset_parcelas(
-                    parcela_formset
-                )
-            )
-
-            if (
-                total_parcelas
-                != valor_total
-            ):
+            if not parcelas_completas:
                 form.add_error(
                     None,
                     (
-                        "A soma das parcelas "
-                        "deve ser igual ao valor "
-                        "total do lançamento."
+                        "Gere e confira todas as parcelas "
+                        "antes de salvar o lançamento."
                     ),
                 )
 
             else:
-                with transaction.atomic():
-                    lancamento_editado = (
-                        form.save(
-                            commit=False
+                valor_total = (
+                    form.cleaned_data[
+                        "valor_total"
+                    ]
+                )
+
+                total_parcelas = (
+                    total_formset_parcelas(
+                        parcela_formset
+                    )
+                )
+
+                if (
+                    total_parcelas
+                    != valor_total
+                ):
+                    form.add_error(
+                        None,
+                        (
+                            "A soma das parcelas "
+                            "deve ser igual ao valor "
+                            "total do lançamento."
+                        ),
+                    )
+
+                else:
+                    with transaction.atomic():
+                        lancamento_editado = (
+                            form.save(
+                                commit=False
+                            )
                         )
+
+                        lancamento_editado.tipo = (
+                            tipo
+                        )
+
+                        lancamento_editado.save()
+
+                        (
+                            lancamento
+                            .parcelas
+                            .all()
+                            .delete()
+                        )
+
+                        salvar_novas_parcelas(
+                            lancamento_editado,
+                            parcela_formset,
+                        )
+
+                    messages.success(
+                        request,
+                        mensagem_sucesso,
                     )
 
-                    lancamento_editado.tipo = (
-                        tipo
+                    return redirect(
+                        detalhe_url,
+                        pk=lancamento.pk,
                     )
-
-                    lancamento_editado.save()
-
-                    (
-                        lancamento
-                        .parcelas
-                        .all()
-                        .delete()
-                    )
-
-                    salvar_novas_parcelas(
-                        lancamento_editado,
-                        parcela_formset,
-                    )
-
-                messages.success(
-                    request,
-                    mensagem_sucesso,
-                )
-
-                return redirect(
-                    detalhe_url,
-                    pk=lancamento.pk,
-                )
 
     else:
         form = (
@@ -1529,6 +1597,7 @@ def detalhe_conta_bancaria(
         contexto,
     )
 
+
 # ============================================================
 # TRANSFERÊNCIAS BANCÁRIAS
 # ============================================================
@@ -2407,6 +2476,23 @@ def conciliar_movimento_ofx(
             pk=movimento.importacao_id,
         )
 
+    if movimento.status != "PENDENTE":
+        messages.error(
+            request,
+            (
+                "Este movimento não está "
+                "mais pendente."
+            ),
+        )
+
+        return redirect(
+            (
+                "financeiro:"
+                "detalhe_importacao_ofx"
+            ),
+            pk=movimento.importacao_id,
+        )
+
     tipo_esperado = (
         tipo_lancamento_para_movimento(
             baixa.parcela.lancamento.tipo
@@ -2467,6 +2553,10 @@ def conciliar_movimento_ofx(
 
     else:
         with transaction.atomic():
+            movimento.transferencia_conciliada = (
+                None
+            )
+
             movimento.baixa_conciliada = (
                 baixa
             )
@@ -2475,8 +2565,11 @@ def conciliar_movimento_ofx(
                 "CONCILIADO"
             )
 
+            movimento.full_clean()
+
             movimento.save(
                 update_fields=[
+                    "transferencia_conciliada",
                     "baixa_conciliada",
                     "status",
                     "atualizado_em",
@@ -2498,7 +2591,6 @@ def conciliar_movimento_ofx(
         ),
         pk=movimento.importacao_id,
     )
-
 
 @login_required
 @permission_required(

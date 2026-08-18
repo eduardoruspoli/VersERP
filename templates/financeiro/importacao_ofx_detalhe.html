@@ -497,6 +497,30 @@ Importação OFX | VersERP
                                             R$ {{ movimento.baixa_conciliada.valor_movimento|floatformat:"2g" }}
                                         </small>
 
+
+                                    {% elif movimento.transferencia_conciliada %}
+
+                                        <strong>
+                                            Transferência bancária
+                                        </strong>
+
+                                        <br>
+
+                                        <small>
+                                            {{ movimento.transferencia_conciliada.conta_origem }}
+                                            →
+                                            {{ movimento.transferencia_conciliada.conta_destino }}
+                                            —
+                                            R$ {{ movimento.transferencia_conciliada.valor|floatformat:"2g" }}
+                                        </small>
+
+
+                                    {% else %}
+
+                                        <span>
+                                            Conciliado
+                                        </span>
+
                                     {% endif %}
 
 

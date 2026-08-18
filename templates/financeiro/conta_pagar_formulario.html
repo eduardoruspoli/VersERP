@@ -39,7 +39,7 @@
 </div>
 
 
-<form method="post" class="verserp-form">
+<form method="post" class="verserp-form" id="form-conta-pagar">
 
     {% csrf_token %}
 
@@ -553,6 +553,12 @@ document.addEventListener(
             );
 
 
+        const totalForms =
+            document.getElementById(
+                "id_parcelas-TOTAL_FORMS"
+            );
+
+
         const grupoQuantidade =
             document.getElementById(
                 "grupo-quantidade-parcelas"
@@ -561,6 +567,12 @@ document.addEventListener(
 
         const modoEdicao =
             secaoParcelas.dataset.modoEdicao === "1";
+
+
+        const formulario =
+            document.getElementById(
+                "form-conta-pagar"
+            );
 
 
         /* ================================================== */
@@ -1148,6 +1160,13 @@ document.addEventListener(
             }
 
 
+            if (totalForms) {
+
+                totalForms.value = String(qtd);
+
+            }
+
+
             secaoParcelas.style.display =
                 "";
 
@@ -1410,6 +1429,74 @@ document.addEventListener(
 
             }
         );
+
+
+
+
+        /* ================================================== */
+        /* VALIDAÇÃO ANTES DE SALVAR */
+        /* ================================================== */
+
+
+        if (formulario) {
+
+            formulario.addEventListener(
+                "submit",
+                function (event) {
+
+                    if (modoEdicao && secaoParcelas.style.display !== "none") {
+                        return;
+                    }
+
+
+                    const qtdEsperada =
+                        condicao.value === "AVISTA"
+                            ? 1
+                            : Number.parseInt(
+                                quantidade.value,
+                                10
+                            );
+
+
+                    const linhas =
+                        parcelasBody.querySelectorAll(
+                            "tr"
+                        );
+
+
+                    if (
+                        !qtdEsperada ||
+                        linhas.length !== qtdEsperada
+                    ) {
+
+                        event.preventDefault();
+
+                        gerarParcelas();
+
+                        alert(
+                            "As parcelas foram geradas. " +
+                            "Confira vencimentos e valores " +
+                            "e clique em Salvar Conta novamente."
+                        );
+
+                        return;
+
+                    }
+
+
+                    if (totalForms) {
+
+                        totalForms.value =
+                            String(
+                                linhas.length
+                            );
+
+                    }
+
+                }
+            );
+
+        }
 
 
         /* ================================================== */

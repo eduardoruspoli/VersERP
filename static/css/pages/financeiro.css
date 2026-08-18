@@ -144,6 +144,212 @@
 
 
 /* ==========================================
+   CONTA BANCÁRIA / EXTRATO
+========================================== */
+
+.conta-bancaria-page {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+
+    width: 100%;
+    min-width: 0;
+}
+
+.conta-bancaria-page .page-header {
+    margin-bottom: 0;
+}
+
+.conta-bancaria-page .dashboard-panel {
+    width: 100%;
+    min-width: 0;
+}
+
+.conta-bancaria-page .panel-header {
+    gap: 16px;
+}
+
+.conta-bancaria-page .panel-header h2 {
+    margin-bottom: 4px;
+}
+
+
+/* ==========================================
+   RESUMO BANCÁRIO
+========================================== */
+
+.conta-bancaria-page .dashboard-panel:first-of-type .form-grid {
+    grid-template-columns:
+        repeat(
+            4,
+            minmax(0, 1fr)
+        );
+
+    gap: 0;
+
+    padding: 0;
+}
+
+.conta-bancaria-page .dashboard-panel:first-of-type .form-group {
+    position: relative;
+
+    gap: 6px;
+
+    padding: 22px 24px;
+
+    border-right: 1px solid var(--border);
+}
+
+.conta-bancaria-page .dashboard-panel:first-of-type .form-group:last-child {
+    border-right: 0;
+}
+
+.conta-bancaria-page .dashboard-panel:first-of-type .form-group label {
+    font-size: 12px;
+    font-weight: 500;
+
+    color: var(--text-light);
+}
+
+.conta-bancaria-page .dashboard-panel:first-of-type .form-group strong {
+    display: block;
+
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 1.2;
+
+    color: var(--text);
+}
+
+
+/* ==========================================
+   FILTROS DO EXTRATO
+========================================== */
+
+.conta-bancaria-page form.verserp-form .form-grid {
+    align-items: end;
+
+    grid-template-columns:
+        repeat(
+            4,
+            minmax(0, 1fr)
+        );
+
+    gap: 16px;
+
+    padding: 20px 24px 24px;
+}
+
+.conta-bancaria-page form.verserp-form .form-group-wide {
+    grid-column: span 2;
+}
+
+.conta-bancaria-page form.verserp-form .form-actions {
+    justify-content: flex-end;
+
+    padding: 0;
+    margin: 0;
+}
+
+
+/* ==========================================
+   TABELA DO EXTRATO
+========================================== */
+
+.conta-bancaria-page .table-responsive {
+    width: 100%;
+    min-width: 0;
+
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.conta-bancaria-page .verserp-table {
+    width: 100%;
+    min-width: 880px;
+
+    table-layout: auto;
+}
+
+.conta-bancaria-page .verserp-table th {
+    white-space: nowrap;
+}
+
+.conta-bancaria-page .verserp-table th:nth-child(1),
+.conta-bancaria-page .verserp-table td:nth-child(1) {
+    width: 105px;
+
+    white-space: nowrap;
+}
+
+.conta-bancaria-page .verserp-table th:nth-child(2),
+.conta-bancaria-page .verserp-table td:nth-child(2) {
+    width: auto;
+    min-width: 260px;
+    max-width: 420px;
+}
+
+.conta-bancaria-page .verserp-table th:nth-child(3),
+.conta-bancaria-page .verserp-table td:nth-child(3) {
+    min-width: 130px;
+}
+
+.conta-bancaria-page .verserp-table th:nth-child(4),
+.conta-bancaria-page .verserp-table td:nth-child(4) {
+    min-width: 130px;
+}
+
+.conta-bancaria-page .verserp-table th:nth-child(5),
+.conta-bancaria-page .verserp-table td:nth-child(5),
+.conta-bancaria-page .verserp-table th:nth-child(6),
+.conta-bancaria-page .verserp-table td:nth-child(6),
+.conta-bancaria-page .verserp-table th:nth-child(7),
+.conta-bancaria-page .verserp-table td:nth-child(7) {
+    min-width: 130px;
+
+    text-align: right;
+
+    white-space: nowrap;
+}
+
+.conta-bancaria-page .verserp-table td:nth-child(2) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.conta-bancaria-page .verserp-table td:nth-child(2) small {
+    color: var(--text-light);
+}
+
+.conta-bancaria-page .verserp-table td:nth-child(5) strong {
+    color: var(--success);
+}
+
+.conta-bancaria-page .verserp-table td:nth-child(6) strong {
+    color: var(--danger);
+}
+
+.conta-bancaria-page .verserp-table td:nth-child(7) strong {
+    color: var(--text);
+}
+
+
+/* ==========================================
+   STATUS / ORIGEM
+========================================== */
+
+.conta-bancaria-page .status-badge {
+    display: inline-flex;
+
+    align-items: center;
+
+    max-width: 100%;
+
+    white-space: nowrap;
+}
+
+
+/* ==========================================
    NOTEBOOK
 ========================================== */
 
@@ -160,6 +366,34 @@
     .dashboard-card {
         padding: 18px;
     }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-grid {
+        grid-template-columns:
+            repeat(
+                2,
+                minmax(0, 1fr)
+            );
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group {
+        border-bottom: 1px solid var(--border);
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group:nth-child(2n) {
+        border-right: 0;
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group:nth-last-child(-n + 2) {
+        border-bottom: 0;
+    }
+
+    .conta-bancaria-page form.verserp-form .form-grid {
+        grid-template-columns:
+            repeat(
+                2,
+                minmax(0, 1fr)
+            );
+    }
 }
 
 
@@ -171,6 +405,35 @@
 
     .dashboard-grid {
         grid-template-columns: 1fr;
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group {
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group:nth-last-child(-n + 2) {
+        border-bottom: 1px solid var(--border);
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group:last-child {
+        border-bottom: 0;
+    }
+
+    .conta-bancaria-page form.verserp-form .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .conta-bancaria-page form.verserp-form .form-group-wide {
+        grid-column: auto;
+    }
+
+    .conta-bancaria-page form.verserp-form .form-actions {
+        justify-content: flex-start;
     }
 }
 
@@ -192,5 +455,47 @@
         height: 38px;
 
         font-size: 17px;
+    }
+
+    .conta-bancaria-page {
+        gap: 16px;
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group {
+        padding: 18px 16px;
+    }
+
+    .conta-bancaria-page .dashboard-panel:first-of-type .form-group strong {
+        font-size: 19px;
+    }
+
+    .conta-bancaria-page form.verserp-form .form-grid {
+        gap: 14px;
+
+        padding: 16px;
+    }
+
+    .conta-bancaria-page form.verserp-form .form-actions {
+        display: grid;
+
+        grid-template-columns: 1fr;
+
+        width: 100%;
+    }
+
+    .conta-bancaria-page form.verserp-form .form-actions .btn {
+        width: 100%;
+    }
+}
+
+
+/* ==========================================
+   CELULAR PEQUENO
+========================================== */
+
+@media (max-width: 480px) {
+
+    .conta-bancaria-page .verserp-table {
+        min-width: 820px;
     }
 }
