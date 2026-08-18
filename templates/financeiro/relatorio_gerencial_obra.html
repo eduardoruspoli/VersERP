@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Resultado por Obra | VersERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Resultado por Obra</h1>
+        <p>Análise gerencial por competência e posição financeira.</p>
+    </div>
+    <a href="{% url 'financeiro:index' %}" class="btn btn-light">
+        <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+</div>
+
+<div class="dashboard-panel relatorio-filtros">
+    <div class="panel-header">
+        <div><h2>Filtros</h2><span>Selecione a empresa, a obra e o período.</span></div>
+    </div>
+    <form method="get" class="verserp-form">
+        <div class="form-grid">
+            {% for field in form %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group-wide">
+                <div class="form-actions">
+                    <a href="{% url 'financeiro:relatorio_gerencial_obra' %}" class="btn btn-light">Limpar</a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-funnel"></i> Analisar obra
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+{% if relatorio %}
+    <div class="relatorio-identificacao">
+        <div>
+            <strong>{{ form.cleaned_data.obra.codigo }} — {{ form.cleaned_data.obra.nome }}</strong>
+            <span>{{ form.cleaned_data.empresa }}{% if form.cleaned_data.obra.cliente %} · {{ form.cleaned_data.obra.cliente }}{% endif %}</span>
+        </div>
+        <span class="status-badge {% if form.cleaned_data.obra.ativo %}status-active{% else %}status-inactive{% endif %}">
+            {% if form.cleaned_data.obra.ativo %}Obra ativa{% else %}Obra inativa{% endif %}
+        </span>
+    </div>
+
+    <section class="relatorio-secao">
+        <div class="panel-header">
+            <div><h2>Resultado por Competência</h2><span>Valores reconhecidos no período selecionado.</span></div>
+        </div>
+        <div class="relatorio-cards relatorio-cards-competencia">
+            <article class="relatorio-card"><span>Receitas reconhecidas</span><strong>R$ {{ relatorio.receitas|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card relatorio-card-saida"><span>(−) Custos</span><strong>R$ {{ relatorio.custos|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card {% if relatorio.resultado_bruto < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado bruto</span><strong>R$ {{ relatorio.resultado_bruto|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card relatorio-card-saida"><span>(−) Despesas</span><strong>R$ {{ relatorio.despesas|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card relatorio-card-destaque {% if relatorio.resultado_obra < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado da obra</span><strong>R$ {{ relatorio.resultado_obra|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card {% if relatorio.margem is not None and relatorio.margem < 0 %}relatorio-card-negativo{% endif %}"><span>Margem</span><strong>{% if relatorio.margem is not None %}{{ relatorio.margem|floatformat:2 }}%{% else %}—{% endif %}</strong></article>
+        </div>
+    </section>
+
+    <section class="relatorio-secao">
+        <div class="panel-header">
+            <div><h2>Posição Financeira</h2><span>Movimentação de caixa no período e saldos atuais dos títulos reconhecidos.</span></div>
+        </div>
+        <div class="relatorio-cards">
+            <article class="relatorio-card"><span>Recebido</span><strong>R$ {{ relatorio.recebido|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card relatorio-card-saida"><span>(−) Pago</span><strong>R$ {{ relatorio.pago|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card relatorio-card-destaque {% if relatorio.resultado_caixa < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado de caixa</span><strong>R$ {{ relatorio.resultado_caixa|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card"><span>A receber</span><strong>R$ {{ relatorio.a_receber|floatformat:"2g" }}</strong></article>
+            <article class="relatorio-card relatorio-card-saida"><span>A pagar</span><strong>R$ {{ relatorio.a_pagar|floatformat:"2g" }}</strong></article>
+        </div>
+    </section>
+
+    <div class="dashboard-panel">
+        <div class="panel-header">
+            <div><h2>Evolução mensal por competência</h2><span>Receitas, custos + despesas e resultado.</span></div>
+        </div>
+        <div class="relatorio-grafico">
+            <canvas id="grafico-resultado-obra" aria-label="Gráfico mensal do resultado da obra"></canvas>
+        </div>
+        {{ relatorio.grafico_mensal|json_script:"dados-grafico-resultado-obra" }}
+    </div>
+
+    <div class="dashboard-panel">
+        <div class="panel-header">
+            <div><h2>Plano de Contas</h2><span>Composição hierárquica dos valores reconhecidos.</span></div>
+        </div>
+        <div class="table-responsive">
+            <table class="verserp-table relatorio-contas-table">
+                <thead><tr><th>Código</th><th>Conta</th><th>Valor por competência</th></tr></thead>
+                <tbody>
+                    {% for grupo in relatorio.grupos_contas %}
+                        <tr class="relatorio-grupo"><td colspan="2">{{ grupo.nome }}</td><td></td></tr>
+                        {% for linha in grupo.linhas %}
+                            <tr>
+                                <td>{{ linha.conta.codigo }}</td>
+                                <td class="relatorio-conta-nivel-{{ linha.nivel }}">
+                                    {{ linha.conta.nome }}
+                                    {% if not linha.conta.aceita_lancamento %}<small>Agrupadora</small>{% endif %}
+                                </td>
+                                <td><strong>R$ {{ linha.valor|floatformat:"2g" }}</strong></td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="3" class="relatorio-sem-dados">Nenhum valor em {{ grupo.nome|lower }}.</td></tr>
+                        {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="dashboard-panel">
+        <div class="panel-header">
+            <div><h2>Detalhamento dos lançamentos</h2><span>{{ relatorio.detalhes|length }} lançamento{{ relatorio.detalhes|length|pluralize }} no período de competência.</span></div>
+        </div>
+        <div class="table-responsive">
+            <table class="verserp-table relatorio-detalhes-table">
+                <thead><tr><th>Competência</th><th>Documento</th><th>Pessoa / Descrição</th><th>Plano de Contas</th><th>Rateado</th><th>Caixa no período</th><th>Em aberto</th><th></th></tr></thead>
+                <tbody>
+                    {% for item in pagina %}
+                        <tr>
+                            <td>{{ item.data_referencia|date:"d/m/Y" }}</td>
+                            <td>{{ item.lancamento.numero_documento|default:"—" }}</td>
+                            <td>{{ item.lancamento.pessoa }}<br><small>{{ item.lancamento.descricao }}</small></td>
+                            <td>{{ item.lancamento.plano_conta.codigo }} — {{ item.lancamento.plano_conta.nome }}</td>
+                            <td>R$ {{ item.valor_rateado|floatformat:"2g" }}</td>
+                            <td>R$ {{ item.movimento_periodo|floatformat:"2g" }}</td>
+                            <td>R$ {{ item.saldo|floatformat:"2g" }}</td>
+                            <td>
+                                {% if item.lancamento.tipo == 'PAGAR' %}
+                                    <a class="btn btn-light" href="{% url 'financeiro:detalhe_conta_pagar' item.lancamento.pk %}" title="Ver conta a pagar"><i class="bi bi-eye"></i></a>
+                                {% else %}
+                                    <a class="btn btn-light" href="{% url 'financeiro:detalhe_conta_receber' item.lancamento.pk %}" title="Ver conta a receber"><i class="bi bi-eye"></i></a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8"><div class="empty-state"><i class="bi bi-bar-chart"></i><h3>Nenhum lançamento no período</h3><p>A obra não possui valores reconhecidos entre as datas selecionadas.</p></div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if pagina.paginator.num_pages > 1 %}
+            <div class="verserp-pagination">
+                <div class="pagination-info">Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</div>
+                <div class="pagination-actions">
+                    {% if pagina.has_previous %}<a class="btn btn-light" href="?{{ parametros_paginacao }}&page={{ pagina.previous_page_number }}"><i class="bi bi-chevron-left"></i> Anterior</a>{% endif %}
+                    {% if pagina.has_next %}<a class="btn btn-light" href="?{{ parametros_paginacao }}&page={{ pagina.next_page_number }}">Próxima <i class="bi bi-chevron-right"></i></a>{% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% elif request.GET and not form.is_valid %}
+    <div class="alert alert-danger">Revise os filtros informados para gerar o relatório.</div>
+{% else %}
+    <div class="empty-state relatorio-inicial">
+        <i class="bi bi-buildings"></i>
+        <h3>Selecione uma obra</h3>
+        <p>Informe a empresa, a obra e o período para visualizar o resultado gerencial.</p>
+    </div>
+{% endif %}
+{% if relatorio %}<script src="{% static 'js/relatorio_obra.js' %}"></script>{% endif %}
+{% endblock %}

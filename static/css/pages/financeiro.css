@@ -572,3 +572,142 @@
         justify-content: space-between;
     }
 }
+
+
+/* ==========================================
+   RELATÓRIO GERENCIAL POR OBRA
+========================================== */
+
+.relatorio-identificacao {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 22px;
+    padding: 18px 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.relatorio-identificacao strong,
+.relatorio-identificacao span {
+    display: block;
+}
+
+.relatorio-identificacao > div > span {
+    margin-top: 4px;
+    color: var(--text-light);
+    font-size: 13px;
+}
+
+.relatorio-secao {
+    margin-bottom: 24px;
+}
+
+.relatorio-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px;
+}
+
+.relatorio-card {
+    min-width: 0;
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--success, #027a48);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.relatorio-card span {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-light);
+    font-size: 12px;
+}
+
+.relatorio-card strong {
+    font-size: 19px;
+}
+
+.relatorio-card-saida {
+    border-left-color: var(--danger, #b42318);
+}
+
+.relatorio-card-destaque {
+    border-left-color: var(--primary);
+    background: rgba(31, 78, 121, 0.04);
+}
+
+.relatorio-card-negativo {
+    border-left-color: var(--danger, #b42318);
+    background: rgba(180, 35, 24, 0.04);
+}
+
+.relatorio-card-negativo strong {
+    color: var(--danger, #b42318);
+}
+
+.relatorio-grafico {
+    width: 100%;
+    min-height: 320px;
+    overflow-x: auto;
+}
+
+.relatorio-grafico canvas {
+    min-width: 640px;
+}
+
+.relatorio-contas-table,
+.relatorio-detalhes-table {
+    min-width: 760px;
+}
+
+.relatorio-grupo td {
+    background: rgba(31, 78, 121, 0.07);
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.relatorio-contas-table td:last-child,
+.relatorio-contas-table th:last-child,
+.relatorio-detalhes-table td:nth-child(n + 5):nth-child(-n + 7),
+.relatorio-detalhes-table th:nth-child(n + 5):nth-child(-n + 7) {
+    text-align: right;
+}
+
+.relatorio-contas-table small {
+    display: block;
+    color: var(--text-light);
+}
+
+.relatorio-conta-nivel-1 { padding-left: 22px !important; }
+.relatorio-conta-nivel-2 { padding-left: 44px !important; }
+.relatorio-conta-nivel-3 { padding-left: 66px !important; }
+.relatorio-conta-nivel-4 { padding-left: 88px !important; }
+.relatorio-conta-nivel-5 { padding-left: 110px !important; }
+
+.relatorio-sem-dados {
+    color: var(--text-light);
+    font-style: italic;
+}
+
+.relatorio-inicial {
+    margin-top: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+@media (max-width: 700px) {
+    .relatorio-identificacao {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .relatorio-cards {
+        grid-template-columns: 1fr;
+    }
+}

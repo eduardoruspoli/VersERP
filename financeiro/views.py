@@ -6,6 +6,7 @@ from django.contrib.auth.decorators import (
     login_required,
     permission_required,
 )
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import (
@@ -25,6 +26,7 @@ from .forms import (
     ParcelaFormSet,
     PlanoContaForm,
     RateioCentroCustoFormSet,
+    RelatorioObraFiltroForm,
     TransferenciaBancariaForm,
 )
 from .models import (
@@ -45,6 +47,7 @@ from .ofx import (
     ErroOFX,
     ler_ofx,
 )
+from .services import calcular_relatorio_obra
 
 
 # ============================================================
@@ -1613,6 +1616,59 @@ def alternar_status_centro_custo(request, pk):
         f"{'ativada' if centro.ativo else 'inativada'} com sucesso.",
     )
     return redirect("financeiro:centros_custo")
+
+
+# ============================================================
+# RELATÓRIO GERENCIAL POR OBRA
+# ============================================================
+
+
+@login_required
+@permission_required(
+    "financeiro.view_lancamentofinanceiro",
+    raise_exception=True,
+)
+def relatorio_gerencial_obra(request):
+    hoje = timezone.localdate()
+    empresa_inicial = (
+        Empresa.objects.filter(ativa=True, principal=True).first()
+        or Empresa.objects.filter(ativa=True).first()
+    )
+    iniciais = {
+        "empresa": empresa_inicial,
+        "data_inicial": hoje.replace(month=1, day=1),
+        "data_final": hoje.replace(month=12, day=31),
+    }
+    form = RelatorioObraFiltroForm(
+        request.GET if request.GET else None,
+        initial=iniciais,
+    )
+    relatorio = None
+    pagina = None
+
+    if request.GET and form.is_valid():
+        relatorio = calcular_relatorio_obra(
+            obra=form.cleaned_data["obra"],
+            data_inicial=form.cleaned_data["data_inicial"],
+            data_final=form.cleaned_data["data_final"],
+        )
+        pagina = Paginator(relatorio["detalhes"], 20).get_page(
+            request.GET.get("page")
+        )
+
+    parametros = request.GET.copy()
+    parametros.pop("page", None)
+    contexto = {
+        "form": form,
+        "relatorio": relatorio,
+        "pagina": pagina,
+        "parametros_paginacao": parametros.urlencode(),
+    }
+    return render(
+        request,
+        "financeiro/relatorio_gerencial_obra.html",
+        contexto,
+    )
 
 
 # ============================================================

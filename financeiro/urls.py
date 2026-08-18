@@ -75,6 +75,12 @@ urlpatterns = [
         name="alternar_status_centro_custo",
     ),
 
+    path(
+        "relatorios/obras/",
+        views.relatorio_gerencial_obra,
+        name="relatorio_gerencial_obra",
+    ),
+
 
     # -------------------------------------------------
     # CONTAS A PAGAR

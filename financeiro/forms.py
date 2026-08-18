@@ -8,6 +8,7 @@ from .models import (
     BaixaFinanceira,
     CentroCusto,
     ContaBancaria,
+    Empresa,
     LancamentoFinanceiro,
     PlanoConta,
     TransferenciaBancaria,
@@ -303,6 +304,64 @@ RateioCentroCustoFormSet = formset_factory(
     extra=1,
     can_delete=True,
 )
+
+
+class RelatorioObraFiltroForm(forms.Form):
+    empresa = forms.ModelChoiceField(
+        label="Empresa",
+        queryset=Empresa.objects.none(),
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    obra = forms.ModelChoiceField(
+        label="Obra / Centro de Custo",
+        queryset=CentroCusto.objects.none(),
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    data_inicial = forms.DateField(
+        label="Data inicial",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+    data_final = forms.DateField(
+        label="Data final",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["empresa"].queryset = Empresa.objects.filter(
+            ativa=True
+        ).order_by("razao_social")
+
+        obras = CentroCusto.objects.select_related("empresa").order_by(
+            "empresa__razao_social", "codigo"
+        )
+        empresa_id = self.data.get("empresa") if self.is_bound else None
+        if empresa_id and str(empresa_id).isdigit():
+            obras = obras.filter(empresa_id=empresa_id)
+        self.fields["obra"].queryset = obras
+
+    def clean(self):
+        dados = super().clean()
+        empresa = dados.get("empresa")
+        obra = dados.get("obra")
+        data_inicial = dados.get("data_inicial")
+        data_final = dados.get("data_final")
+
+        if empresa and obra and obra.empresa_id != empresa.pk:
+            self.add_error(
+                "obra",
+                "A obra deve pertencer à empresa selecionada.",
+            )
+        if data_inicial and data_final and data_inicial > data_final:
+            self.add_error(
+                "data_final",
+                "A data final deve ser igual ou posterior à data inicial.",
+            )
+        return dados
 
 
 class PlanoContaForm(forms.ModelForm):

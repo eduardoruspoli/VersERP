@@ -214,6 +214,23 @@ Financeiro | VersERP
 
     {% endif %}
 
+    {% if perms.financeiro.view_lancamentofinanceiro %}
+
+    <a
+        href="{% url 'financeiro:relatorio_gerencial_obra' %}"
+        class="dashboard-card"
+    >
+        <div class="dashboard-card-icon">
+            <i class="bi bi-graph-up-arrow"></i>
+        </div>
+        <div>
+            <h3>Resultado por Obra</h3>
+            <p>Competência, posição financeira e margem por obra</p>
+        </div>
+    </a>
+
+    {% endif %}
+
 
 </div>
 

@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError
 from django.contrib.auth import get_user_model
@@ -12,8 +13,10 @@ from .forms import (
     CriarLancamentoOFXForm,
     LancamentoFinanceiroForm,
     RateioCentroCustoFormSet,
+    RelatorioObraFiltroForm,
 )
 from .models import (
+    BaixaFinanceira,
     CentroCusto,
     ContaBancaria,
     Empresa,
@@ -22,7 +25,9 @@ from .models import (
     PlanoConta,
     RateioCentroCusto,
     MovimentoOFX,
+    ParcelaFinanceira,
 )
+from .services import calcular_relatorio_obra, distribuir_valor_rateios
 
 
 class PlanoContaModelTests(TestCase):
@@ -595,3 +600,349 @@ class ObrasRateioTests(TestCase):
             lancamento.rateios_centro_custo.get().centro_custo,
             self.obra,
         )
+
+
+class RelatorioGerencialObraTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.empresa = Empresa.objects.create(
+            razao_social="Empresa Relatório TESTE",
+            cnpj="71.000.000/0001-01",
+            principal=True,
+        )
+        cls.outra_empresa = Empresa.objects.create(
+            razao_social="Outra Empresa Relatório TESTE",
+            cnpj="72.000.000/0001-02",
+        )
+        cls.pessoa = Pessoa.objects.create(
+            razao_social="Pessoa Relatório TESTE"
+        )
+        cls.obra = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            codigo="REL-TESTE-1",
+            nome="Obra Relatório",
+        )
+        cls.outra_obra = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            codigo="REL-TESTE-2",
+            nome="Obra Rateio",
+        )
+        cls.obra_inativa = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            codigo="REL-TESTE-3",
+            nome="Obra Inativa",
+            ativo=False,
+        )
+        cls.obra_outra_empresa = CentroCusto.objects.create(
+            empresa=cls.outra_empresa,
+            codigo="REL-TESTE-1",
+            nome="Obra Outra Empresa",
+        )
+        cls.receitas_pai = PlanoConta.objects.create(
+            codigo="T.REL.4",
+            nome="Receitas TESTE",
+            tipo="RECEITA",
+            natureza="CREDORA",
+            aceita_lancamento=False,
+            estrutural=True,
+        )
+        cls.receita = PlanoConta.objects.create(
+            codigo="T.REL.4.1",
+            nome="Receita Serviços TESTE",
+            tipo="RECEITA",
+            natureza="CREDORA",
+            conta_pai=cls.receitas_pai,
+        )
+        cls.custo = PlanoConta.objects.create(
+            codigo="T.REL.5.1",
+            nome="Materiais TESTE",
+            tipo="CUSTO",
+            natureza="DEVEDORA",
+        )
+        cls.despesa = PlanoConta.objects.create(
+            codigo="T.REL.6.1",
+            nome="Despesa TESTE",
+            tipo="DESPESA",
+            natureza="DEVEDORA",
+        )
+        cls.conta_bancaria = ContaBancaria.objects.create(
+            empresa=cls.empresa,
+            banco="Banco TESTE",
+            agencia="0001",
+            conta="12345",
+            tipo="CORRENTE",
+        )
+
+    def criar_lancamento(
+        self,
+        tipo,
+        plano_conta,
+        valor,
+        rateios=None,
+        competencia=date(2026, 3, 10),
+        emissao=date(2026, 3, 1),
+        status="ABERTO",
+        empresa=None,
+    ):
+        empresa = empresa or self.empresa
+        lancamento = LancamentoFinanceiro.objects.create(
+            empresa=empresa,
+            pessoa=self.pessoa,
+            tipo=tipo,
+            descricao=f"Lançamento {tipo} TESTE",
+            data_emissao=emissao,
+            data_competencia=competencia,
+            valor_total=valor,
+            plano_conta=plano_conta,
+            status=status,
+        )
+        ParcelaFinanceira.objects.create(
+            lancamento=lancamento,
+            numero=1,
+            vencimento=date(2026, 4, 10),
+            valor=valor,
+        )
+        for obra, valor_rateio in rateios or [(self.obra, valor)]:
+            RateioCentroCusto.objects.create(
+                lancamento=lancamento,
+                centro_custo=obra,
+                valor=valor_rateio,
+            )
+        return lancamento
+
+    def baixar(self, lancamento, valor, data_baixa=date(2026, 3, 20), **extras):
+        return BaixaFinanceira.objects.create(
+            parcela=lancamento.parcelas.get(),
+            conta_bancaria=self.conta_bancaria,
+            data=data_baixa,
+            valor=valor,
+            juros=extras.get("juros", Decimal("0.00")),
+            multa=extras.get("multa", Decimal("0.00")),
+            desconto=extras.get("desconto", Decimal("0.00")),
+        )
+
+    def relatorio(self, obra=None):
+        return calcular_relatorio_obra(
+            obra or self.obra,
+            date(2026, 1, 1),
+            date(2026, 12, 31),
+        )
+
+    def test_resultado_por_competencia(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("1000.00"))
+        self.criar_lancamento("PAGAR", self.custo, Decimal("300.00"))
+        self.criar_lancamento("PAGAR", self.despesa, Decimal("100.00"))
+
+        resultado = self.relatorio()
+
+        self.assertEqual(resultado["receitas"], Decimal("1000.00"))
+        self.assertEqual(resultado["custos"], Decimal("300.00"))
+        self.assertEqual(resultado["resultado_bruto"], Decimal("700.00"))
+        self.assertEqual(resultado["despesas"], Decimal("100.00"))
+        self.assertEqual(resultado["resultado_obra"], Decimal("600.00"))
+        self.assertEqual(resultado["margem"], Decimal("60.00"))
+
+    def test_rateio_entre_obras_afeta_somente_a_parte_da_obra(self):
+        self.criar_lancamento(
+            "PAGAR",
+            self.custo,
+            Decimal("100.00"),
+            [(self.obra, Decimal("60.00")), (self.outra_obra, Decimal("40.00"))],
+        )
+
+        self.assertEqual(self.relatorio()["custos"], Decimal("60.00"))
+        self.assertEqual(
+            self.relatorio(self.outra_obra)["custos"], Decimal("40.00")
+        )
+
+    def test_baixa_parcial_calcula_caixa_e_saldo(self):
+        lancamento = self.criar_lancamento(
+            "RECEBER", self.receita, Decimal("100.00")
+        )
+        self.baixar(lancamento, Decimal("35.00"))
+
+        resultado = self.relatorio()
+
+        self.assertEqual(resultado["recebido"], Decimal("35.00"))
+        self.assertEqual(resultado["a_receber"], Decimal("65.00"))
+        self.assertEqual(resultado["resultado_caixa"], Decimal("35.00"))
+
+    def test_multiplas_baixas_nao_duplicam_valores(self):
+        lancamento = self.criar_lancamento(
+            "PAGAR",
+            self.custo,
+            Decimal("200.00"),
+            [(self.obra, Decimal("150.00")), (self.outra_obra, Decimal("50.00"))],
+        )
+        self.baixar(lancamento, Decimal("40.00"), date(2026, 3, 20))
+        self.baixar(lancamento, Decimal("60.00"), date(2026, 4, 20))
+
+        resultado = self.relatorio()
+
+        self.assertEqual(resultado["pago"], Decimal("75.00"))
+        self.assertEqual(resultado["a_pagar"], Decimal("75.00"))
+        self.assertEqual(resultado["resultado_caixa"], Decimal("-75.00"))
+
+    def test_caixa_inclui_juros_multa_e_desconto(self):
+        lancamento = self.criar_lancamento(
+            "PAGAR",
+            self.custo,
+            Decimal("100.00"),
+            [(self.obra, Decimal("60.00")), (self.outra_obra, Decimal("40.00"))],
+        )
+        self.baixar(
+            lancamento,
+            Decimal("50.00"),
+            juros=Decimal("2.00"),
+            multa=Decimal("3.00"),
+            desconto=Decimal("1.00"),
+        )
+
+        resultado = self.relatorio()
+
+        self.assertEqual(resultado["pago"], Decimal("32.40"))
+        self.assertEqual(resultado["a_pagar"], Decimal("30.00"))
+
+    def test_caixa_do_periodo_independe_da_competencia(self):
+        lancamento = self.criar_lancamento(
+            "RECEBER",
+            self.receita,
+            Decimal("90.00"),
+            competencia=date(2025, 12, 10),
+            emissao=date(2025, 12, 1),
+        )
+        self.baixar(lancamento, Decimal("90.00"), date(2026, 1, 5))
+
+        resultado = self.relatorio()
+
+        self.assertEqual(resultado["receitas"], Decimal("0.00"))
+        self.assertEqual(resultado["recebido"], Decimal("90.00"))
+        self.assertEqual(resultado["detalhes"], [])
+
+    def test_arredondamento_fecha_e_tem_destino_deterministico(self):
+        rateios = [
+            SimpleNamespace(pk=1, valor=Decimal("33.34")),
+            SimpleNamespace(pk=2, valor=Decimal("33.33")),
+            SimpleNamespace(pk=3, valor=Decimal("33.33")),
+        ]
+        distribuicao = distribuir_valor_rateios(Decimal("0.01"), rateios)
+
+        self.assertEqual(sum(distribuicao.values()), Decimal("0.01"))
+        self.assertEqual(distribuicao[1], Decimal("0.01"))
+
+    def test_lancamento_cancelado_nao_entra(self):
+        self.criar_lancamento(
+            "RECEBER", self.receita, Decimal("500.00"), status="CANCELADO"
+        )
+        self.assertEqual(self.relatorio()["receitas"], Decimal("0.00"))
+
+    def test_obra_inativa_preserva_relatorio_historico(self):
+        CentroCusto.objects.filter(pk=self.obra_inativa.pk).update(ativo=True)
+        self.obra_inativa.ativo = True
+        self.criar_lancamento(
+            "PAGAR",
+            self.custo,
+            Decimal("80.00"),
+            [(self.obra_inativa, Decimal("80.00"))],
+        )
+        CentroCusto.objects.filter(pk=self.obra_inativa.pk).update(ativo=False)
+        self.obra_inativa.ativo = False
+        self.assertEqual(
+            self.relatorio(self.obra_inativa)["custos"], Decimal("80.00")
+        )
+
+    def test_isolamento_por_empresa(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("100.00"))
+        self.criar_lancamento(
+            "RECEBER",
+            self.receita,
+            Decimal("900.00"),
+            [(self.obra_outra_empresa, Decimal("900.00"))],
+            empresa=self.outra_empresa,
+        )
+        self.assertEqual(self.relatorio()["receitas"], Decimal("100.00"))
+
+    def test_consulta_sem_resultados_retorna_zeros(self):
+        resultado = self.relatorio()
+        self.assertEqual(resultado["resultado_obra"], Decimal("0.00"))
+        self.assertEqual(resultado["resultado_caixa"], Decimal("0.00"))
+        self.assertEqual(resultado["detalhes"], [])
+
+    def test_competencia_usa_data_emissao_como_fallback(self):
+        self.criar_lancamento(
+            "RECEBER",
+            self.receita,
+            Decimal("75.00"),
+            competencia=None,
+            emissao=date(2026, 5, 2),
+        )
+        self.assertEqual(self.relatorio()["receitas"], Decimal("75.00"))
+
+    def test_tabela_hierarquica_totaliza_conta_superior(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("125.00"))
+        grupo_receitas = self.relatorio()["grupos_contas"][0]
+        valores = {
+            linha["conta"].pk: linha["valor"] for linha in grupo_receitas["linhas"]
+        }
+        self.assertEqual(valores[self.receitas_pai.pk], Decimal("125.00"))
+        self.assertEqual(valores[self.receita.pk], Decimal("125.00"))
+
+    def test_filtro_rejeita_obra_de_outra_empresa(self):
+        form = RelatorioObraFiltroForm({
+            "empresa": self.empresa.pk,
+            "obra": self.obra_outra_empresa.pk,
+            "data_inicial": "2026-01-01",
+            "data_final": "2026-12-31",
+        })
+        self.assertFalse(form.is_valid())
+
+    def test_view_exibe_obra_inativa_e_estado_sem_resultados(self):
+        usuario = get_user_model().objects.create_superuser(
+            username="relatorio_teste",
+            password="senha-teste",
+            email="relatorio@teste.local",
+        )
+        self.client.force_login(usuario)
+        resposta = self.client.get(
+            reverse("financeiro:relatorio_gerencial_obra"),
+            {
+                "empresa": self.empresa.pk,
+                "obra": self.obra_inativa.pk,
+                "data_inicial": "2026-01-01",
+                "data_final": "2026-12-31",
+            },
+        )
+        self.assertEqual(resposta.status_code, 200)
+        self.assertContains(resposta, "Obra inativa")
+        self.assertContains(resposta, "Nenhum lançamento no período")
+
+    def test_detalhamento_e_paginado(self):
+        for indice in range(21):
+            lancamento = self.criar_lancamento(
+                "RECEBER", self.receita, Decimal("1.00")
+            )
+            lancamento.descricao = f"Lançamento paginado {indice} TESTE"
+            LancamentoFinanceiro.objects.filter(pk=lancamento.pk).update(
+                descricao=lancamento.descricao
+            )
+
+        usuario = get_user_model().objects.create_superuser(
+            username="paginacao_relatorio_teste",
+            password="senha-teste",
+            email="paginacao@teste.local",
+        )
+        self.client.force_login(usuario)
+        parametros = {
+            "empresa": self.empresa.pk,
+            "obra": self.obra.pk,
+            "data_inicial": "2026-01-01",
+            "data_final": "2026-12-31",
+            "page": 2,
+        }
+        resposta = self.client.get(
+            reverse("financeiro:relatorio_gerencial_obra"), parametros
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.context["pagina"].number, 2)
+        self.assertEqual(len(resposta.context["pagina"]), 1)
