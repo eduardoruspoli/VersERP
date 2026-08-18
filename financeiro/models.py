@@ -568,10 +568,25 @@ class PlanoConta(models.Model):
 
 
 class CentroCusto(models.Model):
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.PROTECT,
+        related_name="centros_custo",
+        verbose_name="Empresa",
+    )
+
+    cliente = models.ForeignKey(
+        "pessoas.Pessoa",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="obras_centro_custo",
+        verbose_name="Cliente",
+    )
+
     codigo = models.CharField(
         "Código",
         max_length=30,
-        unique=True,
     )
 
     nome = models.CharField(
@@ -602,7 +617,37 @@ class CentroCusto(models.Model):
     class Meta:
         verbose_name = "Centro de custo"
         verbose_name_plural = "Centros de custo"
-        ordering = ["codigo"]
+        ordering = ["empresa", "codigo"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["empresa", "codigo"],
+                name="unique_centro_custo_por_empresa",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+
+        if self.cliente_id and not self.cliente.ativo:
+            cliente_alterado = self._state.adding
+
+            if not self._state.adding:
+                cliente_original_id = (
+                    type(self).objects
+                    .filter(pk=self.pk)
+                    .values_list("cliente_id", flat=True)
+                    .first()
+                )
+                cliente_alterado = cliente_original_id != self.cliente_id
+
+            if cliente_alterado:
+                raise ValidationError({
+                    "cliente": "Não é possível vincular um cliente inativo."
+                })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.codigo} - {self.nome}"
@@ -845,17 +890,44 @@ class RateioCentroCusto(models.Model):
     def clean(self):
         super().clean()
 
-        if self.valor is not None and self.valor <= Decimal("0.00"):
-            raise ValidationError({
-                "valor": "O valor do rateio deve ser maior que zero."
-            })
+        errors = {}
 
-        if self.centro_custo_id and not self.centro_custo.ativo:
-            raise ValidationError({
-                "centro_custo": (
+        if self.valor is not None and self.valor <= Decimal("0.00"):
+            errors["valor"] = "O valor do rateio deve ser maior que zero."
+
+        if self.centro_custo_id:
+            centro_alterado = self._state.adding
+
+            if not self._state.adding:
+                centro_original_id = (
+                    type(self).objects
+                    .filter(pk=self.pk)
+                    .values_list("centro_custo_id", flat=True)
+                    .first()
+                )
+                centro_alterado = centro_original_id != self.centro_custo_id
+
+            if not self.centro_custo.ativo and centro_alterado:
+                errors["centro_custo"] = (
                     "Não é possível utilizar um centro de custo inativo."
                 )
-            })
+
+        if (
+            self.lancamento_id
+            and self.centro_custo_id
+            and self.lancamento.empresa_id
+            != self.centro_custo.empresa_id
+        ):
+            errors["centro_custo"] = (
+                "A obra deve pertencer à mesma empresa do lançamento."
+            )
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return (

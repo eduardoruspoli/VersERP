@@ -1,0 +1,27 @@
+<div class="dashboard-panel">
+    <div class="panel-header">
+        <div>
+            <h2>Rateio por Obra</h2>
+            <span>{{ rateios|length }} obra{{ rateios|length|pluralize }}</span>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="verserp-table rateio-detalhe-table">
+            <thead>
+                <tr><th>Código</th><th>Obra</th><th>Percentual</th><th>Valor</th></tr>
+            </thead>
+            <tbody>
+                {% for rateio in rateios %}
+                    <tr>
+                        <td><strong>{{ rateio.centro_custo.codigo }}</strong></td>
+                        <td>{{ rateio.centro_custo.nome }}</td>
+                        <td>{{ rateio.percentual_calculado|floatformat:"2" }}%</td>
+                        <td>R$ {{ rateio.valor|floatformat:"2g" }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4">Este lançamento não possui rateio por obra.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>

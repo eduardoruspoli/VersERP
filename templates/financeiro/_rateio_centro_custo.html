@@ -1,0 +1,227 @@
+<section
+    class="form-section rateio-obras"
+    data-valor-rateio="{{ valor_rateio|default:'' }}"
+>
+    <div class="form-section-header">
+        <div>
+            <h2>Rateio por Obra</h2>
+            <p>
+                Distribua integralmente o lançamento entre uma ou mais obras.
+            </p>
+        </div>
+    </div>
+
+    <div class="form-grid">
+        <div class="form-group">
+            <label for="{{ form.modo_rateio.id_for_label }}">
+                {{ form.modo_rateio.label }}
+            </label>
+            {{ form.modo_rateio }}
+            {{ form.modo_rateio.errors }}
+        </div>
+    </div>
+
+    {{ rateio_formset.management_form }}
+
+    {% if rateio_formset.non_form_errors %}
+        <div class="alert alert-danger">
+            {{ rateio_formset.non_form_errors }}
+        </div>
+    {% endif %}
+
+    <div class="table-responsive">
+        <table class="verserp-table rateio-table">
+            <thead>
+                <tr>
+                    <th>Obra</th>
+                    <th class="rateio-coluna-valor">Valor</th>
+                    <th class="rateio-coluna-percentual">Percentual</th>
+                    <th>Valor distribuído</th>
+                    <th>Ação</th>
+                </tr>
+            </thead>
+            <tbody id="rateio-obras-body">
+                {% for rateio_form in rateio_formset %}
+                    <tr class="rateio-linha">
+                        <td>
+                            {{ rateio_form.centro_custo }}
+                            {{ rateio_form.centro_custo.errors }}
+                        </td>
+                        <td class="rateio-coluna-valor">
+                            {{ rateio_form.valor }}
+                            {{ rateio_form.valor.errors }}
+                        </td>
+                        <td class="rateio-coluna-percentual">
+                            {{ rateio_form.percentual }}
+                            {{ rateio_form.percentual.errors }}
+                        </td>
+                        <td>
+                            <strong class="rateio-valor-calculado">R$ 0,00</strong>
+                        </td>
+                        <td class="table-actions">
+                            <span class="rateio-delete-field">
+                                {{ rateio_form.DELETE }}
+                            </span>
+                            <button
+                                type="button"
+                                class="btn btn-light rateio-remover"
+                                title="Remover obra"
+                            >
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <template id="rateio-obras-empty-form">
+        <tr class="rateio-linha">
+            <td>{{ rateio_formset.empty_form.centro_custo }}</td>
+            <td class="rateio-coluna-valor">
+                {{ rateio_formset.empty_form.valor }}
+            </td>
+            <td class="rateio-coluna-percentual">
+                {{ rateio_formset.empty_form.percentual }}
+            </td>
+            <td><strong class="rateio-valor-calculado">R$ 0,00</strong></td>
+            <td class="table-actions">
+                <span class="rateio-delete-field">
+                    {{ rateio_formset.empty_form.DELETE }}
+                </span>
+                <button
+                    type="button"
+                    class="btn btn-light rateio-remover"
+                    title="Remover obra"
+                >
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        </tr>
+    </template>
+
+    <div class="rateio-footer">
+        <button type="button" class="btn btn-light" id="rateio-adicionar">
+            <i class="bi bi-plus-lg"></i>
+            Adicionar obra
+        </button>
+        <div class="rateio-resumo">
+            <span>Percentual: <strong id="rateio-percentual-total">0,00%</strong></span>
+            <span>Distribuído: <strong id="rateio-total">R$ 0,00</strong></span>
+            <span>Saldo: <strong id="rateio-saldo">R$ 0,00</strong></span>
+        </div>
+    </div>
+</section>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const secao = document.querySelector(".rateio-obras");
+    if (!secao) return;
+
+    const corpo = document.getElementById("rateio-obras-body");
+    const template = document.getElementById("rateio-obras-empty-form");
+    const totalForms = document.getElementById("id_rateios-TOTAL_FORMS");
+    const botaoAdicionar = document.getElementById("rateio-adicionar");
+    const modo = document.getElementById("id_modo_rateio");
+    const totalVisual = document.getElementById("rateio-total");
+    const percentualVisual = document.getElementById("rateio-percentual-total");
+    const saldoVisual = document.getElementById("rateio-saldo");
+    const valorLancamento = document.getElementById("id_valor_total");
+
+    function centavos(valor) {
+        let texto = String(valor || "").replace("R$", "").replace(/\s/g, "");
+        if (texto.includes(",")) {
+            texto = texto.replace(/\./g, "").replace(",", ".");
+        }
+        const numero = Number.parseFloat(texto);
+        return Number.isFinite(numero) ? Math.round(numero * 100) : 0;
+    }
+
+    function moeda(valorCentavos) {
+        return (valorCentavos / 100).toLocaleString("pt-BR", {
+            style: "currency",
+            currency: "BRL"
+        });
+    }
+
+    function totalLancamento() {
+        return valorLancamento
+            ? centavos(valorLancamento.value)
+            : centavos(secao.dataset.valorRateio);
+    }
+
+    function linhasAtivas() {
+        return Array.from(corpo.querySelectorAll(".rateio-linha")).filter(
+            function (linha) {
+                const excluir = linha.querySelector("input[name$='-DELETE']");
+                return !excluir || !excluir.checked;
+            }
+        );
+    }
+
+    function atualizar() {
+        const porPercentual = modo.value === "PERCENTUAL";
+        secao.classList.toggle("rateio-por-percentual", porPercentual);
+        const linhas = linhasAtivas();
+        const total = totalLancamento();
+        let distribuido = 0;
+        const percentualTotal = linhas.reduce(function (soma, linha) {
+            const campo = linha.querySelector(".rateio-percentual");
+            return soma + Number.parseFloat(campo.value || "0");
+        }, 0);
+
+        linhas.forEach(function (linha, indice) {
+            const campoValor = linha.querySelector(".rateio-valor");
+            const campoPercentual = linha.querySelector(".rateio-percentual");
+            campoValor.disabled = porPercentual;
+            campoPercentual.disabled = !porPercentual;
+
+            let valor = centavos(campoValor.value);
+            if (porPercentual) {
+                const percentual = Number.parseFloat(campoPercentual.value || "0");
+                valor = indice === linhas.length - 1
+                    && Math.abs(percentualTotal - 100) < 0.00005
+                    ? Math.max(0, total - distribuido)
+                    : Math.floor(total * percentual / 100);
+                campoValor.value = (valor / 100).toFixed(2).replace(".", ",");
+            }
+            distribuido += valor;
+            linha.querySelector(".rateio-valor-calculado").textContent = moeda(valor);
+        });
+
+        totalVisual.textContent = moeda(distribuido);
+        percentualVisual.textContent = percentualTotal.toLocaleString(
+            "pt-BR",
+            {minimumFractionDigits: 2, maximumFractionDigits: 4}
+        ) + "%";
+        saldoVisual.textContent = moeda(total - distribuido);
+        saldoVisual.classList.toggle("rateio-ok", total === distribuido && total > 0);
+    }
+
+    botaoAdicionar.addEventListener("click", function () {
+        const indice = Number.parseInt(totalForms.value, 10);
+        corpo.insertAdjacentHTML(
+            "beforeend",
+            template.innerHTML.replaceAll("__prefix__", indice)
+        );
+        totalForms.value = indice + 1;
+        atualizar();
+    });
+
+    corpo.addEventListener("click", function (event) {
+        const botao = event.target.closest(".rateio-remover");
+        if (!botao) return;
+        const linha = botao.closest(".rateio-linha");
+        const excluir = linha.querySelector("input[name$='-DELETE']");
+        if (excluir) excluir.checked = true;
+        linha.hidden = true;
+        atualizar();
+    });
+
+    corpo.addEventListener("input", atualizar);
+    modo.addEventListener("change", atualizar);
+    if (valorLancamento) valorLancamento.addEventListener("input", atualizar);
+    atualizar();
+});
+</script>

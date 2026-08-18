@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}{% if modo_edicao %}Editar{% else %}Nova{% endif %} Obra | VersERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{% if modo_edicao %}Editar Obra{% else %}Nova Obra{% endif %}</h1>
+        <p>Identifique a proposta ou obra usada nos lançamentos financeiros.</p>
+    </div>
+    <a href="{% url 'financeiro:centros_custo' %}" class="btn btn-light">
+        <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+</div>
+
+<form method="post" class="verserp-form">
+    {% csrf_token %}
+    {% if form.errors %}
+        <div class="alert alert-danger">
+            <strong>Verifique os campos abaixo.</strong>
+            {{ form.non_field_errors }}
+        </div>
+    {% endif %}
+
+    <section class="form-section">
+        <div class="form-section-header">
+            <div>
+                <h2>Identificação da Obra</h2>
+                <p>Use o código da proposta ou obra, como VERS1917.</p>
+            </div>
+        </div>
+        <div class="form-grid">
+            {% for campo in form %}
+                <div class="form-group {% if campo.name == 'descricao' %}form-group-full{% endif %}">
+                    <label for="{{ campo.id_for_label }}">
+                        {% if campo.name == "ativo" %}{{ campo }}{% endif %}
+                        {{ campo.label }}
+                    </label>
+                    {% if campo.name != "ativo" %}{{ campo }}{% endif %}
+                    {{ campo.errors }}
+                    {% if campo.help_text %}<small>{{ campo.help_text }}</small>{% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <a href="{% url 'financeiro:centros_custo' %}" class="btn btn-light">Cancelar</a>
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg"></i> Salvar Obra
+        </button>
+    </div>
+</form>
+{% endblock %}

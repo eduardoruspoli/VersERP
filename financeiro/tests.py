@@ -2,12 +2,27 @@ from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 
 from pessoas.models import Pessoa
 
-from .forms import CriarLancamentoOFXForm, LancamentoFinanceiroForm
-from .models import Empresa, LancamentoFinanceiro, PlanoConta
+from .forms import (
+    CriarLancamentoOFXForm,
+    LancamentoFinanceiroForm,
+    RateioCentroCustoFormSet,
+)
+from .models import (
+    CentroCusto,
+    ContaBancaria,
+    Empresa,
+    ImportacaoOFX,
+    LancamentoFinanceiro,
+    PlanoConta,
+    RateioCentroCusto,
+    MovimentoOFX,
+)
 
 
 class PlanoContaModelTests(TestCase):
@@ -258,4 +273,325 @@ class PlanoContaLancamentoTests(TestCase):
         self.assertIn(self.contas["RECEITA"], contas_receber)
         self.assertTrue(
             all(conta.tipo == "RECEITA" for conta in contas_receber)
+        )
+
+
+class ObrasRateioTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.empresa = Empresa.objects.create(
+            razao_social="Empresa Obras",
+            cnpj="11.111.111/0001-11",
+        )
+        cls.outra_empresa = Empresa.objects.create(
+            razao_social="Outra Empresa",
+            cnpj="22.222.222/0001-22",
+        )
+        cls.cliente = Pessoa.objects.create(
+            razao_social="Cliente da Obra",
+        )
+        cls.fornecedor = Pessoa.objects.create(
+            razao_social="Fornecedor da Obra",
+            classificacao=Pessoa.Classificacao.FORNECEDOR,
+        )
+        cls.obra = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            cliente=cls.cliente,
+            codigo="VERS1917",
+            nome="Obra VERS1917",
+        )
+        cls.outra_obra = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            codigo="VERS1920",
+            nome="Obra VERS1920",
+        )
+        cls.obra_outra_empresa = CentroCusto.objects.create(
+            empresa=cls.outra_empresa,
+            codigo="VERS1917",
+            nome="Obra de outra empresa",
+        )
+        cls.lancamento = LancamentoFinanceiro.objects.create(
+            empresa=cls.empresa,
+            pessoa=cls.fornecedor,
+            tipo="PAGAR",
+            descricao="Materiais da obra",
+            valor_total=Decimal("100.00"),
+            plano_conta=PlanoConta.objects.get(codigo="5.01.01"),
+        )
+        cls.usuario = get_user_model().objects.create_superuser(
+            username="admin-obras",
+            email="obras@example.com",
+            password="senha-teste",
+        )
+
+    def dados_formset(self, linhas):
+        dados = {
+            "rateios-TOTAL_FORMS": str(len(linhas)),
+            "rateios-INITIAL_FORMS": "0",
+            "rateios-MIN_NUM_FORMS": "0",
+            "rateios-MAX_NUM_FORMS": "1000",
+        }
+
+        for indice, linha in enumerate(linhas):
+            for campo, valor in linha.items():
+                dados[f"rateios-{indice}-{campo}"] = str(valor)
+
+        return dados
+
+    def criar_formset(self, linhas, modo="VALOR", valor=Decimal("100.00")):
+        return RateioCentroCustoFormSet(
+            self.dados_formset(linhas),
+            prefix="rateios",
+            empresa=self.empresa,
+            valor_total=valor,
+            modo_rateio=modo,
+        )
+
+    def test_codigo_da_obra_e_unico_por_empresa(self):
+        self.assertEqual(self.obra.codigo, self.obra_outra_empresa.codigo)
+
+        with self.assertRaises(ValidationError):
+            CentroCusto.objects.create(
+                empresa=self.empresa,
+                codigo="VERS1917",
+                nome="Código repetido",
+            )
+
+    def test_rateio_rejeita_obra_de_outra_empresa(self):
+        with self.assertRaisesMessage(ValidationError, "mesma empresa"):
+            RateioCentroCusto.objects.create(
+                lancamento=self.lancamento,
+                centro_custo=self.obra_outra_empresa,
+                valor=Decimal("100.00"),
+            )
+
+    def test_rateio_rejeita_nova_obra_inativa_e_preserva_historico(self):
+        rateio = RateioCentroCusto.objects.create(
+            lancamento=self.lancamento,
+            centro_custo=self.obra,
+            valor=Decimal("100.00"),
+        )
+        self.obra.ativo = False
+        self.obra.save()
+
+        rateio.valor = Decimal("100.00")
+        rateio.save()
+
+        with self.assertRaisesMessage(ValidationError, "inativo"):
+            RateioCentroCusto.objects.create(
+                lancamento=self.lancamento,
+                centro_custo=self.obra,
+                valor=Decimal("100.00"),
+            )
+
+    def test_rateio_por_valor_deve_fechar_total(self):
+        valido = self.criar_formset([
+            {"centro_custo": self.obra.pk, "valor": "60,00"},
+            {"centro_custo": self.outra_obra.pk, "valor": "40,00"},
+        ])
+        self.assertTrue(valido.is_valid(), valido.errors)
+
+        invalido = self.criar_formset([
+            {"centro_custo": self.obra.pk, "valor": "90,00"},
+        ])
+        self.assertFalse(invalido.is_valid())
+        self.assertIn("igual ao valor total", str(invalido.non_form_errors()))
+
+    def test_rateio_e_obrigatorio(self):
+        formset = self.criar_formset([])
+        self.assertFalse(formset.is_valid())
+        self.assertIn("ao menos uma obra", str(formset.non_form_errors()))
+
+    def test_rateio_nao_permite_obra_duplicada(self):
+        formset = self.criar_formset([
+            {"centro_custo": self.obra.pk, "valor": "50,00"},
+            {"centro_custo": self.obra.pk, "valor": "50,00"},
+        ])
+        self.assertFalse(formset.is_valid())
+        self.assertIn("mais de uma vez", str(formset.non_form_errors()))
+
+    def test_rateio_percentual_exige_cem_por_cento(self):
+        formset = self.criar_formset(
+            [{"centro_custo": self.obra.pk, "percentual": "99.0000"}],
+            modo="PERCENTUAL",
+        )
+        self.assertFalse(formset.is_valid())
+        self.assertIn("100%", str(formset.non_form_errors()))
+
+    def test_rateio_percentual_distribui_residuo_de_centavos(self):
+        terceira_obra = CentroCusto.objects.create(
+            empresa=self.empresa,
+            codigo="VERS1921",
+            nome="Obra VERS1921",
+        )
+        formset = self.criar_formset(
+            [
+                {"centro_custo": self.obra.pk, "percentual": "33.3333"},
+                {"centro_custo": self.outra_obra.pk, "percentual": "33.3333"},
+                {"centro_custo": terceira_obra.pk, "percentual": "33.3334"},
+            ],
+            modo="PERCENTUAL",
+        )
+        self.assertTrue(formset.is_valid(), formset.errors)
+        self.assertEqual(
+            [item["valor"] for item in formset.rateios_calculados],
+            [Decimal("33.33"), Decimal("33.33"), Decimal("33.34")],
+        )
+
+    def dados_lancamento_manual(self, incluir_rateio=True):
+        dados = {
+            "empresa": str(self.empresa.pk),
+            "pessoa": str(self.fornecedor.pk),
+            "descricao": "Combustível da obra",
+            "numero_documento": "NF-1917",
+            "data_emissao": "2026-08-18",
+            "data_competencia": "2026-08-18",
+            "valor_total": "100,00",
+            "plano_conta": str(PlanoConta.objects.get(codigo="5.01.05").pk),
+            "observacoes": "Teste integrado",
+            "condicao_pagamento": "AVISTA",
+            "quantidade_parcelas": "1",
+            "primeiro_vencimento": "2026-08-20",
+            "modo_rateio": "VALOR",
+            "parcelas-TOTAL_FORMS": "1",
+            "parcelas-INITIAL_FORMS": "0",
+            "parcelas-MIN_NUM_FORMS": "0",
+            "parcelas-MAX_NUM_FORMS": "1000",
+            "parcelas-0-numero": "1",
+            "parcelas-0-vencimento": "2026-08-20",
+            "parcelas-0-valor": "100,00",
+            "rateios-TOTAL_FORMS": "1" if incluir_rateio else "0",
+            "rateios-INITIAL_FORMS": "0",
+            "rateios-MIN_NUM_FORMS": "0",
+            "rateios-MAX_NUM_FORMS": "1000",
+        }
+
+        if incluir_rateio:
+            dados.update({
+                "rateios-0-centro_custo": str(self.obra.pk),
+                "rateios-0-valor": "100,00",
+            })
+
+        return dados
+
+    def test_novo_lancamento_manual_exige_e_salva_rateio_atomicamente(self):
+        self.client.force_login(self.usuario)
+        url = reverse("financeiro:nova_conta_pagar")
+        quantidade_inicial = LancamentoFinanceiro.objects.count()
+
+        resposta_invalida = self.client.post(
+            url,
+            self.dados_lancamento_manual(incluir_rateio=False),
+        )
+        self.assertEqual(resposta_invalida.status_code, 200)
+        self.assertEqual(LancamentoFinanceiro.objects.count(), quantidade_inicial)
+
+        resposta = self.client.post(
+            url,
+            self.dados_lancamento_manual(incluir_rateio=True),
+        )
+        self.assertEqual(resposta.status_code, 302)
+        lancamento = LancamentoFinanceiro.objects.latest("pk")
+        self.assertEqual(lancamento.rateios_centro_custo.count(), 1)
+        self.assertEqual(
+            lancamento.rateios_centro_custo.get().valor,
+            Decimal("100.00"),
+        )
+        detalhe = self.client.get(
+            reverse("financeiro:detalhe_conta_pagar", args=[lancamento.pk])
+        )
+        self.assertContains(detalhe, "VERS1917")
+
+    def test_telas_de_obras_listam_e_preservam_inativas(self):
+        self.client.force_login(self.usuario)
+        resposta = self.client.get(reverse("financeiro:centros_custo"))
+        self.assertContains(resposta, "VERS1917")
+        self.assertContains(resposta, "Obras / Centros de Custo")
+
+        resposta_status = self.client.post(
+            reverse(
+                "financeiro:alternar_status_centro_custo",
+                args=[self.obra.pk],
+            )
+        )
+        self.assertEqual(resposta_status.status_code, 302)
+        self.obra.refresh_from_db()
+        self.assertFalse(self.obra.ativo)
+        self.assertTrue(
+            CentroCusto.objects.filter(pk=self.obra.pk).exists()
+        )
+
+    def test_fluxo_ofx_exige_rateio_por_obra(self):
+        conta = ContaBancaria.objects.create(
+            empresa=self.empresa,
+            banco="Banco Teste",
+        )
+        importacao = ImportacaoOFX.objects.create(
+            conta_bancaria=conta,
+            nome_arquivo="teste.ofx",
+            status="CONCLUIDA",
+        )
+        movimento = MovimentoOFX.objects.create(
+            importacao=importacao,
+            conta_bancaria=conta,
+            identificador="FITID-OBRA",
+            data=date.today(),
+            tipo="SAIDA",
+            valor=Decimal("100.00"),
+            descricao="Material da obra",
+        )
+        self.client.force_login(self.usuario)
+        quantidade_inicial = LancamentoFinanceiro.objects.count()
+        resposta = self.client.post(
+            reverse(
+                "financeiro:criar_lancamento_movimento_ofx",
+                args=[movimento.pk],
+            ),
+            {
+                "pessoa": str(self.fornecedor.pk),
+                "descricao": "Material da obra",
+                "numero_documento": "OFX-1",
+                "plano_conta": str(
+                    PlanoConta.objects.get(codigo="5.01.01").pk
+                ),
+                "observacoes": "",
+                "modo_rateio": "VALOR",
+                "rateios-TOTAL_FORMS": "0",
+                "rateios-INITIAL_FORMS": "0",
+                "rateios-MIN_NUM_FORMS": "0",
+                "rateios-MAX_NUM_FORMS": "1000",
+            },
+        )
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(LancamentoFinanceiro.objects.count(), quantidade_inicial)
+
+        dados_validos = {
+            "pessoa": str(self.fornecedor.pk),
+            "descricao": "Material da obra",
+            "numero_documento": "OFX-1",
+            "plano_conta": str(
+                PlanoConta.objects.get(codigo="5.01.01").pk
+            ),
+            "observacoes": "",
+            "modo_rateio": "VALOR",
+            "rateios-TOTAL_FORMS": "1",
+            "rateios-INITIAL_FORMS": "0",
+            "rateios-MIN_NUM_FORMS": "0",
+            "rateios-MAX_NUM_FORMS": "1000",
+            "rateios-0-centro_custo": str(self.obra.pk),
+            "rateios-0-valor": "100,00",
+        }
+        resposta_valida = self.client.post(
+            reverse(
+                "financeiro:criar_lancamento_movimento_ofx",
+                args=[movimento.pk],
+            ),
+            dados_validos,
+        )
+        self.assertEqual(resposta_valida.status_code, 302)
+        lancamento = LancamentoFinanceiro.objects.latest("pk")
+        self.assertEqual(lancamento.origem, "CONCILIACAO")
+        self.assertEqual(
+            lancamento.rateios_centro_custo.get().centro_custo,
+            self.obra,
         )

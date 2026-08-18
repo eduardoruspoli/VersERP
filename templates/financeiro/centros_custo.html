@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Obras / Centros de Custo | VersERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Obras / Centros de Custo</h1>
+        <p>Propostas e obras usadas para apuração de custos, receitas e resultado.</p>
+    </div>
+    <div class="form-actions">
+        <a href="{% url 'financeiro:index' %}" class="btn btn-light">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+        {% if perms.financeiro.add_centrocusto %}
+            <a href="{% url 'financeiro:novo_centro_custo' %}" class="btn btn-primary">
+                <i class="bi bi-plus-lg"></i> Nova Obra
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="dashboard-panel">
+    <div class="panel-header"><div><h2>Resumo</h2><span>Obras cadastradas</span></div></div>
+    <div class="form-grid">
+        <div class="form-group"><label>Total</label><strong>{{ total_centros }}</strong></div>
+        <div class="form-group"><label>Ativas</label><strong>{{ total_ativos }}</strong></div>
+        <div class="form-group"><label>Inativas</label><strong>{{ total_inativos }}</strong></div>
+    </div>
+</div>
+
+<div class="dashboard-panel">
+    <div class="panel-header"><div><h2>Filtros</h2><span>Localize uma obra</span></div></div>
+    <form method="get" class="verserp-form">
+        <div class="form-grid">
+            <div class="form-group form-group-wide">
+                <label for="id_q">Pesquisar</label>
+                <input id="id_q" name="q" value="{{ filtro_busca }}" class="form-control" placeholder="Código, obra ou cliente">
+            </div>
+            <div class="form-group">
+                <label for="id_empresa">Empresa</label>
+                <select id="id_empresa" name="empresa" class="form-select">
+                    <option value="">Todas</option>
+                    {% for empresa in empresas %}
+                        <option value="{{ empresa.pk }}" {% if filtro_empresa == empresa.pk|stringformat:'s' %}selected{% endif %}>{{ empresa }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="id_status">Status</label>
+                <select id="id_status" name="status" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="ATIVO" {% if filtro_status == 'ATIVO' %}selected{% endif %}>Ativas</option>
+                    <option value="INATIVO" {% if filtro_status == 'INATIVO' %}selected{% endif %}>Inativas</option>
+                </select>
+            </div>
+            <div class="form-group form-group-wide">
+                <div class="form-actions">
+                    <a href="{% url 'financeiro:centros_custo' %}" class="btn btn-light">Limpar</a>
+                    <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> Filtrar</button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div class="dashboard-panel">
+    <div class="panel-header"><div><h2>Obras</h2><span>{{ centros|length }} encontrada{{ centros|length|pluralize }}</span></div></div>
+    <div class="table-responsive">
+        <table class="verserp-table">
+            <thead><tr><th>Código</th><th>Obra</th><th>Empresa</th><th>Cliente</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>
+                {% for centro in centros %}
+                    <tr>
+                        <td><strong>{{ centro.codigo }}</strong></td>
+                        <td>{{ centro.nome }}{% if centro.descricao %}<br><small>{{ centro.descricao }}</small>{% endif %}</td>
+                        <td>{{ centro.empresa }}</td>
+                        <td>{{ centro.cliente|default:"—" }}</td>
+                        <td><span class="status-badge {% if centro.ativo %}status-active{% else %}status-inactive{% endif %}">{% if centro.ativo %}Ativa{% else %}Inativa{% endif %}</span></td>
+                        <td class="table-actions">
+                            {% if perms.financeiro.change_centrocusto %}
+                                <a href="{% url 'financeiro:editar_centro_custo' centro.pk %}" class="btn btn-light" title="Editar"><i class="bi bi-pencil"></i></a>
+                                <form method="post" action="{% url 'financeiro:alternar_status_centro_custo' centro.pk %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-light" title="{% if centro.ativo %}Inativar{% else %}Ativar{% endif %}">
+                                        <i class="bi {% if centro.ativo %}bi-pause-circle{% else %}bi-play-circle{% endif %}"></i>
+                                    </button>
+                                </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="6"><div class="empty-state"><i class="bi bi-buildings"></i><h3>Nenhuma obra encontrada</h3><p>Cadastre a primeira proposta ou obra.</p></div></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

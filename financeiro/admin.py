@@ -94,18 +94,22 @@ class PlanoContaAdmin(admin.ModelAdmin):
 @admin.register(CentroCusto)
 class CentroCustoAdmin(admin.ModelAdmin):
     list_display = (
+        "empresa",
         "codigo",
         "nome",
+        "cliente",
         "ativo",
     )
 
     list_filter = (
+        "empresa",
         "ativo",
     )
 
     search_fields = (
         "codigo",
         "nome",
+        "cliente__razao_social",
     )
 
 class ParcelaFinanceiraInlineFormSet(BaseInlineFormSet):

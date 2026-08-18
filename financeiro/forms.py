@@ -1,10 +1,12 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
 from django import forms
-from django.forms import formset_factory
+from django.db.models import Q
+from django.forms import BaseFormSet, formset_factory
 
 from .models import (
     BaixaFinanceira,
+    CentroCusto,
     ContaBancaria,
     LancamentoFinanceiro,
     PlanoConta,
@@ -44,6 +46,263 @@ class DecimalBRField(forms.DecimalField):
                 )
 
         return super().to_python(value)
+
+
+class CentroCustoForm(forms.ModelForm):
+
+    class Meta:
+        model = CentroCusto
+        fields = [
+            "empresa",
+            "codigo",
+            "nome",
+            "cliente",
+            "descricao",
+            "ativo",
+        ]
+        widgets = {
+            "empresa": forms.Select(attrs={"class": "form-select"}),
+            "codigo": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "Ex.: VERS1917",
+                    "autocomplete": "off",
+                }
+            ),
+            "nome": forms.TextInput(attrs={"class": "form-control"}),
+            "cliente": forms.Select(attrs={"class": "form-select"}),
+            "descricao": forms.Textarea(
+                attrs={"class": "form-control", "rows": 4}
+            ),
+            "ativo": forms.CheckboxInput(
+                attrs={"class": "form-check-input"}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        queryset = self.fields["cliente"].queryset.filter(ativo=True)
+
+        if self.instance and self.instance.cliente_id:
+            queryset = self.fields["cliente"].queryset.filter(
+                Q(ativo=True)
+                | Q(pk=self.instance.cliente_id)
+            )
+
+        self.fields["cliente"].queryset = queryset.order_by("razao_social")
+        self.fields["cliente"].empty_label = "Nenhum cliente selecionado"
+
+    def clean_codigo(self):
+        return self.cleaned_data["codigo"].strip().upper()
+
+    def clean_nome(self):
+        return self.cleaned_data["nome"].strip()
+
+
+class RateioCentroCustoForm(forms.Form):
+    centro_custo = forms.ModelChoiceField(
+        label="Obra",
+        queryset=CentroCusto.objects.none(),
+        empty_label="Selecione a obra",
+        widget=forms.Select(attrs={"class": "form-select rateio-centro"}),
+    )
+    valor = DecimalBRField(
+        label="Valor",
+        required=False,
+        max_digits=15,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control campo-moeda rateio-valor",
+                "inputmode": "decimal",
+                "autocomplete": "off",
+            }
+        ),
+    )
+    percentual = DecimalBRField(
+        label="Percentual",
+        required=False,
+        max_digits=7,
+        decimal_places=4,
+        min_value=Decimal("0.0001"),
+        max_value=Decimal("100.0000"),
+        widget=forms.NumberInput(
+            attrs={
+                "class": "form-control rateio-percentual",
+                "step": "0.0001",
+                "min": "0.0001",
+                "max": "100",
+            }
+        ),
+    )
+
+    def __init__(
+        self,
+        *args,
+        empresa=None,
+        centros_existentes=(),
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+
+        queryset = CentroCusto.objects.filter(ativo=True)
+
+        if empresa is not None:
+            queryset = CentroCusto.objects.filter(
+                empresa=empresa,
+            ).filter(
+                Q(ativo=True)
+                | Q(pk__in=centros_existentes)
+            )
+
+        self.fields["centro_custo"].queryset = queryset.order_by("codigo")
+
+
+class BaseRateioCentroCustoFormSet(BaseFormSet):
+
+    def __init__(
+        self,
+        *args,
+        empresa=None,
+        valor_total=None,
+        modo_rateio="VALOR",
+        centros_existentes=(),
+        **kwargs,
+    ):
+        self.empresa = empresa
+        self.valor_total = valor_total
+        self.modo_rateio = modo_rateio
+        self.centros_existentes = tuple(centros_existentes)
+        self.rateios_calculados = []
+        super().__init__(*args, **kwargs)
+
+    def get_form_kwargs(self, index):
+        kwargs = super().get_form_kwargs(index)
+        kwargs.update({
+            "empresa": self.empresa,
+            "centros_existentes": self.centros_existentes,
+        })
+        return kwargs
+
+    def clean(self):
+        super().clean()
+
+        if any(self.errors):
+            return
+
+        linhas = []
+        centros = set()
+
+        for form in self.forms:
+            dados = form.cleaned_data
+
+            if not dados or dados.get("DELETE"):
+                continue
+
+            centro = dados.get("centro_custo")
+
+            if centro is None:
+                continue
+
+            if centro.pk in centros:
+                raise forms.ValidationError(
+                    "A mesma obra não pode aparecer mais de uma vez no rateio."
+                )
+
+            centros.add(centro.pk)
+
+            if centro.empresa_id != getattr(self.empresa, "pk", None):
+                raise forms.ValidationError(
+                    "Todas as obras devem pertencer à empresa do lançamento."
+                )
+
+            linhas.append(dados)
+
+        if not linhas:
+            raise forms.ValidationError(
+                "Informe ao menos uma obra para o rateio."
+            )
+
+        if self.valor_total is None:
+            raise forms.ValidationError(
+                "Informe o valor total do lançamento antes do rateio."
+            )
+
+        if self.modo_rateio == "PERCENTUAL":
+            self._calcular_por_percentual(linhas)
+        else:
+            self._validar_por_valor(linhas)
+
+    def _validar_por_valor(self, linhas):
+        if any(dados.get("valor") is None for dados in linhas):
+            raise forms.ValidationError(
+                "Informe o valor de todas as linhas do rateio."
+            )
+
+        total = sum(
+            (dados["valor"] for dados in linhas),
+            Decimal("0.00"),
+        )
+
+        if total != self.valor_total:
+            raise forms.ValidationError(
+                "A soma do rateio deve ser igual ao valor total do lançamento."
+            )
+
+        self.rateios_calculados = [
+            {
+                "centro_custo": dados["centro_custo"],
+                "valor": dados["valor"],
+            }
+            for dados in linhas
+        ]
+
+    def _calcular_por_percentual(self, linhas):
+        if any(dados.get("percentual") is None for dados in linhas):
+            raise forms.ValidationError(
+                "Informe o percentual de todas as linhas do rateio."
+            )
+
+        total_percentual = sum(
+            (dados["percentual"] for dados in linhas),
+            Decimal("0.0000"),
+        )
+
+        if total_percentual != Decimal("100.0000"):
+            raise forms.ValidationError(
+                "A soma dos percentuais do rateio deve ser igual a 100%."
+            )
+
+        calculados = []
+        total_calculado = Decimal("0.00")
+
+        for indice, dados in enumerate(linhas):
+            if indice == len(linhas) - 1:
+                valor = self.valor_total - total_calculado
+            else:
+                valor = (
+                    self.valor_total
+                    * dados["percentual"]
+                    / Decimal("100")
+                ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                total_calculado += valor
+
+            calculados.append({
+                "centro_custo": dados["centro_custo"],
+                "valor": valor,
+            })
+
+        self.rateios_calculados = calculados
+
+
+RateioCentroCustoFormSet = formset_factory(
+    RateioCentroCustoForm,
+    formset=BaseRateioCentroCustoFormSet,
+    extra=1,
+    can_delete=True,
+)
 
 
 class PlanoContaForm(forms.ModelForm):
@@ -188,6 +447,16 @@ class PlanoContaForm(forms.ModelForm):
 
 
 class LancamentoFinanceiroForm(forms.ModelForm):
+
+    modo_rateio = forms.ChoiceField(
+        label="Ratear por",
+        choices=[
+            ("VALOR", "Valor"),
+            ("PERCENTUAL", "Percentual"),
+        ],
+        initial="VALOR",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
 
     condicao_pagamento = forms.ChoiceField(
         label="Condição de pagamento",
@@ -674,6 +943,16 @@ class ImportacaoOFXForm(forms.Form):
         return arquivo
 
 class CriarLancamentoOFXForm(forms.ModelForm):
+
+    modo_rateio = forms.ChoiceField(
+        label="Ratear por",
+        choices=[
+            ("VALOR", "Valor"),
+            ("PERCENTUAL", "Percentual"),
+        ],
+        initial="VALOR",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
 
     class Meta:
         model = LancamentoFinanceiro

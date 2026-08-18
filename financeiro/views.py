@@ -18,22 +18,27 @@ from django.utils.dateparse import parse_date
 
 from .forms import (
     BaixaFinanceiraForm,
+    CentroCustoForm,
     CriarLancamentoOFXForm,
     ImportacaoOFXForm,
     LancamentoFinanceiroForm,
     ParcelaFormSet,
     PlanoContaForm,
+    RateioCentroCustoFormSet,
     TransferenciaBancariaForm,
 )
 from .models import (
     BaixaFinanceira,
+    CentroCusto,
     ContaBancaria,
+    Empresa,
     ImportacaoOFX,
     LancamentoFinanceiro,
     MovimentacaoBancaria,
     MovimentoOFX,
     ParcelaFinanceira,
     PlanoConta,
+    RateioCentroCusto,
     TransferenciaBancaria,
 )
 from .ofx import (
@@ -161,6 +166,23 @@ def calcular_totais_lancamento(
     )
 
 
+def rateios_detalhe(lancamento):
+    rateios = list(
+        lancamento.rateios_centro_custo.select_related(
+            "centro_custo"
+        )
+    )
+
+    for rateio in rateios:
+        rateio.percentual_calculado = (
+            rateio.valor
+            * Decimal("100")
+            / lancamento.valor_total
+        ).quantize(Decimal("0.01"))
+
+    return rateios
+
+
 def dados_iniciais_parcelas(
     lancamento,
 ):
@@ -244,6 +266,39 @@ def salvar_novas_parcelas(
     )
 
 
+def dados_iniciais_rateios(lancamento):
+    return [
+        {
+            "centro_custo": rateio.centro_custo_id,
+            "valor": rateio.valor,
+        }
+        for rateio in lancamento.rateios_centro_custo.all()
+    ]
+
+
+def empresa_enviada(request, form):
+    if form.is_valid():
+        return form.cleaned_data.get("empresa")
+
+    empresa_id = request.POST.get("empresa")
+
+    if empresa_id and empresa_id.isdigit():
+        return Empresa.objects.filter(pk=empresa_id).first()
+
+    return None
+
+
+def salvar_rateios(lancamento, rateio_formset):
+    lancamento.rateios_centro_custo.all().delete()
+
+    for dados in rateio_formset.rateios_calculados:
+        RateioCentroCusto.objects.create(
+            lancamento=lancamento,
+            centro_custo=dados["centro_custo"],
+            valor=dados["valor"],
+        )
+
+
 def criar_lancamento_financeiro(
     request,
     tipo,
@@ -256,6 +311,7 @@ def criar_lancamento_financeiro(
             request.POST,
             tipo=tipo,
         )
+        form.instance.tipo = tipo
 
         parcela_formset = (
             preparar_formset_parcelas(
@@ -266,6 +322,26 @@ def criar_lancamento_financeiro(
         form_valido = (
             form.is_valid()
         )
+
+        empresa = empresa_enviada(request, form)
+        valor_rateio = (
+            form.cleaned_data.get("valor_total")
+            if form_valido
+            else None
+        )
+        modo_rateio = (
+            form.cleaned_data.get("modo_rateio", "VALOR")
+            if form_valido
+            else request.POST.get("modo_rateio", "VALOR")
+        )
+        rateio_formset = RateioCentroCustoFormSet(
+            request.POST,
+            prefix="rateios",
+            empresa=empresa,
+            valor_total=valor_rateio,
+            modo_rateio=modo_rateio,
+        )
+        rateios_validos = rateio_formset.is_valid()
 
         parcelas_validas = (
             parcela_formset.is_valid()
@@ -301,6 +377,7 @@ def criar_lancamento_financeiro(
         if (
             form_valido
             and parcelas_validas
+            and rateios_validos
         ):
             if not parcelas_completas:
                 form.add_error(
@@ -357,6 +434,10 @@ def criar_lancamento_financeiro(
                             lancamento,
                             parcela_formset,
                         )
+                        salvar_rateios(
+                            lancamento,
+                            rateio_formset,
+                        )
 
                     messages.success(
                         request,
@@ -380,12 +461,16 @@ def criar_lancamento_financeiro(
                 prefix="parcelas"
             )
         )
+        rateio_formset = RateioCentroCustoFormSet(
+            prefix="rateios",
+        )
 
     contexto = {
         "form": form,
         "parcela_formset": (
             parcela_formset
         ),
+        "rateio_formset": rateio_formset,
         "tipo_lancamento": tipo,
         "modo_edicao": False,
         "possui_baixas": False,
@@ -429,6 +514,7 @@ def editar_lancamento_financeiro(
                 tipo=tipo,
             )
         )
+        form.instance.tipo = tipo
 
         parcela_formset = (
             preparar_formset_parcelas(
@@ -439,6 +525,32 @@ def editar_lancamento_financeiro(
         form_valido = (
             form.is_valid()
         )
+
+        empresa = empresa_enviada(request, form)
+        valor_rateio = (
+            form.cleaned_data.get("valor_total")
+            if form_valido
+            else None
+        )
+        modo_rateio = (
+            form.cleaned_data.get("modo_rateio", "VALOR")
+            if form_valido
+            else request.POST.get("modo_rateio", "VALOR")
+        )
+        centros_existentes = tuple(
+            lancamento.rateios_centro_custo.values_list(
+                "centro_custo_id", flat=True
+            )
+        )
+        rateio_formset = RateioCentroCustoFormSet(
+            request.POST,
+            prefix="rateios",
+            empresa=empresa,
+            valor_total=valor_rateio,
+            modo_rateio=modo_rateio,
+            centros_existentes=centros_existentes,
+        )
+        rateios_validos = rateio_formset.is_valid()
 
         parcelas_validas = (
             parcela_formset.is_valid()
@@ -486,6 +598,7 @@ def editar_lancamento_financeiro(
         elif (
             form_valido
             and parcelas_validas
+            and rateios_validos
         ):
             if not parcelas_completas:
                 form.add_error(
@@ -547,6 +660,10 @@ def editar_lancamento_financeiro(
                             lancamento_editado,
                             parcela_formset,
                         )
+                        salvar_rateios(
+                            lancamento_editado,
+                            rateio_formset,
+                        )
 
                     messages.success(
                         request,
@@ -575,12 +692,26 @@ def editar_lancamento_financeiro(
                 prefix="parcelas",
             )
         )
+        centros_existentes = tuple(
+            lancamento.rateios_centro_custo.values_list(
+                "centro_custo_id", flat=True
+            )
+        )
+        rateio_formset = RateioCentroCustoFormSet(
+            initial=dados_iniciais_rateios(lancamento),
+            prefix="rateios",
+            empresa=lancamento.empresa,
+            valor_total=lancamento.valor_total,
+            modo_rateio="VALOR",
+            centros_existentes=centros_existentes,
+        )
 
     contexto = {
         "form": form,
         "parcela_formset": (
             parcela_formset
         ),
+        "rateio_formset": rateio_formset,
         "lancamento": lancamento,
         "tipo_lancamento": tipo,
         "modo_edicao": True,
@@ -1369,6 +1500,122 @@ def alternar_status_plano_conta(
 
 
 # ============================================================
+# OBRAS / CENTROS DE CUSTO
+# ============================================================
+
+
+@login_required
+@permission_required(
+    "financeiro.view_centrocusto",
+    raise_exception=True,
+)
+def centros_custo(request):
+    centros = CentroCusto.objects.select_related(
+        "empresa",
+        "cliente",
+    )
+    busca = request.GET.get("q", "").strip()
+    empresa_id = request.GET.get("empresa", "").strip()
+    status = request.GET.get("status", "").strip()
+
+    if busca:
+        centros = centros.filter(
+            Q(codigo__icontains=busca)
+            | Q(nome__icontains=busca)
+            | Q(cliente__razao_social__icontains=busca)
+        )
+
+    if empresa_id.isdigit():
+        centros = centros.filter(empresa_id=empresa_id)
+
+    if status == "ATIVO":
+        centros = centros.filter(ativo=True)
+    elif status == "INATIVO":
+        centros = centros.filter(ativo=False)
+
+    todos = CentroCusto.objects.all()
+    contexto = {
+        "centros": centros,
+        "empresas": Empresa.objects.filter(ativa=True).order_by("razao_social"),
+        "total_centros": todos.count(),
+        "total_ativos": todos.filter(ativo=True).count(),
+        "total_inativos": todos.filter(ativo=False).count(),
+        "filtro_busca": busca,
+        "filtro_empresa": empresa_id,
+        "filtro_status": status,
+    }
+    return render(request, "financeiro/centros_custo.html", contexto)
+
+
+@login_required
+@permission_required(
+    "financeiro.add_centrocusto",
+    raise_exception=True,
+)
+def novo_centro_custo(request):
+    form = CentroCustoForm(request.POST or None)
+
+    if request.method == "POST" and form.is_valid():
+        centro = form.save()
+        messages.success(
+            request,
+            f"Obra {centro.codigo} cadastrada com sucesso.",
+        )
+        return redirect("financeiro:centros_custo")
+
+    return render(
+        request,
+        "financeiro/centro_custo_formulario.html",
+        {"form": form, "modo_edicao": False},
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_centrocusto",
+    raise_exception=True,
+)
+def editar_centro_custo(request, pk):
+    centro = get_object_or_404(CentroCusto, pk=pk)
+    form = CentroCustoForm(request.POST or None, instance=centro)
+
+    if request.method == "POST" and form.is_valid():
+        centro = form.save()
+        messages.success(
+            request,
+            f"Obra {centro.codigo} atualizada com sucesso.",
+        )
+        return redirect("financeiro:centros_custo")
+
+    return render(
+        request,
+        "financeiro/centro_custo_formulario.html",
+        {"form": form, "centro": centro, "modo_edicao": True},
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.change_centrocusto",
+    raise_exception=True,
+)
+def alternar_status_centro_custo(request, pk):
+    centro = get_object_or_404(CentroCusto, pk=pk)
+
+    if request.method != "POST":
+        return redirect("financeiro:centros_custo")
+
+    centro.ativo = not centro.ativo
+    centro.save(update_fields=["ativo", "atualizado_em"])
+    messages.success(
+        request,
+        f"Obra {centro.codigo} "
+        f"{'ativada' if centro.ativo else 'inativada'} com sucesso.",
+    )
+    return redirect("financeiro:centros_custo")
+
+
+# ============================================================
 # CONTAS A PAGAR
 # ============================================================
 
@@ -1428,6 +1675,7 @@ def detalhe_conta_pagar(
             total_baixado
         ),
         "saldo_total": saldo_total,
+        "rateios": rateios_detalhe(lancamento),
     }
 
     return render(
@@ -1580,6 +1828,7 @@ def detalhe_conta_receber(
             total_baixado
         ),
         "saldo_total": saldo_total,
+        "rateios": rateios_detalhe(lancamento),
     }
 
     return render(
@@ -3661,7 +3910,15 @@ def criar_lancamento_movimento_ofx(
             tipo=tipo_lancamento,
         )
 
-        if form.is_valid():
+        rateio_formset = RateioCentroCustoFormSet(
+            request.POST,
+            prefix="rateios",
+            empresa=movimento.conta_bancaria.empresa,
+            valor_total=movimento.valor,
+            modo_rateio=request.POST.get("modo_rateio", "VALOR"),
+        )
+
+        if form.is_valid() and rateio_formset.is_valid():
             with transaction.atomic():
                 lancamento = form.save(
                     commit=False
@@ -3700,6 +3957,11 @@ def criar_lancamento_movimento_ofx(
                 lancamento.full_clean()
 
                 lancamento.save()
+
+                salvar_rateios(
+                    lancamento,
+                    rateio_formset,
+                )
 
                 parcela = ParcelaFinanceira(
                     lancamento=lancamento,
@@ -3794,6 +4056,12 @@ def criar_lancamento_movimento_ofx(
                 ),
             },
         )
+        rateio_formset = RateioCentroCustoFormSet(
+            prefix="rateios",
+            empresa=movimento.conta_bancaria.empresa,
+            valor_total=movimento.valor,
+            modo_rateio="VALOR",
+        )
 
     contexto = {
         "form": form,
@@ -3801,6 +4069,8 @@ def criar_lancamento_movimento_ofx(
         "tipo_lancamento": (
             tipo_lancamento
         ),
+        "rateio_formset": rateio_formset,
+        "valor_rateio": movimento.valor,
     }
 
     return render(

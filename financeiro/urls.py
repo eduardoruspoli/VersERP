@@ -48,6 +48,35 @@ urlpatterns = [
 
 
     # -------------------------------------------------
+    # OBRAS / CENTROS DE CUSTO
+    # -------------------------------------------------
+
+    path(
+        "centros-de-custo/",
+        views.centros_custo,
+        name="centros_custo",
+    ),
+
+    path(
+        "centros-de-custo/novo/",
+        views.novo_centro_custo,
+        name="novo_centro_custo",
+    ),
+
+    path(
+        "centros-de-custo/<int:pk>/editar/",
+        views.editar_centro_custo,
+        name="editar_centro_custo",
+    ),
+
+    path(
+        "centros-de-custo/<int:pk>/alternar-status/",
+        views.alternar_status_centro_custo,
+        name="alternar_status_centro_custo",
+    ),
+
+
+    # -------------------------------------------------
     # CONTAS A PAGAR
     # -------------------------------------------------
 

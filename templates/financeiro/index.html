@@ -187,7 +187,12 @@ Financeiro | VersERP
 
     <!-- CENTROS DE CUSTO -->
 
-    <div class="dashboard-card dashboard-card-disabled">
+    {% if perms.financeiro.view_centrocusto %}
+
+    <a
+        href="{% url 'financeiro:centros_custo' %}"
+        class="dashboard-card"
+    >
 
         <div class="dashboard-card-icon">
             <i class="bi bi-building"></i>
@@ -196,20 +201,18 @@ Financeiro | VersERP
         <div>
 
             <h3>
-                Centros de Custo
+                Obras / Centros de Custo
             </h3>
 
             <p>
-                Obras, projetos e áreas administrativas
+                Custos, receitas e resultado por obra
             </p>
-
-            <small>
-                Em desenvolvimento
-            </small>
 
         </div>
 
-    </div>
+    </a>
+
+    {% endif %}
 
 
 </div>
