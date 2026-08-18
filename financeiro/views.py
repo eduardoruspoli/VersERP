@@ -21,6 +21,7 @@ from .forms import (
     BaixaFinanceiraForm,
     CentroCustoForm,
     CriarLancamentoOFXForm,
+    DREFiltroForm,
     ImportacaoOFXForm,
     LancamentoFinanceiroForm,
     ParcelaFormSet,
@@ -47,7 +48,7 @@ from .ofx import (
     ErroOFX,
     ler_ofx,
 )
-from .services import calcular_relatorio_obra
+from .services import calcular_dre, calcular_relatorio_obra, drilldown_dre
 
 
 # ============================================================
@@ -1668,6 +1669,81 @@ def relatorio_gerencial_obra(request):
         request,
         "financeiro/relatorio_gerencial_obra.html",
         contexto,
+    )
+
+
+@login_required
+@permission_required(
+    "financeiro.view_lancamentofinanceiro",
+    raise_exception=True,
+)
+def dre_gerencial(request):
+    hoje = timezone.localdate()
+    empresa_inicial = (
+        Empresa.objects.filter(ativa=True, principal=True).first()
+        or Empresa.objects.filter(ativa=True).first()
+    )
+    form = DREFiltroForm(
+        request.GET if request.GET else None,
+        initial={
+            "empresa": empresa_inicial,
+            "data_inicial": hoje.replace(month=1, day=1),
+            "data_final": hoje.replace(month=12, day=31),
+            "comparacao": "NENHUMA",
+            "usar_fallback": True,
+        },
+    )
+    dre = None
+    drilldown = None
+    pagina = None
+
+    if request.GET and form.is_valid():
+        dados = form.cleaned_data
+        dre = calcular_dre(
+            empresa=dados["empresa"],
+            data_inicial=dados["data_inicial"],
+            data_final=dados["data_final"],
+            obra=dados["obra"],
+            conta_filtro=dados["plano_conta"],
+            usar_fallback=dados["usar_fallback"],
+            comparacao=dados["comparacao"],
+        )
+        conta_detalhe_id = request.GET.get("conta_detalhe", "")
+        if conta_detalhe_id.isdigit():
+            conta_detalhe = get_object_or_404(
+                PlanoConta,
+                pk=conta_detalhe_id,
+                aceita_lancamento=True,
+                tipo__in=("RECEITA", "CUSTO", "DESPESA"),
+            )
+            drilldown = drilldown_dre(
+                empresa=dados["empresa"],
+                conta=conta_detalhe,
+                data_inicial=dados["data_inicial"],
+                data_final=dados["data_final"],
+                obra=dados["obra"],
+                usar_fallback=dados["usar_fallback"],
+            )
+            drilldown["conta"] = conta_detalhe
+            pagina = Paginator(drilldown["itens"], 20).get_page(
+                request.GET.get("page")
+            )
+
+    parametros = request.GET.copy()
+    parametros.pop("page", None)
+    parametros_sem_detalhe = parametros.copy()
+    parametros_sem_detalhe.pop("conta_detalhe", None)
+    return render(
+        request,
+        "financeiro/dre_gerencial.html",
+        {
+            "form": form,
+            "dre": dre,
+            "drilldown": drilldown,
+            "pagina": pagina,
+            "parametros": parametros.urlencode(),
+            "parametros_sem_detalhe": parametros_sem_detalhe.urlencode(),
+        },
     )
 
 

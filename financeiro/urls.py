@@ -81,6 +81,12 @@ urlpatterns = [
         name="relatorio_gerencial_obra",
     ),
 
+    path(
+        "relatorios/dre/",
+        views.dre_gerencial,
+        name="dre_gerencial",
+    ),
+
 
     # -------------------------------------------------
     # CONTAS A PAGAR

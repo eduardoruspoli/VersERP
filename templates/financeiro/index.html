@@ -231,6 +231,13 @@ Financeiro | VersERP
 
     {% endif %}
 
+    {% if perms.financeiro.view_lancamentofinanceiro %}
+    <a href="{% url 'financeiro:dre_gerencial' %}" class="dashboard-card">
+        <div class="dashboard-card-icon"><i class="bi bi-table"></i></div>
+        <div><h3>DRE Gerencial</h3><p>Resultado consolidado por competência</p></div>
+    </a>
+    {% endif %}
+
 
 </div>
 

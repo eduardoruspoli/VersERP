@@ -11,6 +11,7 @@ from pessoas.models import Pessoa
 
 from .forms import (
     CriarLancamentoOFXForm,
+    DREFiltroForm,
     LancamentoFinanceiroForm,
     RateioCentroCustoFormSet,
     RelatorioObraFiltroForm,
@@ -27,7 +28,12 @@ from .models import (
     MovimentoOFX,
     ParcelaFinanceira,
 )
-from .services import calcular_relatorio_obra, distribuir_valor_rateios
+from .services import (
+    calcular_dre,
+    calcular_relatorio_obra,
+    distribuir_valor_rateios,
+    drilldown_dre,
+)
 
 
 class PlanoContaModelTests(TestCase):
@@ -946,3 +952,350 @@ class RelatorioGerencialObraTests(TestCase):
         self.assertEqual(resposta.status_code, 200)
         self.assertEqual(resposta.context["pagina"].number, 2)
         self.assertEqual(len(resposta.context["pagina"]), 1)
+
+
+class DREGerencialTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.empresa = Empresa.objects.create(
+            razao_social="Empresa DRE TESTE",
+            cnpj="81.000.000/0001-01",
+            principal=True,
+        )
+        cls.outra_empresa = Empresa.objects.create(
+            razao_social="Outra Empresa DRE TESTE",
+            cnpj="82.000.000/0001-02",
+        )
+        cls.pessoa = Pessoa.objects.create(razao_social="Pessoa DRE TESTE")
+        cls.conta_bancaria = ContaBancaria.objects.create(
+            empresa=cls.empresa,
+            banco="Banco DRE TESTE",
+            agencia="0001",
+            conta="98765",
+            tipo="CORRENTE",
+        )
+        cls.obra = CentroCusto.objects.create(
+            empresa=cls.empresa, codigo="DRE-TESTE-1", nome="Obra DRE"
+        )
+        cls.outra_obra = CentroCusto.objects.create(
+            empresa=cls.empresa, codigo="DRE-TESTE-2", nome="Outra Obra DRE"
+        )
+        cls.obra_inativa = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            codigo="DRE-TESTE-3",
+            nome="Obra DRE Inativa",
+            ativo=False,
+        )
+        cls.receita = PlanoConta.objects.get(codigo="4.01.01")
+        cls.receita_pai = PlanoConta.objects.get(codigo="4.01")
+        cls.receita_financeira = PlanoConta.objects.get(codigo="4.02.01")
+        cls.custo = PlanoConta.objects.get(codigo="5.01.01")
+        cls.custo_pai = PlanoConta.objects.get(codigo="5.01")
+        cls.despesa = PlanoConta.objects.get(codigo="6.01.01")
+        cls.despesa_financeira = PlanoConta.objects.get(codigo="6.09.01")
+        cls.receita_redutora = PlanoConta.objects.create(
+            codigo="T.DRE.4.R",
+            nome="Redutora de Receita TESTE",
+            tipo="RECEITA",
+            natureza="DEVEDORA",
+            conta_redutora=True,
+            conta_pai=cls.receita_pai,
+        )
+        cls.custo_redutor = PlanoConta.objects.create(
+            codigo="T.DRE.5.R",
+            nome="Redutora de Custo TESTE",
+            tipo="CUSTO",
+            natureza="CREDORA",
+            conta_redutora=True,
+            conta_pai=cls.custo_pai,
+        )
+        cls.receita_financeira_neta = PlanoConta.objects.create(
+            codigo="T.DRE.RF",
+            nome="Receita Financeira Neta TESTE",
+            tipo="RECEITA",
+            natureza="CREDORA",
+            conta_pai=cls.receita_financeira,
+        )
+
+    def criar_lancamento(
+        self,
+        tipo,
+        conta,
+        valor,
+        competencia=date(2026, 3, 10),
+        emissao=date(2026, 3, 1),
+        empresa=None,
+        status="ABERTO",
+        rateios=(),
+        descricao="Lançamento DRE TESTE",
+    ):
+        lancamento = LancamentoFinanceiro.objects.create(
+            empresa=empresa or self.empresa,
+            pessoa=self.pessoa,
+            tipo=tipo,
+            descricao=descricao,
+            data_emissao=emissao,
+            data_competencia=competencia,
+            valor_total=valor,
+            plano_conta=conta,
+            status=status,
+        )
+        for obra, parte in rateios:
+            RateioCentroCusto.objects.create(
+                lancamento=lancamento, centro_custo=obra, valor=parte
+            )
+        return lancamento
+
+    def dre(self, **kwargs):
+        dados = {
+            "empresa": self.empresa,
+            "data_inicial": date(2026, 1, 1),
+            "data_final": date(2026, 12, 31),
+        }
+        dados.update(kwargs)
+        return calcular_dre(**dados)
+
+    def test_calculos_e_margens_da_estrutura_completa(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("1000"))
+        self.criar_lancamento("PAGAR", self.custo, Decimal("300"))
+        self.criar_lancamento("PAGAR", self.despesa, Decimal("100"))
+        self.criar_lancamento(
+            "RECEBER", self.receita_financeira, Decimal("50")
+        )
+        self.criar_lancamento(
+            "PAGAR", self.despesa_financeira, Decimal("20")
+        )
+
+        resumo = self.dre()["resumo"]
+
+        self.assertEqual(resumo["resultado_bruto"], Decimal("700.00"))
+        self.assertEqual(resumo["resultado_operacional"], Decimal("600.00"))
+        self.assertEqual(resumo["resultado_financeiro"], Decimal("30.00"))
+        self.assertEqual(resumo["resultado_periodo"], Decimal("630.00"))
+        self.assertEqual(resumo["margem_bruta"], Decimal("70.00"))
+        self.assertEqual(resumo["margem_operacional"], Decimal("60.00"))
+        self.assertEqual(resumo["margem_periodo"], Decimal("63.00"))
+
+    def test_margens_sem_receita_sao_nulas(self):
+        self.criar_lancamento("PAGAR", self.custo, Decimal("30"))
+        resumo = self.dre()["resumo"]
+        self.assertIsNone(resumo["margem_bruta"])
+        self.assertIsNone(resumo["margem_operacional"])
+        self.assertIsNone(resumo["margem_periodo"])
+
+    def test_consulta_sem_resultados_tem_estado_vazio(self):
+        dre = self.dre()
+        self.assertFalse(dre["tem_dados"])
+        self.assertEqual(dre["resumo"]["resultado_periodo"], Decimal("0.00"))
+
+    def test_ajustes_da_baixa_nao_entram_no_resultado_financeiro(self):
+        lancamento = self.criar_lancamento(
+            "PAGAR", self.custo, Decimal("100")
+        )
+        parcela = ParcelaFinanceira.objects.create(
+            lancamento=lancamento,
+            numero=1,
+            vencimento=date(2026, 3, 20),
+            valor=Decimal("100"),
+        )
+        BaixaFinanceira.objects.create(
+            parcela=parcela,
+            conta_bancaria=self.conta_bancaria,
+            data=date(2026, 3, 20),
+            valor=Decimal("50"),
+            juros=Decimal("10"),
+            multa=Decimal("5"),
+            desconto=Decimal("2"),
+        )
+        resumo = self.dre()["resumo"]
+        self.assertEqual(resumo["custos"], Decimal("100.00"))
+        self.assertEqual(resumo["resultado_financeiro"], Decimal("0.00"))
+
+    def test_hierarquia_subtotaliza_sem_duplicar_agrupadora(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("120"))
+        secao = self.dre()["secoes"][0]
+        linhas = {linha["conta"].pk: linha for linha in secao["linhas"]}
+        self.assertEqual(secao["total"], Decimal("120.00"))
+        self.assertEqual(linhas[self.receita_pai.pk]["valor"], Decimal("120.00"))
+        self.assertEqual(linhas[self.receita.pk]["valor"], Decimal("120.00"))
+
+    def test_contas_redutoras_aplicam_sinal_liquido(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("1000"))
+        self.criar_lancamento("RECEBER", self.receita_redutora, Decimal("100"))
+        self.criar_lancamento("PAGAR", self.custo, Decimal("300"))
+        self.criar_lancamento("PAGAR", self.custo_redutor, Decimal("50"))
+        resumo = self.dre()["resumo"]
+        self.assertEqual(resumo["receitas_operacionais"], Decimal("900.00"))
+        self.assertEqual(resumo["custos"], Decimal("250.00"))
+        self.assertEqual(resumo["resultado_bruto"], Decimal("650.00"))
+
+    def test_financeiro_e_identificado_por_ancestralidade(self):
+        self.criar_lancamento(
+            "RECEBER", self.receita_financeira_neta, Decimal("45")
+        )
+        resumo = self.dre()["resumo"]
+        self.assertEqual(resumo["receitas_operacionais"], Decimal("0.00"))
+        self.assertEqual(resumo["receitas_financeiras"], Decimal("45.00"))
+
+    def test_fallback_emissao_pode_ser_desativado(self):
+        self.criar_lancamento(
+            "RECEBER",
+            self.receita,
+            Decimal("90"),
+            competencia=None,
+            emissao=date(2026, 4, 2),
+        )
+        com_fallback = self.dre(usar_fallback=True)
+        sem_fallback = self.dre(usar_fallback=False)
+        self.assertEqual(com_fallback["resumo"]["receitas_operacionais"], Decimal("90.00"))
+        self.assertEqual(com_fallback["fallback_count"], 1)
+        self.assertEqual(sem_fallback["resumo"]["receitas_operacionais"], Decimal("0.00"))
+        self.assertEqual(sem_fallback["fallback_count"], 0)
+
+    def test_consolidado_nao_duplica_lancamento_rateado(self):
+        self.criar_lancamento(
+            "RECEBER",
+            self.receita,
+            Decimal("100"),
+            rateios=((self.obra, Decimal("60")), (self.outra_obra, Decimal("40"))),
+        )
+        self.assertEqual(
+            self.dre()["resumo"]["receitas_operacionais"], Decimal("100.00")
+        )
+
+    def test_filtro_obra_usa_exclusivamente_valor_rateado(self):
+        self.criar_lancamento(
+            "RECEBER",
+            self.receita,
+            Decimal("100"),
+            rateios=((self.obra, Decimal("60")), (self.outra_obra, Decimal("40"))),
+        )
+        self.assertEqual(
+            self.dre(obra=self.obra)["resumo"]["receitas_operacionais"],
+            Decimal("60.00"),
+        )
+
+    def test_obra_inativa_permanece_consultavel(self):
+        CentroCusto.objects.filter(pk=self.obra_inativa.pk).update(ativo=True)
+        self.obra_inativa.ativo = True
+        self.criar_lancamento(
+            "PAGAR",
+            self.custo,
+            Decimal("70"),
+            rateios=((self.obra_inativa, Decimal("70")),),
+        )
+        CentroCusto.objects.filter(pk=self.obra_inativa.pk).update(ativo=False)
+        self.obra_inativa.ativo = False
+        self.assertEqual(
+            self.dre(obra=self.obra_inativa)["resumo"]["custos"],
+            Decimal("70.00"),
+        )
+
+    def test_cancelados_e_outra_empresa_nao_entram(self):
+        self.criar_lancamento(
+            "RECEBER", self.receita, Decimal("100"), status="CANCELADO"
+        )
+        self.criar_lancamento(
+            "RECEBER",
+            self.receita,
+            Decimal("900"),
+            empresa=self.outra_empresa,
+        )
+        self.assertEqual(
+            self.dre()["resumo"]["receitas_operacionais"], Decimal("0.00")
+        )
+
+    def test_filtro_plano_agrupador_inclui_descendentes(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("110"))
+        self.criar_lancamento("PAGAR", self.custo, Decimal("80"))
+        resumo = self.dre(conta_filtro=self.receita_pai)["resumo"]
+        self.assertEqual(resumo["receitas_operacionais"], Decimal("110.00"))
+        self.assertEqual(resumo["custos"], Decimal("0.00"))
+
+    def test_comparacao_periodo_anterior_equivalente(self):
+        self.criar_lancamento(
+            "RECEBER", self.receita, Decimal("100"), competencia=date(2026, 3, 10)
+        )
+        self.criar_lancamento(
+            "RECEBER", self.receita, Decimal("70"), competencia=date(2026, 2, 10)
+        )
+        dre = calcular_dre(
+            self.empresa,
+            date(2026, 3, 1),
+            date(2026, 3, 31),
+            comparacao="ANTERIOR",
+        )
+        self.assertEqual(dre["periodo_comparativo"], (date(2026, 1, 29), date(2026, 2, 28)))
+        self.assertEqual(dre["resumo_comparativo"]["receitas_operacionais"], Decimal("70.00"))
+
+    def test_comparacao_mesmo_periodo_ano_anterior(self):
+        self.criar_lancamento(
+            "RECEBER", self.receita, Decimal("55"), competencia=date(2025, 3, 10)
+        )
+        dre = calcular_dre(
+            self.empresa,
+            date(2026, 3, 1),
+            date(2026, 3, 31),
+            comparacao="ANO_ANTERIOR",
+        )
+        self.assertEqual(dre["periodo_comparativo"], (date(2025, 3, 1), date(2025, 3, 31)))
+        self.assertEqual(dre["resumo_comparativo"]["receitas_operacionais"], Decimal("55.00"))
+
+    def test_drilldown_fecha_com_valor_analitico(self):
+        self.criar_lancamento("RECEBER", self.receita, Decimal("40"))
+        self.criar_lancamento("RECEBER", self.receita, Decimal("60"))
+        dre = self.dre()
+        linha = next(
+            linha for linha in dre["secoes"][0]["linhas"]
+            if linha["conta"] == self.receita
+        )
+        detalhe = drilldown_dre(
+            self.empresa,
+            self.receita,
+            date(2026, 1, 1),
+            date(2026, 12, 31),
+        )
+        self.assertEqual(detalhe["total"], linha["valor"])
+        self.assertEqual(len(detalhe["itens"]), 2)
+
+    def test_form_isola_obra_por_empresa(self):
+        form = DREFiltroForm({
+            "empresa": self.outra_empresa.pk,
+            "obra": self.obra.pk,
+            "data_inicial": "2026-01-01",
+            "data_final": "2026-12-31",
+            "comparacao": "NENHUMA",
+            "usar_fallback": "on",
+        })
+        self.assertFalse(form.is_valid())
+
+    def test_view_e_drilldown_paginado(self):
+        for indice in range(21):
+            self.criar_lancamento(
+                "RECEBER",
+                self.receita,
+                Decimal("1"),
+                descricao=f"DRE paginação {indice} TESTE",
+            )
+        usuario = get_user_model().objects.create_superuser(
+            username="dre_view_teste",
+            password="senha-teste",
+            email="dre@teste.local",
+        )
+        self.client.force_login(usuario)
+        resposta = self.client.get(
+            reverse("financeiro:dre_gerencial"),
+            {
+                "empresa": self.empresa.pk,
+                "data_inicial": "2026-01-01",
+                "data_final": "2026-12-31",
+                "comparacao": "NENHUMA",
+                "usar_fallback": "on",
+                "conta_detalhe": self.receita.pk,
+                "page": 2,
+            },
+        )
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.context["pagina"].number, 2)
+        self.assertEqual(len(resposta.context["pagina"]), 1)
+        self.assertContains(resposta, "DRE Gerencial Consolidada")

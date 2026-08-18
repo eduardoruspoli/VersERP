@@ -364,6 +364,85 @@ class RelatorioObraFiltroForm(forms.Form):
         return dados
 
 
+class DREFiltroForm(forms.Form):
+    COMPARACAO_CHOICES = [
+        ("NENHUMA", "Sem comparação"),
+        ("ANTERIOR", "Período anterior equivalente"),
+        ("ANO_ANTERIOR", "Mesmo período do ano anterior"),
+    ]
+
+    empresa = forms.ModelChoiceField(
+        label="Empresa",
+        queryset=Empresa.objects.none(),
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    data_inicial = forms.DateField(
+        label="Competência inicial",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    data_final = forms.DateField(
+        label="Competência final",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    obra = forms.ModelChoiceField(
+        label="Obra / Centro de Custo",
+        queryset=CentroCusto.objects.none(),
+        required=False,
+        empty_label="Todas as obras / Consolidado",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    plano_conta = forms.ModelChoiceField(
+        label="Plano de Contas",
+        queryset=PlanoConta.objects.none(),
+        required=False,
+        empty_label="Todas as contas",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    comparacao = forms.ChoiceField(
+        label="Comparação",
+        choices=COMPARACAO_CHOICES,
+        initial="NENHUMA",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    usar_fallback = forms.BooleanField(
+        label="Usar data de emissão quando a competência estiver vazia",
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["empresa"].queryset = Empresa.objects.filter(
+            ativa=True
+        ).order_by("razao_social")
+        obras = CentroCusto.objects.select_related("empresa").order_by(
+            "empresa__razao_social", "codigo"
+        )
+        empresa_id = self.data.get("empresa") if self.is_bound else None
+        if empresa_id and str(empresa_id).isdigit():
+            obras = obras.filter(empresa_id=empresa_id)
+        self.fields["obra"].queryset = obras
+        self.fields["plano_conta"].queryset = PlanoConta.objects.filter(
+            tipo__in=("RECEITA", "CUSTO", "DESPESA")
+        ).order_by("codigo")
+
+    def clean(self):
+        dados = super().clean()
+        empresa = dados.get("empresa")
+        obra = dados.get("obra")
+        inicio = dados.get("data_inicial")
+        fim = dados.get("data_final")
+        if empresa and obra and obra.empresa_id != empresa.pk:
+            self.add_error("obra", "A obra deve pertencer à empresa selecionada.")
+        if inicio and fim and inicio > fim:
+            self.add_error(
+                "data_final",
+                "A competência final deve ser igual ou posterior à inicial.",
+            )
+        return dados
+
+
 class PlanoContaForm(forms.ModelForm):
 
     class Meta:

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}DRE Gerencial Consolidada | VersERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>DRE Gerencial Consolidada</h1>
+        <p>Resultado econômico da empresa apurado exclusivamente por competência.</p>
+    </div>
+    <a href="{% url 'financeiro:index' %}" class="btn btn-light"><i class="bi bi-arrow-left"></i> Voltar</a>
+</div>
+
+<div class="dashboard-panel relatorio-filtros">
+    <div class="panel-header"><div><h2>Filtros</h2><span>Defina a empresa, o período de competência e os recortes opcionais.</span></div></div>
+    <form method="get" class="verserp-form">
+        <div class="form-grid">
+            {% for field in form %}
+                <div class="form-group {% if field.name == 'usar_fallback' %}dre-filtro-checkbox{% endif %}">
+                    {% if field.name == 'usar_fallback' %}
+                        <label class="form-check-label" for="{{ field.id_for_label }}">{{ field }} {{ field.label }}</label>
+                    {% else %}
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+                    {% endif %}
+                    {% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group-wide"><div class="form-actions">
+                <a href="{% url 'financeiro:dre_gerencial' %}" class="btn btn-light">Limpar</a>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-calculator"></i> Gerar DRE</button>
+            </div></div>
+        </div>
+    </form>
+</div>
+
+{% if dre %}
+    <div class="relatorio-identificacao">
+        <div>
+            <strong>{{ form.cleaned_data.empresa }}</strong>
+            <span>
+                Competência de {{ form.cleaned_data.data_inicial|date:"d/m/Y" }} a {{ form.cleaned_data.data_final|date:"d/m/Y" }}
+                {% if form.cleaned_data.obra %} · {{ form.cleaned_data.obra.codigo }} — {{ form.cleaned_data.obra.nome }}{% else %} · Consolidado da empresa{% endif %}
+            </span>
+        </div>
+        {% if form.cleaned_data.obra %}<span class="status-badge {% if form.cleaned_data.obra.ativo %}status-active{% else %}status-inactive{% endif %}">{% if form.cleaned_data.obra.ativo %}Obra ativa{% else %}Obra inativa{% endif %}</span>{% endif %}
+    </div>
+
+    {% if form.cleaned_data.usar_fallback %}
+        <div class="alert alert-info dre-fallback-aviso">
+            <i class="bi bi-info-circle"></i>
+            {{ dre.fallback_count }} lançamento{{ dre.fallback_count|pluralize }} sem data de competência utilizaram a data de emissão neste período.
+            {% if dre.tem_comparacao %} No comparativo: {{ dre.fallback_comparativo_count }}.{% endif %}
+        </div>
+    {% endif %}
+
+    {% if not dre.tem_dados %}
+        <div class="alert alert-warning"><i class="bi bi-exclamation-circle"></i> Nenhum lançamento de competência foi encontrado para os filtros informados.</div>
+    {% endif %}
+
+    <div class="relatorio-cards dre-resumo-cards">
+        <article class="relatorio-card"><span>Receitas Operacionais</span><strong>R$ {{ dre.resumo.receitas_operacionais|floatformat:"2g" }}</strong></article>
+        <article class="relatorio-card {% if dre.resumo.resultado_bruto < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado Bruto</span><strong>R$ {{ dre.resumo.resultado_bruto|floatformat:"2g" }}</strong><small>Margem {{ dre.resumo.margem_bruta|floatformat:2|default:"—" }}{% if dre.resumo.margem_bruta is not None %}%{% endif %}</small></article>
+        <article class="relatorio-card {% if dre.resumo.resultado_operacional < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado Operacional</span><strong>R$ {{ dre.resumo.resultado_operacional|floatformat:"2g" }}</strong><small>Margem {{ dre.resumo.margem_operacional|floatformat:2|default:"—" }}{% if dre.resumo.margem_operacional is not None %}%{% endif %}</small></article>
+        <article class="relatorio-card {% if dre.resumo.resultado_financeiro < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado Financeiro</span><strong>R$ {{ dre.resumo.resultado_financeiro|floatformat:"2g" }}</strong></article>
+        <article class="relatorio-card relatorio-card-destaque {% if dre.resumo.resultado_periodo < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado do Período</span><strong>R$ {{ dre.resumo.resultado_periodo|floatformat:"2g" }}</strong><small>Margem {{ dre.resumo.margem_periodo|floatformat:2|default:"—" }}{% if dre.resumo.margem_periodo is not None %}%{% endif %}</small></article>
+    </div>
+
+    <div class="dashboard-panel dre-demonstrativo">
+        <div class="panel-header">
+            <div><h2>Demonstrativo</h2><span>Valores líquidos conforme a hierarquia do Plano de Contas.</span></div>
+            {% if dre.tem_comparacao %}<div class="dre-periodo-comparativo">Comparativo: {{ dre.periodo_comparativo.0|date:"d/m/Y" }} a {{ dre.periodo_comparativo.1|date:"d/m/Y" }}</div>{% endif %}
+        </div>
+        <div class="table-responsive">
+            <table class="verserp-table dre-table">
+                <thead><tr><th>Conta</th><th>Período atual</th>{% if dre.tem_comparacao %}<th>Comparativo</th><th>Variação</th><th>Variação %</th>{% endif %}</tr></thead>
+                <tbody>
+                    {% for secao in dre.secoes %}
+                        <tr class="dre-secao"><td>{{ secao.nome }}</td><td>R$ {{ secao.total|floatformat:"2g" }}</td>{% if dre.tem_comparacao %}<td>R$ {{ secao.total_comparativo|floatformat:"2g" }}</td><td></td><td></td>{% endif %}</tr>
+                        {% for linha in secao.linhas %}
+                            <tr class="{% if linha.conta.conta_redutora %}dre-conta-redutora{% endif %}">
+                                <td class="relatorio-conta-nivel-{{ linha.nivel }}"><span class="dre-conta-codigo">{{ linha.conta.codigo }}</span> {{ linha.conta.nome }}{% if linha.conta.conta_redutora %} <small>Redutora</small>{% endif %}</td>
+                                <td>{% if linha.analitica %}<a class="dre-valor-link" href="?{{ parametros_sem_detalhe }}&conta_detalhe={{ linha.conta.pk }}">R$ {{ linha.valor|floatformat:"2g" }}</a>{% else %}<strong>R$ {{ linha.valor|floatformat:"2g" }}</strong>{% endif %}</td>
+                                {% if dre.tem_comparacao %}<td>R$ {{ linha.comparativo|floatformat:"2g" }}</td><td>R$ {{ linha.variacao|floatformat:"2g" }}</td><td>{% if linha.variacao_percentual is not None %}{{ linha.variacao_percentual|floatformat:2 }}%{% else %}—{% endif %}</td>{% endif %}
+                            </tr>
+                        {% empty %}<tr><td colspan="{% if dre.tem_comparacao %}5{% else %}2{% endif %}" class="relatorio-sem-dados">Nenhum valor nesta seção.</td></tr>{% endfor %}
+
+                        {% if secao.codigo == 'custos' %}<tr class="dre-resultado"><td>= Resultado Bruto</td><td>R$ {{ dre.resumo.resultado_bruto|floatformat:"2g" }}</td>{% if dre.tem_comparacao %}<td>R$ {{ dre.resumo_comparativo.resultado_bruto|floatformat:"2g" }}</td><td></td><td></td>{% endif %}</tr>{% endif %}
+                        {% if secao.codigo == 'despesas_operacionais' %}<tr class="dre-resultado"><td>= Resultado Operacional</td><td>R$ {{ dre.resumo.resultado_operacional|floatformat:"2g" }}</td>{% if dre.tem_comparacao %}<td>R$ {{ dre.resumo_comparativo.resultado_operacional|floatformat:"2g" }}</td><td></td><td></td>{% endif %}</tr>{% endif %}
+                        {% if secao.codigo == 'despesas_financeiras' %}
+                            <tr class="dre-resultado"><td>= Resultado Financeiro</td><td>R$ {{ dre.resumo.resultado_financeiro|floatformat:"2g" }}</td>{% if dre.tem_comparacao %}<td>R$ {{ dre.resumo_comparativo.resultado_financeiro|floatformat:"2g" }}</td><td></td><td></td>{% endif %}</tr>
+                            <tr class="dre-resultado dre-resultado-final"><td>= Resultado do Período</td><td>R$ {{ dre.resumo.resultado_periodo|floatformat:"2g" }}</td>{% if dre.tem_comparacao %}<td>R$ {{ dre.resumo_comparativo.resultado_periodo|floatformat:"2g" }}</td><td></td><td></td>{% endif %}</tr>
+                        {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if drilldown %}
+        <div class="dashboard-panel" id="drilldown">
+            <div class="panel-header"><div><h2>Drill-down: {{ drilldown.conta.codigo }} — {{ drilldown.conta.nome }}</h2><span>Total dos lançamentos: R$ {{ drilldown.total|floatformat:"2g" }}</span></div><a href="?{{ parametros_sem_detalhe }}" class="btn btn-light">Fechar</a></div>
+            <div class="table-responsive"><table class="verserp-table dre-drilldown-table">
+                <thead><tr><th>Competência</th><th>Documento</th><th>Pessoa / Descrição</th><th>Valor na DRE</th><th></th></tr></thead>
+                <tbody>{% for item in pagina %}<tr><td>{{ item.data_referencia|date:"d/m/Y" }}{% if item.usou_fallback %}<br><small>Data de emissão</small>{% endif %}</td><td>{{ item.lancamento.numero_documento|default:"—" }}</td><td>{{ item.lancamento.pessoa }}<br><small>{{ item.lancamento.descricao }}</small></td><td>R$ {{ item.valor|floatformat:"2g" }}</td><td>{% if item.lancamento.tipo == 'PAGAR' %}<a class="btn btn-light" href="{% url 'financeiro:detalhe_conta_pagar' item.lancamento.pk %}" title="Ver conta a pagar"><i class="bi bi-eye"></i></a>{% else %}<a class="btn btn-light" href="{% url 'financeiro:detalhe_conta_receber' item.lancamento.pk %}" title="Ver conta a receber"><i class="bi bi-eye"></i></a>{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="relatorio-sem-dados">Nenhum lançamento encontrado.</td></tr>{% endfor %}</tbody>
+            </table></div>
+            {% if pagina.paginator.num_pages > 1 %}<div class="verserp-pagination"><div class="pagination-info">Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</div><div class="pagination-actions">{% if pagina.has_previous %}<a class="btn btn-light" href="?{{ parametros }}&page={{ pagina.previous_page_number }}#drilldown">Anterior</a>{% endif %}{% if pagina.has_next %}<a class="btn btn-light" href="?{{ parametros }}&page={{ pagina.next_page_number }}#drilldown">Próxima</a>{% endif %}</div></div>{% endif %}
+        </div>
+    {% endif %}
+{% elif request.GET and not form.is_valid %}
+    <div class="alert alert-danger">Revise os filtros informados para gerar a DRE.</div>
+{% else %}
+    <div class="empty-state relatorio-inicial"><i class="bi bi-table"></i><h3>Defina o período da DRE</h3><p>Selecione a empresa e o período de competência para gerar o demonstrativo.</p></div>
+{% endif %}
+{% endblock %}

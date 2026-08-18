@@ -1,12 +1,13 @@
 from collections import defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Sum
 from django.db.models.functions import Coalesce
 
 from .models import (
     BaixaFinanceira,
+    LancamentoFinanceiro,
     PlanoConta,
     RateioCentroCusto,
 )
@@ -14,6 +15,14 @@ from .models import (
 
 CENTAVO = Decimal("0.01")
 ZERO = Decimal("0.00")
+
+DRE_SECOES = (
+    ("receitas_operacionais", "Receitas Operacionais"),
+    ("custos", "(-) Custos"),
+    ("despesas_operacionais", "(-) Despesas Operacionais"),
+    ("receitas_financeiras", "(+) Receitas Financeiras"),
+    ("despesas_financeiras", "(-) Despesas Financeiras"),
+)
 
 
 def moeda(valor):
@@ -261,4 +270,367 @@ def calcular_relatorio_obra(obra, data_inicial, data_final):
         "grupos_contas": _contas_hierarquicas(valores_por_conta),
         "detalhes": detalhes,
         "grafico_mensal": meses,
+    }
+
+
+def _mapa_contas_dre():
+    contas = list(
+        PlanoConta.objects.filter(
+            tipo__in=("RECEITA", "CUSTO", "DESPESA")
+        ).select_related("conta_pai").order_by("codigo")
+    )
+    return contas, {conta.pk: conta for conta in contas}
+
+
+def ids_descendentes_conta(conta, contas=None):
+    contas = contas or list(PlanoConta.objects.all())
+    filhos = defaultdict(list)
+    for item in contas:
+        filhos[item.conta_pai_id].append(item.pk)
+    encontrados = set()
+    pendentes = [conta.pk]
+    while pendentes:
+        conta_id = pendentes.pop()
+        if conta_id in encontrados:
+            continue
+        encontrados.add(conta_id)
+        pendentes.extend(filhos[conta_id])
+    return encontrados
+
+
+def _secao_conta_dre(conta, por_id, receitas_financeiras_id, despesas_financeiras_id):
+    ancestrais = set()
+    atual = conta
+    while atual and atual.pk not in ancestrais:
+        ancestrais.add(atual.pk)
+        atual = por_id.get(atual.conta_pai_id)
+
+    if conta.tipo == "RECEITA":
+        if receitas_financeiras_id in ancestrais:
+            return "receitas_financeiras"
+        return "receitas_operacionais"
+    if conta.tipo == "CUSTO":
+        return "custos"
+    if despesas_financeiras_id in ancestrais:
+        return "despesas_financeiras"
+    return "despesas_operacionais"
+
+
+def _periodo_comparativo(data_inicial, data_final, tipo):
+    if tipo == "ANTERIOR":
+        duracao = (data_final - data_inicial).days + 1
+        fim = data_inicial - timedelta(days=1)
+        return fim - timedelta(days=duracao - 1), fim
+    if tipo == "ANO_ANTERIOR":
+        def ano_anterior(valor):
+            try:
+                return valor.replace(year=valor.year - 1)
+            except ValueError:
+                return date(valor.year - 1, 2, 28)
+        return ano_anterior(data_inicial), ano_anterior(data_final)
+    return None
+
+
+def _valores_dre(
+    empresa,
+    data_inicial,
+    data_final,
+    obra=None,
+    conta_filtro=None,
+    usar_fallback=True,
+    contas=None,
+):
+    contas = contas or list(PlanoConta.objects.all())
+    ids_contas = None
+    if conta_filtro:
+        ids_contas = ids_descendentes_conta(conta_filtro, contas)
+
+    if obra:
+        queryset = RateioCentroCusto.objects.filter(
+            centro_custo=obra,
+            lancamento__empresa=empresa,
+            lancamento__plano_conta__aceita_lancamento=True,
+            lancamento__plano_conta__tipo__in=("RECEITA", "CUSTO", "DESPESA"),
+        ).exclude(lancamento__status="CANCELADO")
+        prefixo = "lancamento__"
+        campo_valor = "valor"
+        campo_conta = "lancamento__plano_conta_id"
+    else:
+        queryset = LancamentoFinanceiro.objects.filter(
+            empresa=empresa,
+            plano_conta__aceita_lancamento=True,
+            plano_conta__tipo__in=("RECEITA", "CUSTO", "DESPESA"),
+        ).exclude(status="CANCELADO")
+        prefixo = ""
+        campo_valor = "valor_total"
+        campo_conta = "plano_conta_id"
+
+    if ids_contas is not None:
+        queryset = queryset.filter(**{f"{prefixo}plano_conta_id__in": ids_contas})
+
+    campo_competencia = f"{prefixo}data_competencia"
+    campo_emissao = f"{prefixo}data_emissao"
+    if usar_fallback:
+        queryset = queryset.annotate(
+            data_referencia=Coalesce(campo_competencia, campo_emissao)
+        ).filter(data_referencia__range=(data_inicial, data_final))
+        fallback = queryset.filter(**{f"{campo_competencia}__isnull": True}).count()
+    else:
+        queryset = queryset.filter(
+            **{f"{campo_competencia}__range": (data_inicial, data_final)}
+        )
+        fallback = 0
+
+    agregados = queryset.values(campo_conta).annotate(total=Sum(campo_valor))
+    valores = {
+        item[campo_conta]: moeda(item["total"])
+        for item in agregados
+    }
+    return valores, fallback
+
+
+def _linhas_dre(valores, comparativos, contas, por_id):
+    receitas_financeiras = next(
+        (conta for conta in contas if conta.codigo == "4.02"), None
+    )
+    despesas_financeiras = next(
+        (conta for conta in contas if conta.codigo == "6.09"), None
+    )
+    totais_diretos = defaultdict(lambda: ZERO)
+    comparativos_diretos = defaultdict(lambda: ZERO)
+    secoes_por_conta = {}
+
+    for conta_id in set(valores) | set(comparativos):
+        conta = por_id.get(conta_id)
+        if not conta or not conta.aceita_lancamento:
+            continue
+        secao = _secao_conta_dre(
+            conta,
+            por_id,
+            receitas_financeiras.pk if receitas_financeiras else None,
+            despesas_financeiras.pk if despesas_financeiras else None,
+        )
+        sinal = Decimal("-1") if conta.conta_redutora else Decimal("1")
+        totais_diretos[conta_id] += valores.get(conta_id, ZERO) * sinal
+        comparativos_diretos[conta_id] += comparativos.get(conta_id, ZERO) * sinal
+        secoes_por_conta[conta_id] = secao
+
+    secoes = []
+    totais_secoes = defaultdict(lambda: ZERO)
+    comparativos_secoes = defaultdict(lambda: ZERO)
+    raizes = {"4", "5", "6"}
+
+    for codigo_secao, nome_secao in DRE_SECOES:
+        acumulado = defaultdict(lambda: ZERO)
+        acumulado_comparativo = defaultdict(lambda: ZERO)
+        for conta_id, secao in secoes_por_conta.items():
+            if secao != codigo_secao:
+                continue
+            atual = por_id.get(conta_id)
+            visitadas = set()
+            while atual and atual.pk not in visitadas:
+                acumulado[atual.pk] += totais_diretos[conta_id]
+                acumulado_comparativo[atual.pk] += comparativos_diretos[conta_id]
+                visitadas.add(atual.pk)
+                atual = por_id.get(atual.conta_pai_id)
+
+        linhas = []
+        for conta in contas:
+            if conta.codigo in raizes or conta.pk not in acumulado:
+                continue
+            atual = conta
+            pertence = False
+            while atual:
+                if secoes_por_conta.get(atual.pk) == codigo_secao:
+                    pertence = True
+                    break
+                atual = por_id.get(atual.conta_pai_id)
+            if not pertence:
+                descendentes_analiticos = [
+                    conta_id for conta_id, secao in secoes_por_conta.items()
+                    if secao == codigo_secao
+                ]
+                pertence = bool(descendentes_analiticos and conta.pk in acumulado)
+            if not pertence:
+                continue
+            nivel = 0
+            pai = por_id.get(conta.conta_pai_id)
+            while pai and pai.codigo not in raizes:
+                nivel += 1
+                pai = por_id.get(pai.conta_pai_id)
+            atual_valor = moeda(acumulado[conta.pk])
+            anterior_valor = moeda(acumulado_comparativo[conta.pk])
+            variacao = atual_valor - anterior_valor
+            percentual = (
+                moeda(variacao * Decimal("100") / abs(anterior_valor))
+                if anterior_valor else None
+            )
+            linhas.append({
+                "conta": conta,
+                "nivel": min(nivel, 5),
+                "valor": atual_valor,
+                "comparativo": anterior_valor,
+                "variacao": moeda(variacao),
+                "variacao_percentual": percentual,
+                "analitica": conta.aceita_lancamento,
+            })
+
+        total = sum(
+            (valor for conta_id, valor in totais_diretos.items()
+             if secoes_por_conta.get(conta_id) == codigo_secao),
+            ZERO,
+        )
+        total_comparativo = sum(
+            (valor for conta_id, valor in comparativos_diretos.items()
+             if secoes_por_conta.get(conta_id) == codigo_secao),
+            ZERO,
+        )
+        totais_secoes[codigo_secao] = moeda(total)
+        comparativos_secoes[codigo_secao] = moeda(total_comparativo)
+        secoes.append({
+            "codigo": codigo_secao,
+            "nome": nome_secao,
+            "linhas": linhas,
+            "total": moeda(total),
+            "total_comparativo": moeda(total_comparativo),
+        })
+
+    return secoes, totais_secoes, comparativos_secoes
+
+
+def _resumo_dre(totais):
+    receitas = totais["receitas_operacionais"]
+    custos = totais["custos"]
+    despesas = totais["despesas_operacionais"]
+    receitas_financeiras = totais["receitas_financeiras"]
+    despesas_financeiras = totais["despesas_financeiras"]
+    bruto = receitas - custos
+    operacional = bruto - despesas
+    financeiro = receitas_financeiras - despesas_financeiras
+    periodo = operacional + financeiro
+
+    def margem(valor):
+        return moeda(valor * Decimal("100") / receitas) if receitas else None
+
+    return {
+        "receitas_operacionais": moeda(receitas),
+        "custos": moeda(custos),
+        "resultado_bruto": moeda(bruto),
+        "despesas_operacionais": moeda(despesas),
+        "resultado_operacional": moeda(operacional),
+        "receitas_financeiras": moeda(receitas_financeiras),
+        "despesas_financeiras": moeda(despesas_financeiras),
+        "resultado_financeiro": moeda(financeiro),
+        "resultado_periodo": moeda(periodo),
+        "margem_bruta": margem(bruto),
+        "margem_operacional": margem(operacional),
+        "margem_periodo": margem(periodo),
+    }
+
+
+def calcular_dre(
+    empresa,
+    data_inicial,
+    data_final,
+    obra=None,
+    conta_filtro=None,
+    usar_fallback=True,
+    comparacao="NENHUMA",
+):
+    contas, por_id = _mapa_contas_dre()
+    valores, fallback = _valores_dre(
+        empresa, data_inicial, data_final, obra, conta_filtro,
+        usar_fallback, contas,
+    )
+    periodo_comparativo = _periodo_comparativo(
+        data_inicial, data_final, comparacao
+    )
+    valores_comparativos = {}
+    fallback_comparativo = 0
+    if periodo_comparativo:
+        valores_comparativos, fallback_comparativo = _valores_dre(
+            empresa,
+            periodo_comparativo[0],
+            periodo_comparativo[1],
+            obra,
+            conta_filtro,
+            usar_fallback,
+            contas,
+        )
+
+    secoes, totais, totais_comparativos = _linhas_dre(
+        valores, valores_comparativos, contas, por_id
+    )
+    return {
+        "resumo": _resumo_dre(totais),
+        "resumo_comparativo": (
+            _resumo_dre(totais_comparativos) if periodo_comparativo else None
+        ),
+        "secoes": secoes,
+        "fallback_count": fallback,
+        "fallback_comparativo_count": fallback_comparativo,
+        "periodo_comparativo": periodo_comparativo,
+        "tem_comparacao": bool(periodo_comparativo),
+        "tem_dados": any(secao["linhas"] for secao in secoes),
+    }
+
+
+def drilldown_dre(
+    empresa,
+    conta,
+    data_inicial,
+    data_final,
+    obra=None,
+    usar_fallback=True,
+):
+    if not conta.aceita_lancamento:
+        return {"itens": [], "total": ZERO}
+    sinal = Decimal("-1") if conta.conta_redutora else Decimal("1")
+    if obra:
+        queryset = RateioCentroCusto.objects.filter(
+            centro_custo=obra,
+            lancamento__empresa=empresa,
+            lancamento__plano_conta=conta,
+        ).exclude(lancamento__status="CANCELADO")
+        prefixo = "lancamento__"
+        campo_valor = "valor"
+        queryset = queryset.select_related(
+            "lancamento__pessoa", "lancamento__plano_conta"
+        )
+    else:
+        queryset = LancamentoFinanceiro.objects.filter(
+            empresa=empresa,
+            plano_conta=conta,
+        ).exclude(status="CANCELADO").select_related("pessoa", "plano_conta")
+        prefixo = ""
+        campo_valor = "valor_total"
+
+    competencia = f"{prefixo}data_competencia"
+    emissao = f"{prefixo}data_emissao"
+    if usar_fallback:
+        queryset = queryset.annotate(
+            data_referencia=Coalesce(competencia, emissao)
+        ).filter(data_referencia__range=(data_inicial, data_final))
+    else:
+        queryset = queryset.filter(
+            **{f"{competencia}__range": (data_inicial, data_final)}
+        )
+
+    ordem_data = "-data_referencia" if usar_fallback else f"-{competencia}"
+    itens = []
+    for item in queryset.order_by(ordem_data, "-id"):
+        lancamento = item.lancamento if obra else item
+        valor = moeda(getattr(item, campo_valor) * sinal)
+        data_referencia = (
+            item.data_referencia if usar_fallback else lancamento.data_competencia
+        )
+        itens.append({
+            "lancamento": lancamento,
+            "data_referencia": data_referencia,
+            "valor": valor,
+            "usou_fallback": lancamento.data_competencia is None,
+        })
+    return {
+        "itens": itens,
+        "total": moeda(sum((item["valor"] for item in itens), ZERO)),
     }
