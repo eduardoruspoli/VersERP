@@ -11,6 +11,7 @@ import csv
 
 from financeiro.models import Empresa
 from core.access import empresa_request
+from core.csv import linha_csv_segura
 
 from .forms import (CompetenciaForm, ConferenciaForm, ContratoForm,
                     DadosBancariosForm, EventoForm, FuncionarioForm, JornadaDiaForm,
@@ -71,7 +72,7 @@ def relatorio_gerencial(request):
         writer = csv.writer(resposta, delimiter=";")
         writer.writerow(["Funcionário", "Competência", "Saldo BH (min)", "Horas 100% (min)", "Status"])
         for ponto in pontos:
-            writer.writerow([ponto.funcionario.nome, competencia.strftime("%m/%Y"), ponto.saldo_final_minutos, ponto.horas_100_minutos, ponto.get_status_display()])
+            writer.writerow(linha_csv_segura([ponto.funcionario.nome, competencia.strftime("%m/%Y"), ponto.saldo_final_minutos, ponto.horas_100_minutos, ponto.get_status_display()]))
         return resposta
     return render(request, "rh/relatorio_gerencial.html", {"empresa": empresa, "empresas": empresas, "competencia": competencia, "pontos": pontos, "resumo": resumo, "alertas": alertas, "ferias_afastamentos": funcionarios.filter(situacao__in=[Funcionario.Situacao.FERIAS, Funcionario.Situacao.AFASTADO])})
 

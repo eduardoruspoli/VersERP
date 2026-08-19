@@ -46,3 +46,22 @@ class ImportacaoHistoricaTests(TestCase):
             call_command("importar_propostas_historicas", caminho, empresa=self.empresa.pk)
         self.assertEqual(Proposta.objects.get().cliente, cliente)
         self.assertEqual(Pessoa.objects.count(), 1)
+
+    def test_duplicidade_no_mesmo_arquivo_nao_cria_propostas_repetidas(self):
+        with TemporaryDirectory() as pasta:
+            caminho = self.arquivo(pasta, [
+                "VERS9004;03/08/2026;Cliente Único;Projeto A;100,00;Enviada;",
+                "VERS9004;04/08/2026;Cliente Único;Projeto B;200,00;Enviada;",
+            ])
+            call_command("importar_propostas_historicas", caminho, empresa=self.empresa.pk)
+        self.assertEqual(Proposta.objects.filter(codigo="VERS9004").count(), 1)
+
+    def test_mesmo_cliente_novo_e_reutilizado_dentro_do_arquivo(self):
+        with TemporaryDirectory() as pasta:
+            caminho = self.arquivo(pasta, [
+                "VERS9005;03/08/2026;Cliente Repetido;Projeto A;100,00;Enviada;",
+                "VERS9006;04/08/2026;CLIENTE REPETIDO;Projeto B;200,00;Enviada;",
+            ])
+            call_command("importar_propostas_historicas", caminho, empresa=self.empresa.pk)
+        self.assertEqual(Pessoa.objects.count(), 1)
+        self.assertEqual(Proposta.objects.values("cliente_id").distinct().count(), 1)

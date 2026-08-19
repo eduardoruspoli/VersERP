@@ -37,6 +37,8 @@ def data(valor):
 
 
 class Command(BaseCommand):
+    TAMANHO_MAXIMO = 20 * 1024 * 1024
+    LINHAS_MAXIMAS = 10000
     help = "Analisa/importa propostas históricas de CSV ou XLSX de forma idempotente."
 
     def add_arguments(self, parser):
@@ -68,16 +70,22 @@ class Command(BaseCommand):
         caminho = Path(opcoes["arquivo"])
         if not caminho.exists():
             raise CommandError("Arquivo não encontrado.")
+        if caminho.stat().st_size > self.TAMANHO_MAXIMO:
+            raise CommandError("Arquivo excede o limite de 20 MB.")
         empresas = Empresa.objects.filter(pk=opcoes.get("empresa")) if opcoes.get("empresa") else Empresa.objects.filter(ativa=True)
         if empresas.count() != 1:
             raise CommandError("Informe --empresa quando houver zero ou mais de uma empresa ativa.")
         empresa = empresas.get()
         relatorio = {"validas": 0, "duplicadas": 0, "erros": 0, "clientes_novos": 0, "ambiguos": 0, "importadas": 0}
         preparados = []
+        codigos_arquivo = set()
+        clientes_novos = set()
         existentes = {}
         for pessoa in Pessoa.objects.all():
             existentes.setdefault(normalizar(pessoa.razao_social), []).append(pessoa)
         for numero, linha in enumerate(self._linhas(caminho), start=2):
+            if numero > self.LINHAS_MAXIMAS + 1:
+                raise CommandError(f"Arquivo excede o limite de {self.LINHAS_MAXIMAS} registros.")
             try:
                 codigo = "".join(str(linha.get("numero") or linha.get("Número") or linha.get("proposta") or "").upper().split())
                 if not re.fullmatch(r"VERS\d+", codigo):
@@ -85,6 +93,10 @@ class Command(BaseCommand):
                 if Proposta.objects.filter(empresa=empresa, codigo=codigo).exists():
                     relatorio["duplicadas"] += 1
                     continue
+                if codigo in codigos_arquivo:
+                    relatorio["duplicadas"] += 1
+                    continue
+                codigos_arquivo.add(codigo)
                 cliente_nome = str(linha.get("cliente") or linha.get("Cliente") or "").strip()
                 if not cliente_nome:
                     raise ValueError("cliente ausente")
@@ -93,8 +105,10 @@ class Command(BaseCommand):
                     relatorio["ambiguos"] += 1
                     continue
                 cliente = candidatos[0] if candidatos else None
-                if not cliente:
+                chave_cliente = normalizar(cliente_nome)
+                if not cliente and chave_cliente not in clientes_novos:
                     relatorio["clientes_novos"] += 1
+                    clientes_novos.add(chave_cliente)
                 preparados.append({"codigo": codigo, "cliente": cliente, "cliente_nome": cliente_nome, "data": data(linha.get("data") or linha.get("Data")), "servico": str(linha.get("servico") or linha.get("Serviço") or linha.get("descricao") or "Proposta histórica").strip(), "contato": str(linha.get("contato") or linha.get("Contato") or "").strip(), "valor": moeda(linha.get("valor") or linha.get("Valor")), "status_historico": str(linha.get("status") or linha.get("Status") or "").strip(), "observacao": str(linha.get("observacao") or linha.get("Observação") or "").strip()})
                 relatorio["validas"] += 1
             except (ValueError, InvalidOperation) as erro:
@@ -102,8 +116,13 @@ class Command(BaseCommand):
                 self.stderr.write(f"Linha {numero}: {erro}")
         if not opcoes["dry_run"]:
             with transaction.atomic():
+                clientes_criados = {}
                 for item in preparados:
-                    cliente = item["cliente"] or Pessoa.objects.create(razao_social=item["cliente_nome"], classificacao=Pessoa.Classificacao.CLIENTE)
+                    chave_cliente = normalizar(item["cliente_nome"])
+                    cliente = item["cliente"] or clientes_criados.get(chave_cliente)
+                    if not cliente:
+                        cliente = Pessoa.objects.create(razao_social=item["cliente_nome"], classificacao=Pessoa.Classificacao.CLIENTE)
+                        clientes_criados[chave_cliente] = cliente
                     proposta = Proposta.objects.create(empresa=empresa, cliente=cliente, codigo=item["codigo"], numero_sequencial=int(item["codigo"][4:]), origem=Proposta.Origem.IMPORTADO_HISTORICO, status_historico=item["status_historico"], observacao_importacao=item["observacao"])
                     PropostaRevisao.objects.create(proposta=proposta, numero=0, data_proposta=item["data"], nome_servico=item["servico"], aos_cuidados_de=item["contato"], formacao_preco=PropostaRevisao.FormacaoPreco.MANUAL, preco_venda_final=item["valor"], congelada=True)
                     relatorio["importadas"] += 1

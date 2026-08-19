@@ -11,6 +11,7 @@ from .forms import AcompanhamentoPropostaForm, MotivoStatusForm, PropostaCriacao
 from .models import Proposta, PropostaRevisao
 from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta
 from core.access import filtrar_empresas, objeto_empresa_ou_404
+from core.csv import linha_csv_segura
 
 
 def _propostas(request):
@@ -235,7 +236,7 @@ def relatorio_propostas(request):
         writer = csv.writer(resposta, delimiter=";")
         writer.writerow(["Número", "Data", "Cliente", "Serviço", "Status", "Valor", "Responsável"])
         for proposta in propostas:
-            writer.writerow([proposta.codigo, proposta.data_emissao_relatorio.strftime("%d/%m/%Y"), proposta.cliente, proposta.servico_relatorio, proposta.get_status_display(), str(proposta.valor_relatorio).replace(".", ","), proposta.responsavel_interno or ""])
+            writer.writerow(linha_csv_segura([proposta.codigo, proposta.data_emissao_relatorio.strftime("%d/%m/%Y"), proposta.cliente, proposta.servico_relatorio, proposta.get_status_display(), str(proposta.valor_relatorio).replace(".", ","), proposta.responsavel_interno or ""]))
         return resposta
     pagina=Paginator(propostas,50).get_page(request.GET.get("page"))
     return render(request,"comercial/relatorio_propostas.html",{"form":form,"pagina":pagina,"resumo":resumo,"por_status":por_status,"status_labels":dict(Proposta.Status.choices)})

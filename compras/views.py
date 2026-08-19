@@ -39,7 +39,7 @@ from pessoas.models import Pessoa
 
 
 @login_required
-@permission_required("compras.view_pedidocompra", raise_exception=True)
+@permission_required(("compras.view_pedidocompra", "compras.view_custos_compra"), raise_exception=True)
 def fornecedor_historico(request, pk):
     empresas = ids_empresas_usuario(request.user)
     fornecedor = get_object_or_404(Pessoa, pk=pk, pedidos_compra_fornecedor__empresa_id__in=empresas)
@@ -346,7 +346,7 @@ def pedido_cancelar(request,pk): return _acao_pedido(request,pk,cancelar_pedido,
 def pedido_enviar(request,pk): return _acao_pedido(request,pk,enviar_pedido,"Envio ao fornecedor registrado.")
 
 @login_required
-@permission_required("compras.view_pedidocompra",raise_exception=True)
+@permission_required(("compras.view_pedidocompra","compras.view_custos_compra"),raise_exception=True)
 def pedido_imprimir(request,pk):
     pedido=get_object_or_404(PedidoCompra.objects.select_related("empresa","fornecedor"),pk=pk)
     return render(request,"compras/pedido_imprimir.html",{"pedido":pedido,"itens":pedido.itens.prefetch_related("alocacoes__obra")})

@@ -52,6 +52,7 @@ from .ofx import (
 )
 from django.http import HttpResponse
 import csv
+from core.csv import linha_csv_segura
 from .services import (
     calcular_dashboard_financeiro,
     calcular_dre,
@@ -78,7 +79,7 @@ def aging_financeiro(request, tipo):
         writer = csv.writer(resposta, delimiter=";")
         writer.writerow(["Pessoa", "Vencimento", "Dias em atraso", "Saldo"])
         for linha in relatorio["linhas"]:
-            writer.writerow([linha["parcela"].lancamento.pessoa, linha["parcela"].vencimento.strftime("%d/%m/%Y"), linha["dias_atraso"], str(linha["saldo"]).replace(".", ",")])
+            writer.writerow(linha_csv_segura([linha["parcela"].lancamento.pessoa, linha["parcela"].vencimento.strftime("%d/%m/%Y"), linha["dias_atraso"], str(linha["saldo"]).replace(".", ",")]))
         return resposta
     return render(request, "financeiro/aging.html", {"empresa": empresa, "empresas": empresas, "relatorio": relatorio})
 

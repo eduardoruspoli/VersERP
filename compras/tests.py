@@ -473,7 +473,7 @@ class PedidoCompraTests(ComprasBase):
         with self.assertRaises(ValidationError): aprovar_pedido(p,self.usuario)
 
     def test_documento_imprimivel_nao_expoe_comparativo(self):
-        p=self.pedido(observacoes="Observação pública"); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra"); self.client.force_login(self.usuario)
+        p=self.pedido(observacoes="Observação pública"); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra","view_custos_compra"); self.client.force_login(self.usuario)
         resposta=self.client.get(reverse("compras:pedido_imprimir",args=[p.pk])); self.assertEqual(resposta.status_code,200); self.assertContains(resposta,"PEDIDO DE COMPRA"); self.assertContains(resposta,"PC TESTE 01"); self.assertNotContains(resposta,"Compra direta TESTE"); self.assertNotContains(resposta,"mapa comparativo")
 
     def test_pdf_pedido_valido_com_fornecedor_itens_obras_e_sem_dados_de_cotacao(self):
@@ -482,7 +482,11 @@ class PedidoCompraTests(ComprasBase):
 
     def test_detalhe_oculta_custos_sem_permissao(self):
         p=self.pedido(); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra"); self.client.force_login(self.usuario)
-        self.assertNotContains(self.client.get(reverse("compras:pedido_detalhe",args=[p.pk])),"Valor unitário")
+        detalhe=self.client.get(reverse("compras:pedido_detalhe",args=[p.pk]))
+        self.assertNotContains(detalhe,"Valor unitário")
+        self.assertNotContains(detalhe,"R$ 100,00")
+        self.assertEqual(self.client.get(reverse("compras:pedido_imprimir",args=[p.pk])).status_code,403)
+        self.assertEqual(self.client.get(reverse("compras:fornecedor_historico",args=[p.fornecedor_id])).status_code,403)
 
 
 class RecebimentoCompraTests(ComprasBase):
