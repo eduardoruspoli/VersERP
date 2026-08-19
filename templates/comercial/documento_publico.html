@@ -1,0 +1,19 @@
+{% load static comercial_formatos %}
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Proposta {{ documento.cabecalho.numero }}</title><link rel="stylesheet" href="{% static 'css/pages/propostas.css' %}"></head>
+<body class="documento-proposta"><main class="folha-a4">
+<header class="proposta-cabecalho"><div><strong>{{ documento.cabecalho.empresa }}</strong><small>{{ documento.cabecalho.documento_empresa }}</small></div><div><strong>PROPOSTA COMERCIAL</strong><small>{{ documento.cabecalho.numero }} · Rev. {{ documento.cabecalho.revisao }}</small></div></header>
+<table class="dados-proposta"><tr><th>Data</th><td>{{ documento.cabecalho.data|date:"d/m/Y" }}</td><th>Cliente</th><td>{{ documento.cabecalho.cliente }}</td></tr><tr><th>A/C</th><td>{{ documento.cabecalho.aos_cuidados_de|default:"—" }}</td><th>Serviço</th><td>{{ documento.cabecalho.servico }}</td></tr></table>
+<div class="secoes-proposta">
+{% if documento.blocos.texto_introdutorio %}<section><h2>Apresentação</h2><p>{{ documento.blocos.texto_introdutorio|linebreaksbr }}</p></section>{% endif %}
+<section><h2>Escopo de fornecimento</h2><p>{{ documento.blocos.escopo_incluido|linebreaksbr }}</p>{% if documento.materiais %}<h3>Materiais</h3><table><thead><tr><th>Descrição</th><th>Qtd.</th><th>Un.</th><th>Valor</th></tr></thead><tbody>{% for linha in documento.materiais %}<tr><td>{{ linha.descricao }}</td><td>{{ linha.quantidade|default:"—" }}</td><td>{{ linha.unidade }}</td><td>R$ {{ linha.valor_total|moeda_br }}</td></tr>{% endfor %}</tbody></table>{% endif %}</section>
+<section><h2>Não incluso</h2><p>{{ documento.blocos.nao_incluso|default:"Não há exclusões adicionais."|linebreaksbr }}</p></section>
+{% if documento.blocos.normas_procedimentos %}<section><h2>Normas e procedimentos</h2><p>{{ documento.blocos.normas_procedimentos|linebreaksbr }}</p></section>{% endif %}
+{% if documento.blocos.qualificacao_mao_obra %}<section><h2>Qualificação da mão de obra</h2><p>{{ documento.blocos.qualificacao_mao_obra|linebreaksbr }}</p></section>{% endif %}
+{% if documento.blocos.obrigacoes_contratada %}<section><h2>Obrigações da contratada</h2><p>{{ documento.blocos.obrigacoes_contratada|linebreaksbr }}</p></section>{% endif %}
+<section><h2>Valores</h2>{% if documento.servicos %}<table><thead><tr><th>Serviço</th><th>Valor</th></tr></thead><tbody>{% for linha in documento.servicos %}<tr><td>{{ linha.descricao }}</td><td>R$ {{ linha.valor_total|moeda_br }}</td></tr>{% endfor %}</tbody></table>{% endif %}<div class="totais"><p>Subtotal materiais <strong>R$ {{ documento.valores.subtotal_materiais|moeda_br }}</strong></p><p>Subtotal serviços <strong>R$ {{ documento.valores.subtotal_servicos|moeda_br }}</strong></p><p class="total-geral">TOTAL DA PROPOSTA <strong>R$ {{ documento.valores.total|moeda_br }}</strong></p></div></section>
+<section><h2>Condições comerciais</h2><dl><dt>Faturamento/NF</dt><dd>{{ documento.condicoes.faturamento|default:"—" }}</dd><dt>Impostos</dt><dd>{{ documento.condicoes.impostos|default:"—" }}</dd><dt>Prazo</dt><dd>{{ documento.condicoes.prazo|default:"—" }}</dd><dt>Frete</dt><dd>{{ documento.condicoes.frete|default:"—" }}</dd><dt>Pagamento</dt><dd>{{ documento.condicoes.pagamento|default:"—" }}</dd><dt>Dados bancários</dt><dd>{{ documento.condicoes.dados_bancarios|default:"—" }}</dd><dt>Validade</dt><dd>{{ documento.condicoes.validade|date:"d/m/Y"|default:"—" }}</dd></dl></section>
+{% if documento.blocos.observacoes_comerciais %}<section><h2>Observações e adendos</h2><p>{{ documento.blocos.observacoes_comerciais|linebreaksbr }}</p></section>{% endif %}
+</div>
+<footer><p>{{ documento.responsavel.nome }}{% if documento.responsavel.cargo %} · {{ documento.responsavel.cargo }}{% endif %}</p><p>{{ documento.responsavel.assinatura }}</p><small>{{ documento.rodape }}</small></footer>
+</main></body></html>

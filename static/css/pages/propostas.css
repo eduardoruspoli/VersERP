@@ -1,0 +1,48 @@
+.proposta-filtro { display: flex; gap: .75rem; margin-bottom: 1rem; }
+.proposta-resumo { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+.proposta-resumo > div { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 1rem; }
+.proposta-resumo span { display: block; color: #64748b; font-size: .8rem; }
+.proposta-resumo strong { font-size: 1.2rem; }
+.proposta-congelada { color: #166534; font-weight: 600; }
+
+.documento-proposta { margin: 0; background: #e5e7eb; color: #1f2937; font: 14px/1.5 Arial, sans-serif; }
+.folha-a4 { box-sizing: border-box; width: 210mm; min-height: 297mm; margin: 12mm auto; padding: 16mm; background: #fff; }
+.proposta-cabecalho { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid #17365d; padding-bottom: 10px; }
+.proposta-cabecalho div:last-child { text-align: right; }
+.proposta-cabecalho small { display: block; color: #64748b; }
+.secoes-proposta { counter-reset: secao-proposta; }
+.documento-proposta section { counter-increment: secao-proposta; break-inside: auto; margin-top: 16px; }
+.documento-proposta h2 { break-after: avoid; color: #17365d; font-size: 16px; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
+.documento-proposta h2::before { content: counter(secao-proposta) ". "; }
+.documento-proposta h3 { break-after: avoid; font-size: 14px; }
+.documento-proposta table { width: 100%; border-collapse: collapse; }
+.documento-proposta th, .documento-proposta td { border: 1px solid #cbd5e1; padding: 6px; text-align: left; }
+.documento-proposta tr { break-inside: avoid; }
+.dados-proposta { margin-top: 14px; }
+.totais { break-inside: avoid; margin-left: auto; max-width: 390px; }
+.totais p { display: flex; justify-content: space-between; gap: 20px; }
+.total-geral { border-top: 2px solid #17365d; padding-top: 8px; }
+.documento-proposta dl { display: grid; grid-template-columns: 150px 1fr; gap: 5px; }
+.documento-proposta dt { font-weight: bold; }
+.documento-proposta dd { margin: 0; }
+.documento-proposta footer { break-inside: avoid; margin-top: 32px; border-top: 1px solid #94a3b8; padding-top: 12px; text-align: center; }
+
+@media (max-width: 900px) {
+    .proposta-resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .proposta-filtro, .proposta-cabecalho { flex-direction: column; }
+    .proposta-cabecalho div:last-child { text-align: left; }
+    .folha-a4 { width: 100%; min-height: auto; margin: 0; padding: 20px; }
+    .documento-proposta dl { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+    .proposta-resumo { grid-template-columns: 1fr; }
+}
+
+@page { size: A4; margin: 12mm; }
+@media print {
+    .documento-proposta { background: #fff; }
+    .folha-a4 { width: auto; min-height: auto; margin: 0; padding: 0; }
+    .documento-proposta thead { display: table-header-group; }
+    .documento-proposta tfoot { display: table-footer-group; }
+}
