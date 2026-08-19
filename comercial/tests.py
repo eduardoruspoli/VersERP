@@ -22,7 +22,7 @@ class ComercialBase(TestCase):
         self.empresa = Empresa.objects.create(razao_social="Empresa Teste", nome_fantasia="Vers Teste", cnpj="11.111.111/0001-11")
         self.cliente = Pessoa.objects.create(razao_social="Cliente Teste", classificacao=Pessoa.Classificacao.CLIENTE, ativo=True, cpf_cnpj="22.222.222/0001-22")
         self.fornecedor = Pessoa.objects.create(razao_social="Fornecedor Secreto", classificacao=Pessoa.Classificacao.FORNECEDOR, ativo=True)
-        self.proposta, self.revisao = criar_proposta(empresa=self.empresa, cliente=self.cliente, nome_servico="Serviço TESTE", usuario=self.usuario)
+        self.proposta, self.revisao = criar_proposta(empresa=self.empresa, codigo="VERS1917", cliente=self.cliente, nome_servico="Serviço TESTE", usuario=self.usuario)
 
     def item(self, custo="100.00", quantidade="1"):
         return PropostaItem.objects.create(revisao=self.revisao, tipo=PropostaItem.Tipo.MATERIAL, descricao="Material interno", quantidade=Decimal(quantidade), custo_unitario=Decimal(custo), fornecedor=self.fornecedor)
@@ -32,17 +32,46 @@ class ComercialBase(TestCase):
 
 
 class DominioPropostaTests(ComercialBase):
-    def test_codigo_sequencial_por_empresa(self):
-        segunda, _ = criar_proposta(empresa=self.empresa, cliente=self.cliente, nome_servico="Outra")
-        self.assertEqual((self.proposta.codigo, segunda.codigo), ("VERS0001", "VERS0002"))
+    def test_numero_informado_e_preservado(self):
+        segunda, _ = criar_proposta(empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Outra")
+        self.assertEqual((self.proposta.codigo, segunda.codigo), ("VERS1917", "VERS1918"))
+
+    def test_numero_e_normalizado_para_maiusculas_e_sem_espacos(self):
+        proposta, _ = criar_proposta(empresa=self.empresa, codigo="  vers 1918  ", cliente=self.cliente, nome_servico="Normalizada")
+        self.assertEqual(proposta.codigo, "VERS1918")
+        self.assertEqual(proposta.numero_sequencial, 1918)
+
+    def test_formato_invalido_e_rejeitado(self):
+        with self.assertRaises(ValidationError):
+            criar_proposta(empresa=self.empresa, codigo="PROP-1918", cliente=self.cliente, nome_servico="Inválida")
+
+    def test_numero_duplicado_na_mesma_empresa_e_rejeitado(self):
+        with self.assertRaises(ValidationError):
+            criar_proposta(empresa=self.empresa, codigo="vers1917", cliente=self.cliente, nome_servico="Duplicada")
+
+    def test_mesmo_numero_em_empresas_diferentes(self):
+        outra_empresa = Empresa.objects.create(razao_social="Outra Empresa", cnpj="44.444.444/0001-44")
+        proposta, _ = criar_proposta(empresa=outra_empresa, codigo="VERS1917", cliente=self.cliente, nome_servico="Outra empresa")
+        self.assertEqual(proposta.codigo, "VERS1917")
+
+    def test_criacao_sem_modelo_conteudo(self):
+        self.assertIsNone(self.revisao.modelo_conteudo)
+        self.assertEqual(self.revisao.numero, 0)
+
+    def test_nova_proposta_nao_renumera_existente(self):
+        codigo_original = self.proposta.codigo
+        criar_proposta(empresa=self.empresa, codigo="VERS3000", cliente=self.cliente, nome_servico="Nova")
+        self.proposta.refresh_from_db()
+        self.assertEqual(self.proposta.codigo, codigo_original)
 
     def test_modelo_padrao_e_copiado_como_snapshot(self):
         modelo = ModeloConteudoProposta.objects.create(empresa=self.empresa, nome="Padrão", padrao=True, texto_introdutorio="Texto original")
-        _, revisao = criar_proposta(empresa=self.empresa, cliente=self.cliente, nome_servico="Nova")
+        _, revisao = criar_proposta(empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Nova")
         modelo.texto_introdutorio = "Texto alterado"
         modelo.save()
         revisao.refresh_from_db()
         self.assertEqual(revisao.texto_introdutorio, "Texto original")
+        self.assertEqual(revisao.modelo_conteudo_id, modelo.pk)
 
     def test_custo_total_item_e_derivado(self):
         item = self.item("12.3456", "2")
@@ -132,7 +161,7 @@ class ViewsPropostaTests(ComercialBase):
         self.client.force_login(self.usuario)
 
     def test_lista_e_detalhe(self):
-        self.assertContains(self.client.get(reverse("comercial:proposta_lista")), "VERS0001")
+        self.assertContains(self.client.get(reverse("comercial:proposta_lista")), "VERS1917")
         self.assertContains(self.client.get(reverse("comercial:proposta_detalhe", args=[self.proposta.pk])), "Composição interna")
 
     def test_documento_publico_nao_expoe_dados_internos(self):
@@ -151,9 +180,14 @@ class ViewsPropostaTests(ComercialBase):
         self.assertFalse(self.revisao.congelada)
 
     def test_criacao_pela_tela(self):
-        resposta = self.client.post(reverse("comercial:proposta_criar"), {"empresa": self.empresa.pk, "cliente": self.cliente.pk, "nome_servico": "Nova tela", "modelo": ""})
+        resposta = self.client.post(reverse("comercial:proposta_criar"), {"empresa": self.empresa.pk, "codigo": "VERS1918", "cliente": self.cliente.pk, "nome_servico": "Nova tela"})
         self.assertEqual(resposta.status_code, 302)
         self.assertTrue(Proposta.objects.filter(revisoes__nome_servico="Nova tela").exists())
+
+    def test_tela_inicial_exibe_numero_e_nao_exibe_modelo(self):
+        resposta = self.client.get(reverse("comercial:proposta_criar"))
+        self.assertContains(resposta, "Número da proposta")
+        self.assertNotContains(resposta, "Modelo")
 
     def test_menu_comercial_e_link_ativo_respeitam_permissao(self):
         resposta = self.client.get(reverse("comercial:proposta_lista"))

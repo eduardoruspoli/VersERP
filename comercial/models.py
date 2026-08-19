@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 
 from django.conf import settings
@@ -72,8 +73,16 @@ class Proposta(models.Model):
         ]
 
     def clean(self):
+        self.codigo = "".join((self.codigo or "").upper().split())
+        if not re.fullmatch(r"VERS\d+", self.codigo):
+            raise ValidationError({"codigo": "Informe o número no padrão VERS seguido de algarismos, por exemplo VERS1917."})
+        self.numero_sequencial = int(self.codigo[4:])
         if self.cliente_id and (not self.cliente.ativo or self.cliente.classificacao not in {Pessoa.Classificacao.CLIENTE, Pessoa.Classificacao.AMBOS}):
             raise ValidationError({"cliente": "Selecione um cliente ativo."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.codigo

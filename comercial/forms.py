@@ -5,7 +5,7 @@ from financeiro.models import Empresa
 from financeiro.models import PlanoConta
 from pessoas.models import Pessoa
 
-from .models import ModeloConteudoProposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
+from .models import Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
 
 
 class ClasseCssMixin:
@@ -16,13 +16,25 @@ class ClasseCssMixin:
 
 class PropostaCriacaoForm(ClasseCssMixin, forms.Form):
     empresa = forms.ModelChoiceField(Empresa.objects.filter(ativa=True))
+    codigo = forms.CharField(label="Número da proposta", max_length=20, help_text="Ex.: VERS1917")
     cliente = forms.ModelChoiceField(Pessoa.objects.filter(ativo=True).filter(Q(classificacao="CLIENTE") | Q(classificacao="AMBOS")))
     nome_servico = forms.CharField(max_length=250)
-    modelo = forms.ModelChoiceField(ModeloConteudoProposta.objects.filter(ativo=True), required=False)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.aplicar_classes()
+
+    def clean_codigo(self):
+        codigo = "".join(self.cleaned_data["codigo"].upper().split())
+        if not codigo.startswith("VERS") or not codigo[4:].isdigit():
+            raise forms.ValidationError("Informe o número no padrão VERS seguido de algarismos, por exemplo VERS1917.")
+        return codigo
+
+    def clean(self):
+        dados = super().clean()
+        if dados.get("empresa") and dados.get("codigo") and Proposta.objects.filter(empresa=dados["empresa"], codigo=dados["codigo"]).exists():
+            self.add_error("codigo", "Já existe uma proposta com este número nesta empresa.")
+        return dados
 
 
 class PropostaRevisaoForm(ClasseCssMixin, forms.ModelForm):

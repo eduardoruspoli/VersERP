@@ -94,16 +94,14 @@ def validar_fechamento_publico(revisao):
 
 
 @transaction.atomic
-def criar_proposta(*, empresa, cliente, nome_servico, usuario=None, modelo=None, **dados_revisao):
+def criar_proposta(*, empresa, codigo, cliente, nome_servico, usuario=None, **dados_revisao):
     from financeiro.models import Empresa
 
     Empresa.objects.select_for_update().get(pk=empresa.pk)
-    sequencial = (Proposta.objects.filter(empresa=empresa).aggregate(maximo=Max("numero_sequencial"))["maximo"] or 0) + 1
-    proposta = Proposta(empresa=empresa, cliente=cliente, codigo=f"VERS{sequencial:04d}", numero_sequencial=sequencial, responsavel_interno=usuario)
+    proposta = Proposta(empresa=empresa, cliente=cliente, codigo=codigo, numero_sequencial=0, responsavel_interno=usuario)
     proposta.full_clean()
     proposta.save()
-    if modelo is None:
-        modelo = ModeloConteudoProposta.objects.filter(empresa=empresa, ativo=True, padrao=True).first()
+    modelo = ModeloConteudoProposta.objects.filter(empresa=empresa, ativo=True, padrao=True).first()
     snapshot = {}
     if modelo:
         for campo in ("texto_introdutorio", "normas_procedimentos", "qualificacao_mao_obra", "obrigacoes_contratada", "observacoes_comerciais", "observacao_faturamento", "texto_impostos", "multa_juros_atraso", "regra_protesto", "rodape"):
