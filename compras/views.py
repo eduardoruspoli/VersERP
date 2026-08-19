@@ -1,18 +1,23 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import (CotacaoFornecedorForm, CotacaoFornecedorItemForm, MotivoCancelamentoForm,
-                    ProcessoCotacaoForm, SolicitacaoCompraForm, SolicitacaoCompraItemFormSet)
+from .forms import (CotacaoFornecedorForm, CotacaoFornecedorItemForm, GerarPedidosCotacaoForm,
+                    MotivoCancelamentoForm, PedidoCompraForm, PedidoCompraItemForm,
+                    PedidoItemAlocacaoForm, ProcessoCotacaoForm, SolicitacaoCompraForm,
+                    SolicitacaoCompraItemFormSet)
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
-                     ProcessoCotacaoItem, SolicitacaoCompra)
+                     ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
+                     PedidoItemAlocacaoObra, SolicitacaoCompra)
 from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_solicitacao,
-                       concluir_processo_cotacao, iniciar_processo_cotacao,
-                       montar_mapa_comparativo, selecionar_oferta)
+                       cancelar_pedido, concluir_processo_cotacao, enviar_pedido,
+                       gerar_pedidos_da_cotacao, iniciar_processo_cotacao,
+                       montar_mapa_comparativo, recalcular_pedido, rejeitar_pedido,
+                       selecionar_oferta, submeter_pedido, aprovar_pedido)
 
 
 @login_required
@@ -207,3 +212,98 @@ def cotacao_selecionar(request,pk,item_pk):
     try: selecionar_oferta(item,oferta,request.user,request.POST.get("justificativa",""),request.POST.get("observacao","")); messages.success(request,"Fornecedor selecionado.")
     except ValidationError as erro: messages.error(request," ".join(erro.messages))
     return redirect("compras:cotacao_mapa",pk=pk)
+
+
+@login_required
+@permission_required("compras.view_pedidocompra",raise_exception=True)
+def pedido_lista(request):
+    qs=PedidoCompra.objects.select_related("empresa","fornecedor","criado_por").annotate(total_itens=Count("itens",distinct=True),total_obras=Count("itens__alocacoes__obra",distinct=True))
+    for campo in ("empresa","fornecedor","status","origem"):
+        if request.GET.get(campo): qs=qs.filter(**{f"{campo}_id" if campo in {"empresa","fornecedor"} else campo:request.GET[campo]})
+    return render(request,"compras/pedido_lista.html",{"pedidos":qs,"status_choices":PedidoCompra.Status.choices,"origem_choices":PedidoCompra.Origem.choices})
+
+
+def _salvar_pedido(request,pedido=None):
+    pedido=pedido or PedidoCompra(criado_por=request.user)
+    form=PedidoCompraForm(request.POST or None,instance=pedido)
+    if request.method=="POST" and form.is_valid():
+        pedido=form.save(); messages.success(request,"Pedido salvo em rascunho."); return redirect("compras:pedido_detalhe",pk=pedido.pk)
+    return render(request,"compras/pedido_formulario.html",{"form":form,"pedido":pedido})
+
+
+@login_required
+@permission_required(("compras.add_pedidocompra","compras.criar_pedido"),raise_exception=True)
+def pedido_criar(request): return _salvar_pedido(request)
+
+@login_required
+@permission_required("compras.change_pedidocompra",raise_exception=True)
+def pedido_editar(request,pk):
+    pedido=get_object_or_404(PedidoCompra,pk=pk)
+    if pedido.status!=PedidoCompra.Status.RASCUNHO: messages.error(request,"Somente rascunhos podem ser editados."); return redirect("compras:pedido_detalhe",pk=pk)
+    return _salvar_pedido(request,pedido)
+
+@login_required
+@permission_required("compras.criar_pedido",raise_exception=True)
+def pedido_gerar_cotacao(request,pk):
+    processo=get_object_or_404(ProcessoCotacao,pk=pk,status=ProcessoCotacao.Status.CONCLUIDA)
+    form=GerarPedidosCotacaoForm(request.POST or None,processo=processo)
+    if request.method=="POST" and form.is_valid():
+        numeros={int(k.split("_")[1]):v for k,v in form.cleaned_data.items()}
+        try:
+            pedidos=gerar_pedidos_da_cotacao(processo,numeros,request.user); messages.success(request,f"{len(pedidos)} pedido(s) gerado(s).")
+            return redirect("compras:pedido_lista")
+        except ValidationError as erro: form.add_error(None," ".join(erro.messages))
+    return render(request,"compras/pedido_gerar_cotacao.html",{"form":form,"processo":processo})
+
+@login_required
+@permission_required("compras.view_pedidocompra",raise_exception=True)
+def pedido_detalhe(request,pk):
+    pedido=get_object_or_404(PedidoCompra.objects.select_related("empresa","fornecedor","transportadora","aprovado_por","enviado_por"),pk=pk)
+    itens=pedido.itens.select_related("plano_conta").prefetch_related("alocacoes__obra")
+    return render(request,"compras/pedido_detalhe.html",{"pedido":pedido,"itens":itens,"historico":pedido.historico.select_related("usuario")})
+
+@login_required
+@permission_required("compras.change_pedidocompra",raise_exception=True)
+def pedido_item(request,pk,item_pk=None):
+    pedido=get_object_or_404(PedidoCompra,pk=pk,status=PedidoCompra.Status.RASCUNHO)
+    instancia=get_object_or_404(PedidoCompraItem,pk=item_pk,pedido=pedido) if item_pk else None
+    form=PedidoCompraItemForm(request.POST or None,instance=instancia,pedido=pedido)
+    if request.method=="POST" and form.is_valid():
+        item=form.save(commit=False); item.pedido=pedido; item.save(); recalcular_pedido(pedido); return redirect("compras:pedido_detalhe",pk=pk)
+    return render(request,"compras/pedido_item_formulario.html",{"form":form,"pedido":pedido})
+
+@login_required
+@permission_required("compras.change_pedidocompra",raise_exception=True)
+def pedido_alocacao(request,pk,item_pk,alocacao_pk=None):
+    pedido=get_object_or_404(PedidoCompra,pk=pk,status=PedidoCompra.Status.RASCUNHO); item=get_object_or_404(PedidoCompraItem,pk=item_pk,pedido=pedido)
+    instancia=get_object_or_404(PedidoItemAlocacaoObra,pk=alocacao_pk,pedido_item=item) if alocacao_pk else None
+    form=PedidoItemAlocacaoForm(request.POST or None,instance=instancia,pedido_item=item)
+    if request.method=="POST" and form.is_valid():
+        obj=form.save(commit=False); obj.pedido_item=item; obj.save(); return redirect("compras:pedido_detalhe",pk=pk)
+    return render(request,"compras/pedido_alocacao_formulario.html",{"form":form,"pedido":pedido,"item":item})
+
+
+def _acao_pedido(request,pk,funcao,sucesso,motivo=False):
+    if request.method!="POST": return HttpResponseBadRequest()
+    pedido=get_object_or_404(PedidoCompra,pk=pk)
+    try:
+        funcao(pedido,request.user,request.POST.get("motivo", "")) if motivo else funcao(pedido,request.user); messages.success(request,sucesso)
+    except (ValidationError, PermissionDenied) as erro: messages.error(request," ".join(getattr(erro,"messages",[str(erro)])))
+    return redirect("compras:pedido_detalhe",pk=pk)
+
+@login_required
+def pedido_submeter(request,pk): return _acao_pedido(request,pk,submeter_pedido,"Pedido enviado para aprovação.")
+@login_required
+def pedido_aprovar(request,pk): return _acao_pedido(request,pk,aprovar_pedido,"Pedido aprovado.")
+@login_required
+def pedido_rejeitar(request,pk): return _acao_pedido(request,pk,rejeitar_pedido,"Pedido rejeitado.",True)
+@login_required
+def pedido_cancelar(request,pk): return _acao_pedido(request,pk,cancelar_pedido,"Pedido cancelado.",True)
+@login_required
+def pedido_enviar(request,pk): return _acao_pedido(request,pk,enviar_pedido,"Envio ao fornecedor registrado.")
+
+@login_required
+@permission_required("compras.view_pedidocompra",raise_exception=True)
+def pedido_imprimir(request,pk):
+    pedido=get_object_or_404(PedidoCompra.objects.select_related("empresa","fornecedor"),pk=pk)
+    return render(request,"compras/pedido_imprimir.html",{"pedido":pedido,"itens":pedido.itens.prefetch_related("alocacoes__obra")})

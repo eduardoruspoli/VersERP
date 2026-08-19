@@ -6,7 +6,8 @@ from financeiro.models import CentroCusto, Empresa
 from pessoas.models import Pessoa
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
-                     ProcessoCotacaoItem, SolicitacaoCompra, SolicitacaoCompraItem)
+                     ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
+                     PedidoItemAlocacaoObra, SolicitacaoCompra, SolicitacaoCompraItem)
 
 
 class SolicitacaoCompraForm(forms.ModelForm):
@@ -142,3 +143,46 @@ class EscolhaOfertaForm(forms.Form):
     oferta = forms.IntegerField(widget=forms.HiddenInput)
     justificativa = forms.CharField(required=False, widget=forms.Textarea(attrs={"class":"form-control","rows":2}))
     observacao = forms.CharField(required=False, widget=forms.Textarea(attrs={"class":"form-control","rows":2}))
+
+
+class PedidoCompraForm(forms.ModelForm):
+    class Meta:
+        model=PedidoCompra
+        fields=["empresa","fornecedor","origem","justificativa_origem","numero_pedido_versatile","numero_pedido_fornecedor","data_pedido","nome_vendedor_fornecedor_snapshot","telefone_vendedor_snapshot","email_vendedor_snapshot","condicao_pagamento","prazo_entrega","tipo_frete","transportadora","transportadora_nome_snapshot","transportadora_documento_snapshot","transportadora_contato_snapshot","dados_bancarios","instrucoes_entrega","observacoes","frete","desconto","impostos","outras_despesas","responsavel_nome_snapshot","responsavel_cargo_snapshot","assinatura_textual"]
+        widgets={"data_pedido":forms.DateInput(attrs={"type":"date"})}
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        if not self.instance.pk: self.fields["origem"].choices=[(PedidoCompra.Origem.DIRETA,"Direta"),(PedidoCompra.Origem.EMERGENCIAL,"Emergencial")]
+        self.fields["empresa"].queryset=Empresa.objects.filter(ativa=True)
+        self.fields["fornecedor"].queryset=Pessoa.objects.filter(ativo=True,classificacao__in=[Pessoa.Classificacao.FORNECEDOR,Pessoa.Classificacao.AMBOS])
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-select" if isinstance(field.widget,(forms.Select,forms.SelectMultiple)) else "form-control")
+
+
+class PedidoCompraItemForm(forms.ModelForm):
+    class Meta:
+        model=PedidoCompraItem
+        fields=["solicitacao_item","proposta_item","proposta_codigo_snapshot","descricao_mercadoria","quantidade","unidade","valor_unitario","plano_conta","observacao","ordem"]
+    def __init__(self,*args,pedido=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        if pedido: self.fields["solicitacao_item"].queryset=SolicitacaoCompraItem.objects.filter(solicitacao__empresa=pedido.empresa,cancelado=False)
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-select" if isinstance(field.widget,forms.Select) else "form-control")
+
+
+class PedidoItemAlocacaoForm(forms.ModelForm):
+    class Meta:
+        model=PedidoItemAlocacaoObra
+        fields=["obra","solicitacao_item","proposta_item","quantidade","valor","tipo_origem","observacao"]
+    def __init__(self,*args,pedido_item=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        if pedido_item:
+            self.fields["obra"].queryset=CentroCusto.objects.filter(empresa=pedido_item.pedido.empresa,ativo=True)
+            self.fields["solicitacao_item"].queryset=SolicitacaoCompraItem.objects.filter(solicitacao__empresa=pedido_item.pedido.empresa)
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-select" if isinstance(field.widget,forms.Select) else "form-control")
+
+
+class GerarPedidosCotacaoForm(forms.Form):
+    def __init__(self,*args,processo=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        ids=processo.itens.filter(escolha__isnull=False).values_list("escolha__oferta_escolhida__cotacao__fornecedor_id",flat=True).distinct()
+        for fornecedor in Pessoa.objects.filter(pk__in=ids):
+            self.fields[f"fornecedor_{fornecedor.pk}"]=forms.CharField(label=f"Nº Pedido Versatile — {fornecedor}",widget=forms.TextInput(attrs={"class":"form-control"}))

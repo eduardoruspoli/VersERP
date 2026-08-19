@@ -5,6 +5,21 @@ from . import views
 app_name = "compras"
 
 urlpatterns = [
+    path("pedidos/",views.pedido_lista,name="pedido_lista"),
+    path("pedidos/novo/",views.pedido_criar,name="pedido_criar"),
+    path("pedidos/cotacao/<int:pk>/gerar/",views.pedido_gerar_cotacao,name="pedido_gerar_cotacao"),
+    path("pedidos/<int:pk>/",views.pedido_detalhe,name="pedido_detalhe"),
+    path("pedidos/<int:pk>/editar/",views.pedido_editar,name="pedido_editar"),
+    path("pedidos/<int:pk>/item/",views.pedido_item,name="pedido_item"),
+    path("pedidos/<int:pk>/item/<int:item_pk>/editar/",views.pedido_item,name="pedido_item_editar"),
+    path("pedidos/<int:pk>/item/<int:item_pk>/alocacao/",views.pedido_alocacao,name="pedido_alocacao"),
+    path("pedidos/<int:pk>/item/<int:item_pk>/alocacao/<int:alocacao_pk>/editar/",views.pedido_alocacao,name="pedido_alocacao_editar"),
+    path("pedidos/<int:pk>/submeter/",views.pedido_submeter,name="pedido_submeter"),
+    path("pedidos/<int:pk>/aprovar/",views.pedido_aprovar,name="pedido_aprovar"),
+    path("pedidos/<int:pk>/rejeitar/",views.pedido_rejeitar,name="pedido_rejeitar"),
+    path("pedidos/<int:pk>/cancelar/",views.pedido_cancelar,name="pedido_cancelar"),
+    path("pedidos/<int:pk>/enviar/",views.pedido_enviar,name="pedido_enviar"),
+    path("pedidos/<int:pk>/imprimir/",views.pedido_imprimir,name="pedido_imprimir"),
     path("cotacoes/", views.cotacao_lista, name="cotacao_lista"),
     path("cotacoes/nova/", views.cotacao_criar, name="cotacao_criar"),
     path("cotacoes/<int:pk>/", views.cotacao_detalhe, name="cotacao_detalhe"),

@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoItem,
                      HistoricoProcessoCotacao, HistoricoSolicitacaoCompra,
+                     HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra,
                      ProcessoCotacao, ProcessoCotacaoItem, SolicitacaoCompra, SolicitacaoCompraItem)
 
 
@@ -19,4 +20,5 @@ class SolicitacaoCompraAdmin(admin.ModelAdmin):
 
 admin.site.register(HistoricoSolicitacaoCompra)
 admin.site.register([ProcessoCotacao, ProcessoCotacaoItem, CotacaoFornecedor,
-                     CotacaoFornecedorItem, EscolhaCotacaoItem, HistoricoProcessoCotacao])
+                     CotacaoFornecedorItem, EscolhaCotacaoItem, HistoricoProcessoCotacao,
+                     PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra, HistoricoPedidoCompra])

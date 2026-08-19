@@ -14,10 +14,14 @@ from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoItem,
-                     ProcessoCotacao, ProcessoCotacaoItem, SolicitacaoCompra, SolicitacaoCompraItem)
+                     HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem,
+                     PedidoItemAlocacaoObra, ProcessoCotacao, ProcessoCotacaoItem,
+                     SolicitacaoCompra, SolicitacaoCompraItem)
 from .services import (abrir_solicitacao, calcular_custos_cotacao, cancelar_processo_cotacao,
-                       cancelar_solicitacao, concluir_processo_cotacao,
-                       iniciar_processo_cotacao, montar_mapa_comparativo, selecionar_oferta)
+                       cancelar_pedido, cancelar_solicitacao, concluir_processo_cotacao,
+                       enviar_pedido, gerar_pedidos_da_cotacao, iniciar_processo_cotacao,
+                       montar_mapa_comparativo, recalcular_pedido, rejeitar_pedido,
+                       selecionar_oferta, submeter_pedido, aprovar_pedido)
 
 
 class ComprasBase(TestCase):
@@ -345,3 +349,119 @@ class ProcessoCotacaoTests(ComprasBase):
         self.permissao("view_processocotacao")
         self.assertEqual(self.client.get(reverse("compras:cotacao_lista")).status_code,200)
         self.assertContains(self.client.get(reverse("compras:cotacao_detalhe",args=[self.processo.pk])),self.processo.identificacao)
+
+
+class PedidoCompraTests(ComprasBase):
+    def setUp(self):
+        super().setUp()
+        self.fornecedor=Pessoa.objects.create(razao_social="Fornecedor Pedido",classificacao=Pessoa.Classificacao.FORNECEDOR)
+
+    def pedido(self,**kwargs):
+        dados={"empresa":self.empresa,"fornecedor":self.fornecedor,"origem":PedidoCompra.Origem.DIRETA,"justificativa_origem":"Compra direta TESTE","numero_pedido_versatile":"PC TESTE 01","condicao_pagamento":"28 dias","prazo_entrega":"5 dias","criado_por":self.usuario}; dados.update(kwargs)
+        return PedidoCompra.objects.create(**dados)
+
+    def item_pedido(self,pedido=None,**kwargs):
+        dados={"pedido":pedido or self.pedido(),"descricao_mercadoria":"Material pedido","quantidade":Decimal("10"),"unidade":"UN","valor_unitario":Decimal("10")}; dados.update(kwargs)
+        item=PedidoCompraItem.objects.create(**dados); recalcular_pedido(item.pedido); item.refresh_from_db(); return item
+
+    def alocar(self,item,obra=None,**kwargs):
+        dados={"pedido_item":item,"obra":obra or self.obra,"quantidade":item.quantidade,"valor":item.custo_total,"tipo_origem":"NAO_PREVISTO"}; dados.update(kwargs)
+        return PedidoItemAlocacaoObra.objects.create(**dados)
+
+    def test_numero_obrigatorio_normaliza_espacos_e_preserva_conteudo(self):
+        with self.assertRaises(ValidationError): self.pedido(numero_pedido_versatile="  ")
+        p=self.pedido(numero_pedido_versatile="  PC   Ab-01  "); self.assertEqual(p.numero_pedido_versatile,"PC Ab-01")
+
+    def test_numero_unico_por_empresa_e_repetido_em_outra(self):
+        self.pedido()
+        with self.assertRaises(ValidationError): self.pedido()
+        obra=CentroCusto.objects.create(empresa=self.outra_empresa,codigo="PED-OUTRA",nome="Outra")
+        p=self.pedido(empresa=self.outra_empresa,numero_pedido_versatile="PC TESTE 01"); self.assertEqual(p.empresa,self.outra_empresa)
+
+    def test_direto_e_emergencial_exigem_justificativa(self):
+        for origem in (PedidoCompra.Origem.DIRETA,PedidoCompra.Origem.EMERGENCIAL):
+            with self.assertRaises(ValidationError): self.pedido(origem=origem,justificativa_origem="",numero_pedido_versatile=f"{origem}-1")
+        self.assertEqual(self.pedido(origem="EMERGENCIAL",numero_pedido_versatile="EM-1").origem,"EMERGENCIAL")
+
+    def test_fornecedor_inativo_e_rejeitado(self):
+        self.fornecedor.ativo=False; self.fornecedor.save()
+        with self.assertRaises(ValidationError): self.pedido()
+
+    def test_custos_globais_e_arredondamento(self):
+        p=self.pedido(frete=Decimal("0.01"),desconto=Decimal("1"),impostos=Decimal("2"),outras_despesas=Decimal("3"))
+        a=self.item_pedido(p,quantidade=1,valor_unitario=10); b=self.item_pedido(p,quantidade=1,valor_unitario=10,descricao_mercadoria="B")
+        recalcular_pedido(p); a.refresh_from_db(); b.refresh_from_db()
+        self.assertEqual(a.frete_alocado+b.frete_alocado,Decimal("0.01")); self.assertEqual(p.total,Decimal("24.01"))
+
+    def test_multiplas_obras_fecham_quantidade_e_valor(self):
+        p=self.pedido(); item=self.item_pedido(p); obra2=CentroCusto.objects.create(empresa=self.empresa,codigo="OBRA-PED-2",nome="Obra 2")
+        self.alocar(item,quantidade=4,valor=40); self.alocar(item,obra2,quantidade=6,valor=60)
+        self.permissao("change_pedidocompra"); submeter_pedido(p,self.usuario); p.refresh_from_db(); self.assertEqual(p.status,"AGUARDANDO_APROVACAO")
+
+    def test_alocacao_incorreta_bloqueia_submissao(self):
+        p=self.pedido(); item=self.item_pedido(p); self.alocar(item,quantidade=9,valor=90); self.permissao("change_pedidocompra")
+        with self.assertRaises(ValidationError): submeter_pedido(p,self.usuario)
+
+    def test_obra_inativa_e_empresa_divergente(self):
+        p=self.pedido(); item=self.item_pedido(p); self.obra.ativo=False; self.obra.save()
+        with self.assertRaises(ValidationError): self.alocar(item)
+        outra=CentroCusto.objects.create(empresa=self.outra_empresa,codigo="PED-OUT",nome="Outra")
+        with self.assertRaises(ValidationError): self.alocar(item,outra)
+
+    def _cotacao_dupla(self):
+        sc1=self.solicitacao(); i1=self.item(solicitacao=sc1,proposta_item=self.proposta_item,tipo="PREVISTO"); sc1.status="EM_COTACAO"; sc1.save(update_fields=["status"])
+        obra2=CentroCusto.objects.create(empresa=self.empresa,codigo="PED-OBRA-2",nome="Segunda obra")
+        sc2=self.solicitacao(obra=obra2); i2=self.item(solicitacao=sc2); sc2.status="EM_COTACAO"; sc2.save(update_fields=["status"])
+        processo=ProcessoCotacao.objects.create(empresa=self.empresa,responsavel=self.usuario,criado_por=self.usuario)
+        pi1=ProcessoCotacaoItem.objects.create(processo=processo,solicitacao_item=i1,quantidade_cotada=10,unidade="UN")
+        pi2=ProcessoCotacaoItem.objects.create(processo=processo,solicitacao_item=i2,quantidade_cotada=10,unidade="UN")
+        f2=Pessoa.objects.create(razao_social="Fornecedor Pedido 2",classificacao="FORNECEDOR")
+        escolhas=[]
+        for idx,(pi,forn) in enumerate(((pi1,self.fornecedor),(pi2,f2))):
+            c=CotacaoFornecedor.objects.create(processo=processo,fornecedor=forn,nome_contato=f"Vendedor {idx}",condicao_pagamento="30 dias",prazo_entrega="7 dias",valor_frete=Decimal("5"),status="RECEBIDA",registrada_por=self.usuario)
+            o=CotacaoFornecedorItem.objects.create(cotacao=c,processo_item=pi,quantidade_ofertada=10,unidade="UN",preco_unitario=10+idx)
+            escolhas.append(EscolhaCotacaoItem.objects.create(processo_item=pi,oferta_escolhida=o,escolhido_por=self.usuario,era_menor_preco=True))
+        ProcessoCotacao.objects.filter(pk=processo.pk).update(status="CONCLUIDA"); processo.status="CONCLUIDA"
+        return processo,escolhas
+
+    def test_cotacao_gera_um_pedido_por_fornecedor_com_snapshots(self):
+        processo,escolhas=self._cotacao_dupla(); self.permissao("criar_pedido")
+        pedidos=gerar_pedidos_da_cotacao(processo,{self.fornecedor.pk:"COT-A",escolhas[1].oferta_escolhida.cotacao.fornecedor_id:"COT-B"},self.usuario)
+        self.assertEqual(len(pedidos),2); self.assertEqual({p.fornecedor_id for p in pedidos},{e.oferta_escolhida.cotacao.fornecedor_id for e in escolhas})
+        primeiro=PedidoCompraItem.objects.get(escolha_cotacao_item=escolhas[0]); self.assertEqual(primeiro.proposta_codigo_snapshot,"VERS7001"); self.assertEqual(primeiro.alocacoes.get().obra,self.obra)
+
+    def test_nao_duplica_pedido_da_mesma_escolha(self):
+        processo,escolhas=self._cotacao_dupla(); self.permissao("criar_pedido"); numeros={e.oferta_escolhida.cotacao.fornecedor_id:f"N-{n}" for n,e in enumerate(escolhas)}
+        gerar_pedidos_da_cotacao(processo,numeros,self.usuario)
+        with self.assertRaises(ValidationError): gerar_pedidos_da_cotacao(processo,numeros,self.usuario)
+
+    def test_aprovacao_envio_e_imutabilidade(self):
+        p=self.pedido(); item=self.item_pedido(p); self.alocar(item); self.permissao("change_pedidocompra","aprovar_pedido","enviar_pedido")
+        p=submeter_pedido(p,self.usuario); p=aprovar_pedido(p,self.usuario); self.assertEqual(p.aprovado_por,self.usuario)
+        p=enviar_pedido(p,self.usuario); self.assertEqual(p.status,"ENVIADO_FORNECEDOR")
+        item.descricao_mercadoria="Alterado"
+        with self.assertRaises(ValidationError): item.save()
+
+    def test_rejeicao_exige_motivo_e_registra_historico(self):
+        p=self.pedido(); item=self.item_pedido(p); self.alocar(item); self.permissao("change_pedidocompra","rejeitar_pedido"); p=submeter_pedido(p,self.usuario)
+        with self.assertRaises(ValidationError): rejeitar_pedido(p,self.usuario,"")
+        p=rejeitar_pedido(p,self.usuario,"Preço não aprovado"); self.assertEqual(p.status,"REJEITADO"); self.assertEqual(p.historico.first().observacao,"Preço não aprovado")
+
+    def test_cancelamento_exige_motivo(self):
+        p=self.pedido(); item=self.item_pedido(p); self.alocar(item); self.permissao("change_pedidocompra","aprovar_pedido","cancelar_pedido"); p=submeter_pedido(p,self.usuario); p=aprovar_pedido(p,self.usuario)
+        with self.assertRaises(ValidationError): cancelar_pedido(p,self.usuario,"")
+        self.assertEqual(cancelar_pedido(p,self.usuario,"Cancelado pelo gestor").status,"CANCELADO")
+
+    def test_transicao_invalida_e_permissoes(self):
+        p=self.pedido()
+        with self.assertRaises(PermissionDenied): submeter_pedido(p,self.usuario)
+        self.permissao("aprovar_pedido")
+        with self.assertRaises(ValidationError): aprovar_pedido(p,self.usuario)
+
+    def test_documento_imprimivel_nao_expoe_comparativo(self):
+        p=self.pedido(observacoes="Observação pública"); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra"); self.client.force_login(self.usuario)
+        resposta=self.client.get(reverse("compras:pedido_imprimir",args=[p.pk])); self.assertEqual(resposta.status_code,200); self.assertContains(resposta,"PEDIDO DE COMPRA"); self.assertContains(resposta,"PC TESTE 01"); self.assertNotContains(resposta,"Compra direta TESTE"); self.assertNotContains(resposta,"mapa comparativo")
+
+    def test_detalhe_oculta_custos_sem_permissao(self):
+        p=self.pedido(); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra"); self.client.force_login(self.usuario)
+        self.assertNotContains(self.client.get(reverse("compras:pedido_detalhe",args=[p.pk])),"Valor unitário")
