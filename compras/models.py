@@ -354,6 +354,8 @@ class PedidoCompra(models.Model):
         ENVIADO_FORNECEDOR = "ENVIADO_FORNECEDOR", "Enviado ao fornecedor"
         REJEITADO = "REJEITADO", "Rejeitado"
         CANCELADO = "CANCELADO", "Cancelado"
+        PARCIALMENTE_RECEBIDO = "PARCIALMENTE_RECEBIDO", "Parcialmente recebido"
+        RECEBIDO = "RECEBIDO", "Recebido"
 
     empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="pedidos_compra")
     fornecedor = models.ForeignKey(Pessoa, on_delete=models.PROTECT, related_name="pedidos_compra_fornecedor")
@@ -412,7 +414,7 @@ class PedidoCompra(models.Model):
             if getattr(self, campo, 0) < 0: errors[campo] = "O valor não pode ser negativo."
         if self.pk:
             original = type(self).objects.filter(pk=self.pk).values("status").first()
-            if original and original["status"] in {self.Status.APROVADO, self.Status.ENVIADO_FORNECEDOR, self.Status.REJEITADO, self.Status.CANCELADO}: errors["status"] = "O pedido está congelado."
+            if original and original["status"] in {self.Status.APROVADO, self.Status.ENVIADO_FORNECEDOR, self.Status.REJEITADO, self.Status.CANCELADO, self.Status.PARCIALMENTE_RECEBIDO, self.Status.RECEBIDO}: errors["status"] = "O pedido está congelado."
         if errors: raise ValidationError(errors)
 
     def save(self, *args, **kwargs): self.full_clean(); return super().save(*args, **kwargs)
@@ -483,3 +485,82 @@ class HistoricoPedidoCompra(models.Model):
     criado_em = models.DateTimeField(auto_now_add=True)
     class Meta: ordering=["-criado_em","-id"]
     def get_status_anterior_display(self): return dict(PedidoCompra.Status.choices).get(self.status_anterior,self.status_anterior)
+
+
+class RecebimentoCompra(models.Model):
+    class Status(models.TextChoices):
+        RASCUNHO="RASCUNHO","Rascunho"
+        CONFIRMADO="CONFIRMADO","Confirmado"
+        CANCELADO="CANCELADO","Cancelado"
+    pedido=models.ForeignKey(PedidoCompra,on_delete=models.PROTECT,related_name="recebimentos")
+    data_recebimento=models.DateField(default=timezone.localdate)
+    responsavel=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="recebimentos_compra_responsavel")
+    numero_documento=models.CharField(max_length=100,blank=True)
+    observacao=models.TextField(blank=True)
+    status=models.CharField(max_length=15,choices=Status.choices,default=Status.RASCUNHO)
+    criado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="recebimentos_compra_criados")
+    confirmado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="recebimentos_compra_confirmados")
+    confirmado_em=models.DateTimeField(null=True,blank=True)
+    cancelado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="recebimentos_compra_cancelados")
+    cancelado_em=models.DateTimeField(null=True,blank=True)
+    motivo_cancelamento=models.TextField(blank=True)
+    criado_em=models.DateTimeField(auto_now_add=True)
+    atualizado_em=models.DateTimeField(auto_now=True)
+    class Meta:
+        ordering=["-data_recebimento","-id"]
+        permissions=[("registrar_recebimento","Pode registrar recebimento de compra"),("cancelar_recebimento","Pode cancelar recebimento confirmado"),("resolver_divergencia_recebimento","Pode resolver divergência de recebimento")]
+    @property
+    def identificacao(self): return f"REC-{self.pk:05d}" if self.pk else "Novo recebimento"
+    def clean(self):
+        if self.pedido_id and self.pedido.status not in {PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO} and not self.pk: raise ValidationError({"pedido":"Este pedido não permite recebimento."})
+        if self.pk and type(self).objects.filter(pk=self.pk).exclude(status=self.Status.RASCUNHO).exists(): raise ValidationError({"status":"O recebimento confirmado ou cancelado é imutável."})
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+    def __str__(self): return f"{self.identificacao} — {self.pedido}"
+
+
+class RecebimentoCompraItem(models.Model):
+    recebimento=models.ForeignKey(RecebimentoCompra,on_delete=models.CASCADE,related_name="itens")
+    pedido_item=models.ForeignKey(PedidoCompraItem,on_delete=models.PROTECT,related_name="itens_recebimento")
+    quantidade_recebida=models.DecimalField(max_digits=15,decimal_places=4)
+    quantidade_aceita=models.DecimalField(max_digits=15,decimal_places=4)
+    quantidade_rejeitada=models.DecimalField(max_digits=15,decimal_places=4,default=0)
+    observacao=models.TextField(blank=True)
+    possui_divergencia=models.BooleanField(default=False)
+    class Meta:
+        ordering=["id"]
+        constraints=[models.UniqueConstraint(fields=["recebimento","pedido_item"],name="uq_item_por_recebimento_compra")]
+    def clean(self):
+        errors={}
+        for campo in ("quantidade_recebida","quantidade_aceita","quantidade_rejeitada"):
+            if getattr(self,campo,None) is not None and getattr(self,campo)<0: errors[campo]="A quantidade não pode ser negativa."
+        if self.quantidade_aceita is not None and self.quantidade_rejeitada is not None and self.quantidade_recebida is not None and self.quantidade_aceita+self.quantidade_rejeitada>self.quantidade_recebida: errors["quantidade_recebida"]="Aceito mais rejeitado não pode superar o recebido."
+        if self.pedido_item_id and self.recebimento_id and self.pedido_item.pedido_id!=self.recebimento.pedido_id: errors["pedido_item"]="O item deve pertencer ao pedido do recebimento."
+        if self.recebimento_id and RecebimentoCompra.objects.filter(pk=self.recebimento_id).exclude(status=RecebimentoCompra.Status.RASCUNHO).exists(): errors["recebimento"]="O recebimento está congelado."
+        if errors: raise ValidationError(errors)
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+
+
+class DivergenciaRecebimento(models.Model):
+    class Tipo(models.TextChoices):
+        QUANTIDADE_MENOR="QUANTIDADE_MENOR","Quantidade menor"
+        QUANTIDADE_MAIOR="QUANTIDADE_MAIOR","Quantidade maior"
+        MATERIAL_INCORRETO="MATERIAL_INCORRETO","Material incorreto"
+        DANIFICADO="DANIFICADO","Danificado"
+        PRECO_DIVERGENTE="PRECO_DIVERGENTE","Preço divergente"
+        OUTRO="OUTRO","Outro"
+    recebimento_item=models.ForeignKey(RecebimentoCompraItem,on_delete=models.PROTECT,related_name="divergencias")
+    tipo=models.CharField(max_length=25,choices=Tipo.choices)
+    descricao=models.TextField()
+    quantidade_afetada=models.DecimalField(max_digits=15,decimal_places=4,null=True,blank=True)
+    resolvida=models.BooleanField(default=False)
+    resolvida_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="divergencias_recebimento_resolvidas")
+    resolvida_em=models.DateTimeField(null=True,blank=True)
+    solucao=models.TextField(blank=True)
+    criado_em=models.DateTimeField(auto_now_add=True)
+    def clean(self):
+        if self.quantidade_afetada is not None and self.quantidade_afetada<0: raise ValidationError({"quantidade_afetada":"A quantidade não pode ser negativa."})
+        if self.resolvida and (not self.resolvida_por_id or not self.resolvida_em or not self.solucao.strip()): raise ValidationError("Informe usuário, data e solução da divergência.")
+    def save(self,*args,**kwargs):
+        self.full_clean(); resultado=super().save(*args,**kwargs)
+        RecebimentoCompraItem.objects.filter(pk=self.recebimento_item_id).update(possui_divergencia=True)
+        return resultado

@@ -2,11 +2,13 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from .models import (
     CotacaoFornecedor, EscolhaCotacaoItem, HistoricoPedidoCompra, HistoricoProcessoCotacao,
-    HistoricoSolicitacaoCompra, PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra,
+    DivergenciaRecebimento, HistoricoSolicitacaoCompra, PedidoCompra, PedidoCompraItem,
+    PedidoItemAlocacaoObra, RecebimentoCompra, RecebimentoCompraItem,
     ProcessoCotacao, SolicitacaoCompra,
 )
 
@@ -294,3 +296,70 @@ def cancelar_pedido(pedido,usuario,motivo):
 def enviar_pedido(pedido,usuario):
     pedido=PedidoCompra.objects.select_for_update().get(pk=pedido.pk)
     return _mudar_pedido(pedido,usuario,PedidoCompra.Status.ENVIADO_FORNECEDOR,"enviar_pedido")
+
+
+def quantidades_recebimento_pedido(pedido):
+    acumuladas=dict(RecebimentoCompraItem.objects.filter(recebimento__pedido=pedido,recebimento__status=RecebimentoCompra.Status.CONFIRMADO).values_list("pedido_item_id").annotate(total=Sum("quantidade_aceita")))
+    return {item.pk:{"pedida":item.quantidade,"recebida":acumuladas.get(item.pk,Decimal("0")),"pendente":item.quantidade-acumuladas.get(item.pk,Decimal("0"))} for item in pedido.itens.all()}
+
+
+def _recalcular_status_recebimento_pedido(pedido,usuario,observacao):
+    quantidades=quantidades_recebimento_pedido(pedido)
+    recebida=sum((v["recebida"] for v in quantidades.values()),Decimal("0"))
+    completo=bool(quantidades) and all(v["pendente"]==0 for v in quantidades.values())
+    origem_recebimento=pedido.historico.filter(status_novo__in=[PedidoCompra.Status.PARCIALMENTE_RECEBIDO,PedidoCompra.Status.RECEBIDO],status_anterior__in=[PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR]).order_by("-id").values_list("status_anterior",flat=True).first()
+    base=origem_recebimento or (PedidoCompra.Status.ENVIADO_FORNECEDOR if pedido.enviado_em else PedidoCompra.Status.APROVADO)
+    novo=PedidoCompra.Status.RECEBIDO if completo else (PedidoCompra.Status.PARCIALMENTE_RECEBIDO if recebida>0 else base)
+    if pedido.status!=novo:
+        anterior=pedido.status; PedidoCompra.objects.filter(pk=pedido.pk).update(status=novo); pedido.status=novo
+        HistoricoPedidoCompra.objects.create(pedido=pedido,status_anterior=anterior,status_novo=novo,usuario=usuario,observacao=observacao)
+    return pedido
+
+
+@transaction.atomic
+def confirmar_recebimento(recebimento,usuario):
+    _exigir(usuario,"registrar_recebimento")
+    recebimento=RecebimentoCompra.objects.select_for_update().select_related("pedido").get(pk=recebimento.pk)
+    pedido=PedidoCompra.objects.select_for_update().get(pk=recebimento.pedido_id)
+    if recebimento.status!=RecebimentoCompra.Status.RASCUNHO: raise ValidationError("Somente recebimentos em rascunho podem ser confirmados.")
+    if pedido.status not in {PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO}: raise ValidationError("O pedido não permite novos recebimentos.")
+    itens=list(recebimento.itens.select_related("pedido_item"))
+    if not itens: raise ValidationError("Inclua ao menos um item no recebimento.")
+    PedidoCompraItem.objects.select_for_update().filter(pedido=pedido).count()
+    acumuladas=quantidades_recebimento_pedido(pedido)
+    for item in itens:
+        if item.quantidade_aceita+item.quantidade_rejeitada>item.quantidade_recebida: raise ValidationError("Quantidade aceita mais rejeitada supera a recebida.")
+        if item.quantidade_aceita>acumuladas[item.pedido_item_id]["pendente"]: raise ValidationError(f"A quantidade aceita de {item.pedido_item.descricao_mercadoria} supera a pendência do pedido.")
+    if not any(i.quantidade_recebida>0 for i in itens): raise ValidationError("Informe ao menos uma quantidade recebida.")
+    agora=timezone.now(); RecebimentoCompra.objects.filter(pk=recebimento.pk).update(status=RecebimentoCompra.Status.CONFIRMADO,confirmado_por=usuario,confirmado_em=agora)
+    recebimento.status=RecebimentoCompra.Status.CONFIRMADO; recebimento.confirmado_por=usuario; recebimento.confirmado_em=agora
+    _recalcular_status_recebimento_pedido(pedido,usuario,f"Confirmação do {recebimento.identificacao}.")
+    return recebimento
+
+
+@transaction.atomic
+def cancelar_recebimento(recebimento,usuario,motivo):
+    _exigir(usuario,"cancelar_recebimento")
+    if not motivo.strip(): raise ValidationError("Informe o motivo do cancelamento.")
+    referencia=recebimento
+    recebimento=RecebimentoCompra.objects.select_for_update().select_related("pedido").get(pk=recebimento.pk)
+    pedido=PedidoCompra.objects.select_for_update().get(pk=recebimento.pedido_id)
+    if recebimento.status!=RecebimentoCompra.Status.CONFIRMADO: raise ValidationError("Somente recebimentos confirmados podem ser cancelados.")
+    agora=timezone.now(); RecebimentoCompra.objects.filter(pk=recebimento.pk).update(status=RecebimentoCompra.Status.CANCELADO,cancelado_por=usuario,cancelado_em=agora,motivo_cancelamento=motivo.strip())
+    recebimento.status=RecebimentoCompra.Status.CANCELADO; recebimento.cancelado_por=usuario; recebimento.cancelado_em=agora; recebimento.motivo_cancelamento=motivo.strip()
+    referencia.status=recebimento.status; referencia.cancelado_por=usuario; referencia.cancelado_em=agora; referencia.motivo_cancelamento=motivo.strip()
+    _recalcular_status_recebimento_pedido(pedido,usuario,f"Cancelamento do {recebimento.identificacao}: {motivo.strip()}")
+    return recebimento
+
+
+@transaction.atomic
+def resolver_divergencia(divergencia,usuario,solucao):
+    _exigir(usuario,"resolver_divergencia_recebimento")
+    if not solucao.strip(): raise ValidationError("Informe a solução da divergência.")
+    referencia=divergencia
+    divergencia=DivergenciaRecebimento.objects.select_for_update().get(pk=divergencia.pk)
+    if divergencia.resolvida: raise ValidationError("A divergência já foi resolvida.")
+    agora=timezone.now(); DivergenciaRecebimento.objects.filter(pk=divergencia.pk).update(resolvida=True,resolvida_por=usuario,resolvida_em=agora,solucao=solucao.strip())
+    divergencia.resolvida=True; divergencia.resolvida_por=usuario; divergencia.resolvida_em=agora; divergencia.solucao=solucao.strip()
+    referencia.resolvida=True; referencia.resolvida_por=usuario; referencia.resolvida_em=agora; referencia.solucao=solucao.strip()
+    return divergencia

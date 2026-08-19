@@ -6,8 +6,10 @@ from financeiro.models import CentroCusto, Empresa
 from pessoas.models import Pessoa
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
+                     DivergenciaRecebimento,
                      ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
-                     PedidoItemAlocacaoObra, SolicitacaoCompra, SolicitacaoCompraItem)
+                     PedidoItemAlocacaoObra, RecebimentoCompra, RecebimentoCompraItem,
+                     SolicitacaoCompra, SolicitacaoCompraItem)
 
 
 class SolicitacaoCompraForm(forms.ModelForm):
@@ -186,3 +188,37 @@ class GerarPedidosCotacaoForm(forms.Form):
         ids=processo.itens.filter(escolha__isnull=False).values_list("escolha__oferta_escolhida__cotacao__fornecedor_id",flat=True).distinct()
         for fornecedor in Pessoa.objects.filter(pk__in=ids):
             self.fields[f"fornecedor_{fornecedor.pk}"]=forms.CharField(label=f"Nº Pedido Versatile — {fornecedor}",widget=forms.TextInput(attrs={"class":"form-control"}))
+
+
+class RecebimentoCompraForm(forms.ModelForm):
+    class Meta:
+        model=RecebimentoCompra
+        fields=["data_recebimento","responsavel","numero_documento","observacao"]
+        widgets={"data_recebimento":forms.DateInput(attrs={"class":"form-control","type":"date"}),"responsavel":forms.Select(attrs={"class":"form-select"}),"numero_documento":forms.TextInput(attrs={"class":"form-control"}),"observacao":forms.Textarea(attrs={"class":"form-control","rows":3})}
+
+
+class RecebimentoCompraItemForm(forms.ModelForm):
+    class Meta:
+        model=RecebimentoCompraItem
+        fields=["pedido_item","quantidade_recebida","quantidade_aceita","quantidade_rejeitada","observacao"]
+    def __init__(self,*args,pedido=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        if pedido: self.fields["pedido_item"].queryset=pedido.itens.all()
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-select" if isinstance(field.widget,forms.Select) else "form-control")
+
+
+class BaseRecebimentoItemFormSet(BaseInlineFormSet):
+    def __init__(self,*args,pedido=None,**kwargs): self.pedido=pedido; super().__init__(*args,**kwargs)
+    def get_form_kwargs(self,index): kwargs=super().get_form_kwargs(index); kwargs["pedido"]=self.pedido; return kwargs
+
+RecebimentoCompraItemFormSet=inlineformset_factory(RecebimentoCompra,RecebimentoCompraItem,form=RecebimentoCompraItemForm,formset=BaseRecebimentoItemFormSet,extra=1,can_delete=True)
+
+
+class DivergenciaRecebimentoForm(forms.ModelForm):
+    class Meta:
+        model=DivergenciaRecebimento
+        fields=["tipo","descricao","quantidade_afetada"]
+        widgets={"tipo":forms.Select(attrs={"class":"form-select"}),"descricao":forms.Textarea(attrs={"class":"form-control","rows":3}),"quantidade_afetada":forms.NumberInput(attrs={"class":"form-control","step":"0.0001"})}
+
+class SolucaoDivergenciaForm(forms.Form):
+    solucao=forms.CharField(widget=forms.Textarea(attrs={"class":"form-control","rows":3}))

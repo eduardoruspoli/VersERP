@@ -14,14 +14,16 @@ from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoItem,
-                     HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem,
+                     DivergenciaRecebimento, HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, ProcessoCotacao, ProcessoCotacaoItem,
-                     SolicitacaoCompra, SolicitacaoCompraItem)
+                     RecebimentoCompra, RecebimentoCompraItem, SolicitacaoCompra, SolicitacaoCompraItem)
 from .services import (abrir_solicitacao, calcular_custos_cotacao, cancelar_processo_cotacao,
                        cancelar_pedido, cancelar_solicitacao, concluir_processo_cotacao,
                        enviar_pedido, gerar_pedidos_da_cotacao, iniciar_processo_cotacao,
                        montar_mapa_comparativo, recalcular_pedido, rejeitar_pedido,
-                       selecionar_oferta, submeter_pedido, aprovar_pedido)
+                       selecionar_oferta, submeter_pedido, aprovar_pedido,
+                       cancelar_recebimento, confirmar_recebimento,
+                       quantidades_recebimento_pedido, resolver_divergencia)
 
 
 class ComprasBase(TestCase):
@@ -465,3 +467,68 @@ class PedidoCompraTests(ComprasBase):
     def test_detalhe_oculta_custos_sem_permissao(self):
         p=self.pedido(); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra"); self.client.force_login(self.usuario)
         self.assertNotContains(self.client.get(reverse("compras:pedido_detalhe",args=[p.pk])),"Valor unitário")
+
+
+class RecebimentoCompraTests(ComprasBase):
+    def setUp(self):
+        super().setUp(); self.fornecedor=Pessoa.objects.create(razao_social="Fornecedor Recebimento",classificacao="FORNECEDOR")
+    def pedido(self,quantidade=100,status="APROVADO",numero="REC-TESTE-1"):
+        p=PedidoCompra.objects.create(empresa=self.empresa,fornecedor=self.fornecedor,origem="DIRETA",justificativa_origem="Teste",numero_pedido_versatile=numero,condicao_pagamento="28 dias",prazo_entrega="5 dias",criado_por=self.usuario)
+        item=PedidoCompraItem.objects.create(pedido=p,descricao_mercadoria="Material recebido",quantidade=quantidade,unidade="UN",valor_unitario=10)
+        recalcular_pedido(p); PedidoCompra.objects.filter(pk=p.pk).update(status=status); p.status=status; item.refresh_from_db(); return p,item
+    def recebimento(self,pedido,item,recebida,aceita,rejeitada=0):
+        r=RecebimentoCompra.objects.create(pedido=pedido,responsavel=self.usuario,criado_por=self.usuario)
+        ri=RecebimentoCompraItem.objects.create(recebimento=r,pedido_item=item,quantidade_recebida=recebida,quantidade_aceita=aceita,quantidade_rejeitada=rejeitada)
+        return r,ri
+    def test_recebimento_total(self):
+        p,i=self.pedido(); r,_=self.recebimento(p,i,100,100); self.permissao("registrar_recebimento"); confirmar_recebimento(r,self.usuario); p.refresh_from_db()
+        self.assertEqual(p.status,"RECEBIDO"); self.assertEqual(quantidades_recebimento_pedido(p)[i.pk]["pendente"],0)
+    def test_parcial_rejeitado_nao_reduz_pendencia(self):
+        p,i=self.pedido(); r,_=self.recebimento(p,i,60,55,5); self.permissao("registrar_recebimento"); confirmar_recebimento(r,self.usuario); p.refresh_from_db(); q=quantidades_recebimento_pedido(p)[i.pk]
+        self.assertEqual((q["recebida"],q["pendente"],p.status),(Decimal("55"),Decimal("45"),"PARCIALMENTE_RECEBIDO"))
+    def test_multiplos_recebimentos_completam(self):
+        p,i=self.pedido(); self.permissao("registrar_recebimento"); r1,_=self.recebimento(p,i,55,55); confirmar_recebimento(r1,self.usuario); p.refresh_from_db(); r2,_=self.recebimento(p,i,45,45); confirmar_recebimento(r2,self.usuario); p.refresh_from_db()
+        self.assertEqual(p.status,"RECEBIDO"); self.assertEqual(quantidades_recebimento_pedido(p)[i.pk]["recebida"],100)
+    def test_multiplos_itens_status_depende_de_todos(self):
+        p,i1=self.pedido(); PedidoCompra.objects.filter(pk=p.pk).update(status="RASCUNHO"); p.status="RASCUNHO"; i2=PedidoCompraItem.objects.create(pedido=p,descricao_mercadoria="Segundo",quantidade=5,unidade="UN",valor_unitario=1); PedidoCompra.objects.filter(pk=p.pk).update(status="APROVADO"); p.status="APROVADO"
+        r=RecebimentoCompra.objects.create(pedido=p,responsavel=self.usuario,criado_por=self.usuario); RecebimentoCompraItem.objects.create(recebimento=r,pedido_item=i1,quantidade_recebida=100,quantidade_aceita=100); RecebimentoCompraItem.objects.create(recebimento=r,pedido_item=i2,quantidade_recebida=2,quantidade_aceita=2); self.permissao("registrar_recebimento"); confirmar_recebimento(r,self.usuario); p.refresh_from_db(); self.assertEqual(p.status,"PARCIALMENTE_RECEBIDO")
+    def test_excedente_e_concorrencia_logica_bloqueados(self):
+        p,i=self.pedido(); self.permissao("registrar_recebimento"); r1,_=self.recebimento(p,i,60,60); r2,_=self.recebimento(p,i,50,50); confirmar_recebimento(r1,self.usuario)
+        with self.assertRaises(ValidationError): confirmar_recebimento(r2,self.usuario)
+        self.assertEqual(quantidades_recebimento_pedido(p)[i.pk]["recebida"],60)
+    def test_pedido_recebido_bloqueia_novo(self):
+        p,i=self.pedido(); self.permissao("registrar_recebimento"); r,_=self.recebimento(p,i,100,100); confirmar_recebimento(r,self.usuario); p.refresh_from_db()
+        with self.assertRaises(ValidationError): RecebimentoCompra.objects.create(pedido=p,responsavel=self.usuario,criado_por=self.usuario)
+    def test_cancelamento_reverte_quantidade_e_status(self):
+        p,i=self.pedido(status="ENVIADO_FORNECEDOR"); self.permissao("registrar_recebimento","cancelar_recebimento"); r,_=self.recebimento(p,i,40,40); confirmar_recebimento(r,self.usuario); cancelar_recebimento(r,self.usuario,"Entrega anulada"); p.refresh_from_db()
+        self.assertEqual(p.status,"ENVIADO_FORNECEDOR"); self.assertEqual(quantidades_recebimento_pedido(p)[i.pk]["recebida"],0); self.assertEqual(r.motivo_cancelamento,"Entrega anulada")
+    def test_cancelamento_exige_motivo_e_permissao(self):
+        p,i=self.pedido(); self.permissao("registrar_recebimento"); r,_=self.recebimento(p,i,10,10); confirmar_recebimento(r,self.usuario)
+        with self.assertRaises(PermissionDenied): cancelar_recebimento(r,self.usuario,"motivo")
+        self.permissao("cancelar_recebimento")
+        with self.assertRaises(ValidationError): cancelar_recebimento(r,self.usuario,"")
+    def test_quantidades_incoerentes(self):
+        p,i=self.pedido()
+        with self.assertRaises(ValidationError): self.recebimento(p,i,10,8,3)
+    def test_divergencias_e_preco_nao_alteram_pedido(self):
+        p,i=self.pedido(); r,ri=self.recebimento(p,i,10,8,2); valor=i.valor_unitario
+        for n,tipo in enumerate(("QUANTIDADE_MENOR","MATERIAL_INCORRETO","DANIFICADO","PRECO_DIVERGENTE")):
+            DivergenciaRecebimento.objects.create(recebimento_item=ri,tipo=tipo,descricao=f"Divergência {n}",quantidade_afetada=1)
+        i.refresh_from_db(); self.assertEqual(i.valor_unitario,valor); self.assertEqual(ri.divergencias.count(),4)
+    def test_resolucao_divergencia(self):
+        p,i=self.pedido(); r,ri=self.recebimento(p,i,10,10); d=DivergenciaRecebimento.objects.create(recebimento_item=ri,tipo="OUTRO",descricao="Teste"); self.permissao("resolver_divergencia_recebimento"); resolver_divergencia(d,self.usuario,"Resolvido com fornecedor")
+        self.assertTrue(d.resolvida); self.assertEqual(d.resolvida_por,self.usuario)
+    def test_recebimento_confirmado_e_imutavel(self):
+        p,i=self.pedido(); r,ri=self.recebimento(p,i,10,10); self.permissao("registrar_recebimento"); confirmar_recebimento(r,self.usuario); ri.quantidade_aceita=9
+        with self.assertRaises(ValidationError): ri.save()
+        r.observacao="alterada"
+        with self.assertRaises(ValidationError): r.save()
+    def test_pedido_cancelado_ou_rejeitado_nao_recebe(self):
+        for n,status in enumerate(("CANCELADO","REJEITADO")):
+            p,i=self.pedido(status=status,numero=f"REC-BLOQ-{n}")
+            with self.assertRaises(ValidationError): RecebimentoCompra.objects.create(pedido=p,responsavel=self.usuario,criado_por=self.usuario)
+    def test_isolamento_empresa_item_alheio(self):
+        p,i=self.pedido(); obra=CentroCusto.objects.create(empresa=self.outra_empresa,codigo="REC-OUT",nome="Outra"); f=Pessoa.objects.create(razao_social="Fora",classificacao="FORNECEDOR"); p2=PedidoCompra.objects.create(empresa=self.outra_empresa,fornecedor=f,origem="DIRETA",justificativa_origem="x",numero_pedido_versatile="OUT",condicao_pagamento="x",prazo_entrega="x",criado_por=self.usuario); i2=PedidoCompraItem.objects.create(pedido=p2,descricao_mercadoria="Fora",quantidade=1,unidade="UN",valor_unitario=1); PedidoCompra.objects.filter(pk=p2.pk).update(status="APROVADO"); p2.status="APROVADO"; r=RecebimentoCompra.objects.create(pedido=p,responsavel=self.usuario,criado_por=self.usuario)
+        with self.assertRaises(ValidationError): RecebimentoCompraItem.objects.create(recebimento=r,pedido_item=i2,quantidade_recebida=1,quantidade_aceita=1)
+    def test_telas_e_permissoes(self):
+        p,i=self.pedido(); r,ri=self.recebimento(p,i,10,10); self.client.force_login(self.usuario); self.assertEqual(self.client.get(reverse("compras:recebimento_detalhe",args=[r.pk])).status_code,403); self.permissao("view_recebimentocompra","view_pedidocompra"); self.assertContains(self.client.get(reverse("compras:recebimento_detalhe",args=[r.pk])),"Material recebido"); self.assertContains(self.client.get(reverse("compras:pedido_detalhe",args=[p.pk])),"Pendente")

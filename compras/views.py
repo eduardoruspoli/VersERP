@@ -7,17 +7,21 @@ from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import (CotacaoFornecedorForm, CotacaoFornecedorItemForm, GerarPedidosCotacaoForm,
-                    MotivoCancelamentoForm, PedidoCompraForm, PedidoCompraItemForm,
+                    DivergenciaRecebimentoForm, MotivoCancelamentoForm, PedidoCompraForm, PedidoCompraItemForm,
                     PedidoItemAlocacaoForm, ProcessoCotacaoForm, SolicitacaoCompraForm,
-                    SolicitacaoCompraItemFormSet)
+                    SolicitacaoCompraItemFormSet, RecebimentoCompraForm,
+                    RecebimentoCompraItemFormSet, SolucaoDivergenciaForm)
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
-                     ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
+                     DivergenciaRecebimento, ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, SolicitacaoCompra)
+from .models import RecebimentoCompra, RecebimentoCompraItem
 from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_solicitacao,
                        cancelar_pedido, concluir_processo_cotacao, enviar_pedido,
                        gerar_pedidos_da_cotacao, iniciar_processo_cotacao,
                        montar_mapa_comparativo, recalcular_pedido, rejeitar_pedido,
-                       selecionar_oferta, submeter_pedido, aprovar_pedido)
+                       selecionar_oferta, submeter_pedido, aprovar_pedido,
+                       cancelar_recebimento, confirmar_recebimento,
+                       quantidades_recebimento_pedido, resolver_divergencia)
 
 
 @login_required
@@ -259,8 +263,9 @@ def pedido_gerar_cotacao(request,pk):
 @permission_required("compras.view_pedidocompra",raise_exception=True)
 def pedido_detalhe(request,pk):
     pedido=get_object_or_404(PedidoCompra.objects.select_related("empresa","fornecedor","transportadora","aprovado_por","enviado_por"),pk=pk)
-    itens=pedido.itens.select_related("plano_conta").prefetch_related("alocacoes__obra")
-    return render(request,"compras/pedido_detalhe.html",{"pedido":pedido,"itens":itens,"historico":pedido.historico.select_related("usuario")})
+    itens=list(pedido.itens.select_related("plano_conta").prefetch_related("alocacoes__obra")); quantidades=quantidades_recebimento_pedido(pedido)
+    for item in itens: item.quantidade_recebida_acumulada=quantidades[item.pk]["recebida"]; item.quantidade_pendente=quantidades[item.pk]["pendente"]
+    return render(request,"compras/pedido_detalhe.html",{"pedido":pedido,"itens":itens,"historico":pedido.historico.select_related("usuario"),"recebimentos":pedido.recebimentos.select_related("responsavel")})
 
 @login_required
 @permission_required("compras.change_pedidocompra",raise_exception=True)
@@ -307,3 +312,65 @@ def pedido_enviar(request,pk): return _acao_pedido(request,pk,enviar_pedido,"Env
 def pedido_imprimir(request,pk):
     pedido=get_object_or_404(PedidoCompra.objects.select_related("empresa","fornecedor"),pk=pk)
     return render(request,"compras/pedido_imprimir.html",{"pedido":pedido,"itens":pedido.itens.prefetch_related("alocacoes__obra")})
+
+
+@login_required
+@permission_required(("compras.add_recebimentocompra","compras.registrar_recebimento"),raise_exception=True)
+def recebimento_criar(request,pedido_pk):
+    pedido=get_object_or_404(PedidoCompra,pk=pedido_pk,status__in=[PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO])
+    recebimento=RecebimentoCompra(pedido=pedido,responsavel=request.user,criado_por=request.user)
+    form=RecebimentoCompraForm(request.POST or None,instance=recebimento)
+    if request.method=="POST" and form.is_valid():
+        with transaction.atomic():
+            recebimento=form.save(commit=False); recebimento.pedido=pedido; recebimento.criado_por=request.user; recebimento.save()
+            for item in pedido.itens.all(): RecebimentoCompraItem.objects.create(recebimento=recebimento,pedido_item=item,quantidade_recebida=0,quantidade_aceita=0,quantidade_rejeitada=0)
+        return redirect("compras:recebimento_editar",pk=recebimento.pk)
+    return render(request,"compras/recebimento_formulario.html",{"form":form,"pedido":pedido})
+
+@login_required
+@permission_required("compras.change_recebimentocompra",raise_exception=True)
+def recebimento_editar(request,pk):
+    recebimento=get_object_or_404(RecebimentoCompra.objects.select_related("pedido"),pk=pk,status=RecebimentoCompra.Status.RASCUNHO)
+    form=RecebimentoCompraForm(request.POST or None,instance=recebimento); formset=RecebimentoCompraItemFormSet(request.POST or None,instance=recebimento,pedido=recebimento.pedido)
+    if request.method=="POST" and form.is_valid() and formset.is_valid():
+        with transaction.atomic(): form.save(); formset.save()
+        messages.success(request,"Recebimento salvo em rascunho."); return redirect("compras:recebimento_detalhe",pk=pk)
+    return render(request,"compras/recebimento_editar.html",{"form":form,"formset":formset,"recebimento":recebimento})
+
+@login_required
+@permission_required("compras.view_recebimentocompra",raise_exception=True)
+def recebimento_detalhe(request,pk):
+    recebimento=get_object_or_404(RecebimentoCompra.objects.select_related("pedido","responsavel","confirmado_por","cancelado_por"),pk=pk)
+    acumuladas=quantidades_recebimento_pedido(recebimento.pedido); itens=list(recebimento.itens.select_related("pedido_item").prefetch_related("divergencias__resolvida_por"))
+    for item in itens: item.recebida_acumulada=acumuladas[item.pedido_item_id]["recebida"]; item.pendente=acumuladas[item.pedido_item_id]["pendente"]
+    return render(request,"compras/recebimento_detalhe.html",{"recebimento":recebimento,"itens":itens})
+
+def _acao_recebimento(request,pk,funcao,sucesso,motivo=False):
+    if request.method!="POST": return HttpResponseBadRequest()
+    rec=get_object_or_404(RecebimentoCompra,pk=pk)
+    try: funcao(rec,request.user,request.POST.get("motivo","")) if motivo else funcao(rec,request.user); messages.success(request,sucesso)
+    except (ValidationError,PermissionDenied) as erro: messages.error(request," ".join(getattr(erro,"messages",[str(erro)])))
+    return redirect("compras:recebimento_detalhe",pk=pk)
+
+@login_required
+def recebimento_confirmar(request,pk): return _acao_recebimento(request,pk,confirmar_recebimento,"Recebimento confirmado.")
+@login_required
+def recebimento_cancelar(request,pk): return _acao_recebimento(request,pk,cancelar_recebimento,"Recebimento cancelado.",True)
+
+@login_required
+@permission_required("compras.registrar_recebimento",raise_exception=True)
+def divergencia_criar(request,pk,item_pk):
+    recebimento=get_object_or_404(RecebimentoCompra,pk=pk); item=get_object_or_404(RecebimentoCompraItem,pk=item_pk,recebimento=recebimento)
+    form=DivergenciaRecebimentoForm(request.POST or None)
+    if request.method=="POST" and form.is_valid():
+        obj=form.save(commit=False); obj.recebimento_item=item; obj.save(); RecebimentoCompraItem.objects.filter(pk=item.pk).update(possui_divergencia=True); return redirect("compras:recebimento_detalhe",pk=pk)
+    return render(request,"compras/divergencia_formulario.html",{"form":form,"recebimento":recebimento,"item":item})
+
+@login_required
+@permission_required("compras.resolver_divergencia_recebimento",raise_exception=True)
+def divergencia_resolver(request,pk):
+    divergencia=get_object_or_404(DivergenciaRecebimento.objects.select_related("recebimento_item__recebimento"),pk=pk); form=SolucaoDivergenciaForm(request.POST or None)
+    if request.method=="POST" and form.is_valid():
+        try: resolver_divergencia(divergencia,request.user,form.cleaned_data["solucao"]); return redirect("compras:recebimento_detalhe",pk=divergencia.recebimento_item.recebimento_id)
+        except ValidationError as erro: form.add_error(None," ".join(erro.messages))
+    return render(request,"compras/divergencia_resolver.html",{"form":form,"divergencia":divergencia})

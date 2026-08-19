@@ -5,6 +5,13 @@ from . import views
 app_name = "compras"
 
 urlpatterns = [
+    path("pedidos/<int:pedido_pk>/recebimentos/novo/",views.recebimento_criar,name="recebimento_criar"),
+    path("recebimentos/<int:pk>/",views.recebimento_detalhe,name="recebimento_detalhe"),
+    path("recebimentos/<int:pk>/editar/",views.recebimento_editar,name="recebimento_editar"),
+    path("recebimentos/<int:pk>/confirmar/",views.recebimento_confirmar,name="recebimento_confirmar"),
+    path("recebimentos/<int:pk>/cancelar/",views.recebimento_cancelar,name="recebimento_cancelar"),
+    path("recebimentos/<int:pk>/itens/<int:item_pk>/divergencia/",views.divergencia_criar,name="divergencia_criar"),
+    path("divergencias/<int:pk>/resolver/",views.divergencia_resolver,name="divergencia_resolver"),
     path("pedidos/",views.pedido_lista,name="pedido_lista"),
     path("pedidos/novo/",views.pedido_criar,name="pedido_criar"),
     path("pedidos/cotacao/<int:pk>/gerar/",views.pedido_gerar_cotacao,name="pedido_gerar_cotacao"),
