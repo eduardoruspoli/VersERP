@@ -738,3 +738,30 @@ class DivergenciaDocumentoCompra(models.Model):
         if self.documento_item_id and self.documento_item.documento_id!=self.documento_id: raise ValidationError({"documento_item":"O item deve pertencer ao documento."})
         if self.resolvida and (not self.resolvida_por_id or not self.resolvida_em or not self.solucao.strip()): raise ValidationError("Informe responsável, data e solução.")
     def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+
+
+class DocumentoCompraParcela(models.Model):
+    documento=models.ForeignKey(DocumentoCompra,on_delete=models.CASCADE,related_name="parcelas")
+    numero=models.PositiveIntegerField()
+    vencimento=models.DateField()
+    valor=models.DecimalField(max_digits=15,decimal_places=2)
+    observacao=models.TextField(blank=True)
+    parcela_financeira=models.OneToOneField("financeiro.ParcelaFinanceira",on_delete=models.PROTECT,null=True,blank=True,related_name="parcela_documento_compra")
+    criado_em=models.DateTimeField(auto_now_add=True)
+    atualizado_em=models.DateTimeField(auto_now=True)
+    class Meta:
+        ordering=["numero","vencimento"]
+        constraints=[models.UniqueConstraint(fields=["documento","numero"],name="uq_parcela_documento_compra")]
+        permissions=[("view_preview_financeiro_documento","Pode visualizar preview financeiro de documento")]
+    def clean(self):
+        errors={}
+        if self.numero is not None and self.numero<=0: errors["numero"]="O número da parcela deve ser maior que zero."
+        if self.valor is not None and self.valor<=0: errors["valor"]="O valor da parcela deve ser maior que zero."
+        if self.pk and type(self).objects.filter(pk=self.pk,parcela_financeira__isnull=False).exists(): errors["parcela_financeira"]="A parcela integrada ao Financeiro está congelada."
+        if self.documento_id and self.documento.parcelas.filter(parcela_financeira__isnull=False).exclude(pk=self.pk).exists(): errors["documento"]="As parcelas do documento integrado estão congeladas."
+        if errors: raise ValidationError(errors)
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+    def delete(self,*args,**kwargs):
+        if self.parcela_financeira_id or self.documento.parcelas.filter(parcela_financeira__isnull=False).exists(): raise ValidationError("As parcelas do documento integrado estão congeladas.")
+        return super().delete(*args,**kwargs)
+    def __str__(self): return f"{self.documento} — parcela {self.numero}"

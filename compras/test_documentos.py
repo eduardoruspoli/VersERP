@@ -7,13 +7,16 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from financeiro.models import Empresa, LancamentoFinanceiro, PlanoConta
+from financeiro.models import (CentroCusto, Empresa, LancamentoFinanceiro,
+    ParcelaFinanceira, PlanoConta, RateioCentroCusto)
 from pessoas.models import Pessoa
 from .models import (DivergenciaDocumentoCompra, DocumentoCompra, DocumentoCompraItem,
-    DocumentoCompraItemRecebimento, DocumentoCompraPedido, PedidoCompra, PedidoCompraItem,
-    RecebimentoCompra, RecebimentoCompraItem)
+    DocumentoCompraItemRecebimento, DocumentoCompraParcela, DocumentoCompraPedido,
+    PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra, RecebimentoCompra,
+    RecebimentoCompraItem)
 from .services import (cancelar_documento_compra, concluir_conferencia_documento,
     iniciar_conferencia_documento, reabrir_conferencia_documento,
+    gerar_parcelas_documento, montar_preview_financeiro_documento,
     resolver_divergencia_documento, validar_fechamento_documento,
     vincular_recebimento_documento)
 
@@ -58,6 +61,8 @@ class DocumentoCompraTests(TestCase):
     def test_conta_de_receita_rejeitada(self):
         p=PlanoConta.objects.create(codigo="TESTE-DOC-R",nome="Receita",tipo="RECEITA",natureza="CREDORA")
         with self.assertRaises(ValidationError): self.item(plano_conta=p)
+    def test_item_sem_conta_e_rejeitado_no_dominio(self):
+        with self.assertRaises(ValidationError): self.item(plano_conta=None)
     def test_fechamento_exato(self):
         d=self.documento(valor_bruto=101); self.item(d); DocumentoCompraPedido.objects.create(documento=d,pedido=self.pedido)
         with self.assertRaises(ValidationError): validar_fechamento_documento(d)
@@ -84,3 +89,50 @@ class DocumentoCompraTests(TestCase):
         self.client.force_login(self.usuario); d=self.documento(); self.assertEqual(self.client.get(reverse("compras:documento_lista")).status_code,403); self.permissao("view_documentocompra"); self.assertEqual(self.client.get(reverse("compras:documento_lista")).status_code,200); self.assertEqual(self.client.get(reverse("compras:documento_detalhe",args=[d.pk])).status_code,200)
     def test_nao_cria_financeiro(self):
         antes=LancamentoFinanceiro.objects.count(); self.fechado(); self.assertEqual(LancamentoFinanceiro.objects.count(),antes)
+
+    def preparar_preview(self,total=Decimal("100.00"),duas_obras=False):
+        obra1=CentroCusto.objects.create(empresa=self.empresa,codigo="TESTE-OBRA-A",nome="Obra A")
+        PedidoCompra.objects.filter(pk=self.pedido.pk).update(status=PedidoCompra.Status.RASCUNHO); self.pedido.status=PedidoCompra.Status.RASCUNHO
+        PedidoItemAlocacaoObra.objects.create(pedido_item=self.pedido_item,obra=obra1,quantidade=7 if duas_obras else 10,valor=70 if duas_obras else 100,tipo_origem="NAO_PREVISTO")
+        if duas_obras:
+            obra2=CentroCusto.objects.create(empresa=self.empresa,codigo="TESTE-OBRA-B",nome="Obra B")
+            PedidoItemAlocacaoObra.objects.create(pedido_item=self.pedido_item,obra=obra2,quantidade=3,valor=30,tipo_origem="NAO_PREVISTO")
+        PedidoCompra.objects.filter(pk=self.pedido.pk).update(status=PedidoCompra.Status.APROVADO); self.pedido.status=PedidoCompra.Status.APROVADO
+        d=self.documento(valor_bruto=total); i=self.item(d,quantidade_faturada=1,valor_unitario_faturado=total); DocumentoCompra.objects.filter(pk=d.pk).update(status=DocumentoCompra.Status.CONFERIDO); d.status=DocumentoCompra.Status.CONFERIDO
+        DocumentoCompraParcela.objects.create(documento=d,numero=1,vencimento=date(2026,9,18),valor=total)
+        return d,i
+
+    def test_parcela_unica_manual(self):
+        d=self.documento(); p=DocumentoCompraParcela.objects.create(documento=d,numero=1,vencimento=date(2026,8,19),valor=100); self.assertEqual(p.valor,100)
+    def test_geracao_30_60_90_e_centavos(self):
+        self.permissao("add_documentocompraparcela"); d=self.documento(valor_bruto=Decimal("10000.00")); parcelas=gerar_parcelas_documento(d,self.usuario,3,30,30); self.assertEqual([p.valor for p in parcelas],[Decimal("3333.33"),Decimal("3333.33"),Decimal("3333.34")]); self.assertEqual([p.vencimento for p in parcelas],[date(2026,9,19),date(2026,10,19),date(2026,11,19)])
+    def test_parcelas_nao_fechando_bloqueiam(self):
+        d,_=self.preparar_preview(); d.parcelas.update(valor=99); preview=montar_preview_financeiro_documento(d); self.assertFalse(preview["pronto"]); self.assertTrue(any("parcelas totalizam" in m for m in preview["motivos"]))
+    def test_parcela_editavel_antes_integracao(self):
+        d=self.documento(); p=DocumentoCompraParcela.objects.create(documento=d,numero=1,vencimento=date(2026,9,1),valor=100); p.observacao="Alterada"; p.save(); self.assertEqual(p.observacao,"Alterada")
+    def test_documento_nao_conferido_bloqueia(self):
+        d=self.documento(); DocumentoCompraParcela.objects.create(documento=d,numero=1,vencimento=date(2026,9,1),valor=100); self.assertIn("O documento ainda não está conferido.",montar_preview_financeiro_documento(d)["motivos"])
+    def test_multiplos_planos_agrupados(self):
+        d,i=self.preparar_preview(total=150); DocumentoCompra.objects.filter(pk=d.pk).update(status="RASCUNHO"); d.status="RASCUNHO"; i.quantidade_faturada=1;i.valor_unitario_faturado=100;i.save(); self.item(d,pedido_item=self.pedido_item,descricao_snapshot="Serviço",quantidade_faturada=1,valor_unitario_faturado=50,plano_conta=self.plano_despesa); DocumentoCompra.objects.filter(pk=d.pk).update(status="CONFERIDO"); d.status="CONFERIDO"; preview=montar_preview_financeiro_documento(d); self.assertEqual({c["plano_conta"] for c in preview["classificacoes"]},{self.plano,self.plano_despesa}); self.assertEqual(preview["total_classificacoes"],150)
+    def test_conta_inativa_bloqueia(self):
+        d,_=self.preparar_preview(); PlanoConta.objects.filter(pk=self.plano.pk).update(ativo=False); self.assertTrue(any("inválida" in m for m in montar_preview_financeiro_documento(d)["motivos"]))
+    def test_conta_estrutural_bloqueia(self):
+        d,_=self.preparar_preview(); PlanoConta.objects.filter(pk=self.plano.pk).update(estrutural=True,aceita_lancamento=False); self.assertTrue(any("inválida" in m for m in montar_preview_financeiro_documento(d)["motivos"]))
+    def test_custo_e_despesa_validos(self):
+        d,_=self.preparar_preview(); self.assertFalse(any("conta" in m.lower() for m in montar_preview_financeiro_documento(d)["motivos"]))
+    def test_documento_parcial_rateia_valor_faturado(self):
+        d,_=self.preparar_preview(total=Decimal("40.00")); preview=montar_preview_financeiro_documento(d); self.assertEqual(preview["total_rateios"],Decimal("40.00"))
+    def test_duas_obras_e_centavos_fecham(self):
+        d,_=self.preparar_preview(total=Decimal("100.01"),duas_obras=True); preview=montar_preview_financeiro_documento(d); self.assertEqual(sum((r["valor"] for r in preview["rateios"]),Decimal("0")),Decimal("100.01")); self.assertEqual(len(preview["rateios"]),2)
+    def test_competencia_e_data_emissao(self):
+        d,_=self.preparar_preview(); self.assertEqual(montar_preview_financeiro_documento(d)["competencia"],d.data_emissao)
+    def test_preview_pronto(self):
+        d,_=self.preparar_preview(); preview=montar_preview_financeiro_documento(d); self.assertTrue(preview["pronto"],preview["motivos"])
+    def test_divergencia_bloqueante_bloqueia(self):
+        d,_=self.preparar_preview(); DivergenciaDocumentoCompra.objects.create(documento=d,tipo="OUTRO",descricao="Teste",bloqueante=True); self.assertFalse(montar_preview_financeiro_documento(d)["pronto"])
+    def test_preview_nao_persiste_financeiro(self):
+        d,_=self.preparar_preview(); antes=(LancamentoFinanceiro.objects.count(),ParcelaFinanceira.objects.count(),RateioCentroCusto.objects.count()); montar_preview_financeiro_documento(d); self.assertEqual((LancamentoFinanceiro.objects.count(),ParcelaFinanceira.objects.count(),RateioCentroCusto.objects.count()),antes)
+    def test_isolamento_empresa_no_rateio(self):
+        d,_=self.preparar_preview(); outra=Empresa.objects.create(razao_social="Outra Preview",cnpj="55.555.555/0001-55"); PedidoItemAlocacaoObra.objects.filter(pedido_item=self.pedido_item).update(obra=CentroCusto.objects.create(empresa=outra,codigo="OUTRA",nome="Outra")); self.assertTrue(any("outra empresa" in m for m in montar_preview_financeiro_documento(d)["motivos"]))
+    def test_permissao_preview(self):
+        d,_=self.preparar_preview(); self.client.force_login(self.usuario); url=reverse("compras:documento_preview_financeiro",args=[d.pk]); self.assertEqual(self.client.get(url).status_code,403); self.permissao("view_preview_financeiro_documento"); self.assertEqual(self.client.get(url).status_code,200)

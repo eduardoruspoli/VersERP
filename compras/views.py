@@ -14,10 +14,12 @@ from .forms import (CotacaoFornecedorForm, CotacaoFornecedorItemForm, GerarPedid
                     SolicitacaoCompraItemFormSet, RecebimentoCompraForm,
                     RecebimentoCompraItemFormSet, SolucaoDivergenciaForm,
                     PrevistoCompradoFiltroForm, SolucaoDivergenciaDocumentoForm)
+from .forms import DocumentoCompraParcelaForm, GerarParcelasDocumentoForm
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
                      DivergenciaDocumentoCompra, DivergenciaRecebimento, DocumentoCompra,
                      DocumentoCompraItem, DocumentoCompraPedido, ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, SolicitacaoCompra)
+from .models import DocumentoCompraParcela
 from .models import RecebimentoCompra, RecebimentoCompraItem
 from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_solicitacao,
                        cancelar_pedido, concluir_processo_cotacao, enviar_pedido,
@@ -30,6 +32,7 @@ from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_so
                        concluir_conferencia_documento, iniciar_conferencia_documento,
                        reabrir_conferencia_documento, resolver_divergencia_documento,
                        validar_fechamento_documento, vincular_recebimento_documento)
+from .services import gerar_parcelas_documento, montar_preview_financeiro_documento
 
 
 @login_required
@@ -499,3 +502,51 @@ def documento_divergencia_resolver(request,pk):
         try: resolver_divergencia_documento(divergencia,request.user,form.cleaned_data["solucao"]); return redirect("compras:documento_detalhe",pk=divergencia.documento_id)
         except ValidationError as erro: form.add_error(None," ".join(erro.messages))
     return render(request,"compras/documento_divergencia_resolver.html",{"form":form,"divergencia":divergencia})
+
+
+@login_required
+@permission_required("compras.add_documentocompraparcela",raise_exception=True)
+def documento_parcelas_gerar(request,pk):
+    documento=get_object_or_404(DocumentoCompra,pk=pk); form=GerarParcelasDocumentoForm(request.POST or None)
+    if request.method=="POST" and form.is_valid():
+        try:
+            gerar_parcelas_documento(documento,request.user,form.cleaned_data["quantidade"],form.cleaned_data["intervalo_dias"],form.cleaned_data["primeiro_vencimento_dias"]); messages.success(request,"Parcelas geradas com fechamento exato."); return redirect("compras:documento_detalhe",pk=pk)
+        except (ValidationError,PermissionDenied) as erro: form.add_error(None," ".join(getattr(erro,"messages",[str(erro)])))
+    return render(request,"compras/documento_parcelas_gerar.html",{"form":form,"documento":documento})
+
+
+def _salvar_parcela_documento(request,documento,parcela=None):
+    form=DocumentoCompraParcelaForm(request.POST or None,instance=parcela,documento=documento)
+    if request.method=="POST" and form.is_valid():
+        obj=form.save(commit=False); obj.documento=documento
+        try: obj.save(); messages.success(request,"Parcela salva."); return redirect("compras:documento_detalhe",pk=documento.pk)
+        except ValidationError as erro: form.add_error(None," ".join(erro.messages))
+    return render(request,"compras/documento_parcela_formulario.html",{"form":form,"documento":documento,"parcela":parcela})
+
+
+@login_required
+@permission_required("compras.add_documentocompraparcela",raise_exception=True)
+def documento_parcela_criar(request,pk): return _salvar_parcela_documento(request,get_object_or_404(DocumentoCompra,pk=pk))
+
+
+@login_required
+@permission_required("compras.change_documentocompraparcela",raise_exception=True)
+def documento_parcela_editar(request,pk,parcela_pk):
+    documento=get_object_or_404(DocumentoCompra,pk=pk); parcela=get_object_or_404(DocumentoCompraParcela,pk=parcela_pk,documento=documento); return _salvar_parcela_documento(request,documento,parcela)
+
+
+@login_required
+@permission_required("compras.change_documentocompraparcela",raise_exception=True)
+def documento_parcela_excluir(request,pk,parcela_pk):
+    if request.method!="POST": return HttpResponseBadRequest()
+    documento=get_object_or_404(DocumentoCompra,pk=pk); parcela=get_object_or_404(DocumentoCompraParcela,pk=parcela_pk,documento=documento)
+    try: parcela.delete(); messages.success(request,"Parcela removida.")
+    except ValidationError as erro: messages.error(request," ".join(erro.messages))
+    return redirect("compras:documento_detalhe",pk=pk)
+
+
+@login_required
+@permission_required("compras.view_preview_financeiro_documento",raise_exception=True)
+def documento_preview_financeiro(request,pk):
+    documento=get_object_or_404(DocumentoCompra,pk=pk); preview=montar_preview_financeiro_documento(documento)
+    return render(request,"compras/documento_preview_financeiro.html",{"preview":preview,"documento":preview["documento"]})

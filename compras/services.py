@@ -1,4 +1,6 @@
 from django.core.exceptions import PermissionDenied, ValidationError
+from calendar import monthrange
+from datetime import timedelta
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
 from django.db import transaction
@@ -7,6 +9,7 @@ from django.utils import timezone
 
 from .models import (
     CotacaoFornecedor, DocumentoCompra, DocumentoCompraItem, DocumentoCompraItemRecebimento,
+    DocumentoCompraParcela,
     DocumentoCompraPedido, DivergenciaDocumentoCompra, EscolhaCotacaoItem,
     HistoricoPedidoCompra, HistoricoProcessoCotacao,
     DivergenciaRecebimento, HistoricoSolicitacaoCompra, PedidoCompra, PedidoCompraItem,
@@ -536,3 +539,93 @@ def cancelar_documento_compra(documento,usuario,motivo):
     documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
     if documento.status==DocumentoCompra.Status.CANCELADO: raise ValidationError("O documento já está cancelado.")
     agora=timezone.now(); return _atualizar_status_documento(documento,DocumentoCompra.Status.CANCELADO,usuario,cancelado_por=usuario,cancelado_em=agora,motivo_cancelamento=motivo.strip())
+
+
+def _ratear_valor_por_pesos(total,pesos,chave=lambda item:item):
+    """Distribui um valor monetário por pesos, fechando centavos por ordem estável."""
+    total=Decimal(total).quantize(CENTAVO,ROUND_HALF_UP); pesos=[(obj,Decimal(peso)) for obj,peso in pesos if Decimal(peso)>0]
+    soma=sum((peso for _,peso in pesos),Decimal("0"))
+    if not pesos or soma<=0: return {}
+    brutos={obj:total*peso/soma for obj,peso in pesos}
+    resultado={obj:valor.quantize(CENTAVO,ROUND_DOWN) for obj,valor in brutos.items()}
+    centavos=int(((total-sum(resultado.values(),Decimal("0")))/CENTAVO).to_integral_value())
+    ordem=sorted(pesos,key=lambda par:(brutos[par[0]]-resultado[par[0]],chave(par[0])),reverse=True)
+    for indice in range(centavos): resultado[ordem[indice%len(ordem)][0]]+=CENTAVO
+    return resultado
+
+
+def _somar_meses(data_base,meses):
+    indice=data_base.month-1+meses; ano=data_base.year+indice//12; mes=indice%12+1
+    return data_base.replace(year=ano,month=mes,day=min(data_base.day,monthrange(ano,mes)[1]))
+
+
+@transaction.atomic
+def gerar_parcelas_documento(documento,usuario,quantidade=1,intervalo_dias=30,primeiro_dias=0):
+    _exigir(usuario,"add_documentocompraparcela")
+    documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    if quantidade<=0: raise ValidationError("A quantidade de parcelas deve ser maior que zero.")
+    if documento.parcelas.filter(parcela_financeira__isnull=False).exists(): raise ValidationError("As parcelas integradas ao Financeiro estão congeladas.")
+    DocumentoCompraParcela.objects.filter(documento=documento).delete()
+    valores=_ratear_valor_por_pesos(documento.valor_total,[(numero,Decimal("1")) for numero in range(1,quantidade+1)])
+    base=documento.data_emissao or documento.data_entrada
+    parcelas=[]
+    for numero in range(1,quantidade+1):
+        dias=primeiro_dias+(numero-1)*intervalo_dias
+        vencimento=_somar_meses(base,dias//30) if intervalo_dias==30 and primeiro_dias%30==0 else base+timedelta(days=dias)
+        parcelas.append(DocumentoCompraParcela(documento=documento,numero=numero,vencimento=vencimento,valor=valores[numero]))
+    DocumentoCompraParcela.objects.bulk_create(parcelas)
+    return list(documento.parcelas.all())
+
+
+def validar_parcelas_documento(documento):
+    parcelas=list(documento.parcelas.order_by("numero")); total=sum((p.valor for p in parcelas),Decimal("0"))
+    motivos=[]
+    if not parcelas: motivos.append("Defina ao menos uma parcela.")
+    if any(p.valor<=0 for p in parcelas): motivos.append("Todas as parcelas devem possuir valor positivo.")
+    if total!=documento.valor_total: motivos.append(f"As parcelas totalizam R$ {total:.2f}, mas o documento totaliza R$ {documento.valor_total:.2f}.")
+    return parcelas,total,motivos
+
+
+def montar_preview_financeiro_documento(documento):
+    """Monta dados neutros e somente leitura; não persiste objetos financeiros."""
+    documento=DocumentoCompra.objects.select_related("empresa","fornecedor").prefetch_related(
+        "parcelas","divergencias","itens__plano_conta","itens__pedido_item__pedido",
+        "itens__pedido_item__alocacoes__obra",
+    ).get(pk=documento.pk)
+    motivos=[]; itens=list(documento.itens.all())
+    if documento.status!=DocumentoCompra.Status.CONFERIDO: motivos.append("O documento ainda não está conferido.")
+    if documento.valor_total<=0: motivos.append("O valor total deve ser maior que zero.")
+    if not documento.fornecedor_id or not documento.fornecedor.ativo or documento.fornecedor.classificacao not in {"FORNECEDOR","AMBOS"}: motivos.append("O fornecedor é inválido ou está inativo.")
+    if documento.divergencias.filter(bloqueante=True,resolvida=False).exists(): motivos.append("Existem divergências bloqueantes não resolvidas.")
+    parcelas,total_parcelas,motivos_parcelas=validar_parcelas_documento(documento); motivos.extend(motivos_parcelas)
+
+    classificacoes={}
+    for item in itens:
+        conta=item.plano_conta
+        if not conta: motivos.append(f"O item {item.descricao_snapshot} não possui classificação contábil."); continue
+        if not conta.ativo or conta.estrutural or not conta.aceita_lancamento or conta.tipo not in {"CUSTO","DESPESA"}: motivos.append(f"A conta {conta.codigo} do item {item.descricao_snapshot} é inválida para integração.")
+        atual=classificacoes.setdefault(conta.pk,{"plano_conta":conta,"valor":Decimal("0")}); atual["valor"]+=item.total
+    classificacoes=list(classificacoes.values()); total_classificacoes=sum((c["valor"] for c in classificacoes),Decimal("0"))
+    if total_classificacoes!=documento.valor_total: motivos.append("As classificações contábeis não fecham com o valor total do documento.")
+
+    rateios={}; itens_sem_rateio=[]
+    for item in itens:
+        pedido=item.pedido_item
+        if not pedido: itens_sem_rateio.append(item); continue
+        if pedido.pedido.empresa_id!=documento.empresa_id: motivos.append(f"O pedido do item {item.descricao_snapshot} pertence a outra empresa.")
+        alocacoes=list(pedido.alocacoes.all())
+        distribuicao=_ratear_valor_por_pesos(item.total,[(a,a.quantidade) for a in alocacoes],chave=lambda a:a.pk)
+        if not distribuicao: itens_sem_rateio.append(item); continue
+        for alocacao,valor in distribuicao.items():
+            if alocacao.obra.empresa_id!=documento.empresa_id: motivos.append(f"A obra {alocacao.obra.codigo} pertence a outra empresa.")
+            atual=rateios.setdefault(alocacao.obra_id,{"obra":alocacao.obra,"valor":Decimal("0")}); atual["valor"]+=valor
+    if itens_sem_rateio: motivos.append("Há itens sem alocação de obra válida.")
+    rateios=list(rateios.values()); total_rateios=sum((r["valor"] for r in rateios),Decimal("0"))
+    if total_rateios!=documento.valor_total: motivos.append("Os rateios por obra não fecham com o valor total do documento.")
+
+    # Mantém ordem e mensagens determinísticas para HTML, testes e futuras exportações.
+    motivos=list(dict.fromkeys(motivos))
+    return {"documento":documento,"pronto":not motivos,"motivos":motivos,"competencia":documento.data_emissao or documento.data_entrada,
+        "lancamento":{"tipo":"PAGAR","origem":"FISCAL","pessoa":documento.fornecedor,"descricao":f"{documento.identificacao} — {documento.fornecedor}","numero_documento":documento.numero,"valor_total":documento.valor_total},
+        "classificacoes":classificacoes,"total_classificacoes":total_classificacoes,"parcelas":parcelas,"total_parcelas":total_parcelas,
+        "rateios":rateios,"total_rateios":total_rateios}

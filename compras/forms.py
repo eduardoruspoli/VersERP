@@ -1,4 +1,5 @@
 from django import forms
+from django.core.exceptions import ValidationError
 from django.forms import BaseInlineFormSet, inlineformset_factory
 
 from comercial.models import Proposta, PropostaItem
@@ -8,6 +9,7 @@ from pessoas.models import Pessoa
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
                      DivergenciaDocumentoCompra, DivergenciaRecebimento, DocumentoCompra,
                      DocumentoCompraItem, DocumentoCompraItemRecebimento, DocumentoCompraPedido,
+                     DocumentoCompraParcela,
                      ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, RecebimentoCompra, RecebimentoCompraItem,
                      SolicitacaoCompra, SolicitacaoCompraItem)
@@ -294,3 +296,30 @@ class DivergenciaDocumentoForm(forms.ModelForm):
 
 class SolucaoDivergenciaDocumentoForm(forms.Form):
     solucao=forms.CharField(widget=forms.Textarea(attrs={"class":"form-control","rows":3}))
+
+
+class DocumentoCompraParcelaForm(forms.ModelForm):
+    class Meta:
+        model=DocumentoCompraParcela
+        fields=["numero","vencimento","valor","observacao"]
+        widgets={"vencimento":forms.DateInput(attrs={"class":"form-control","type":"date"}),"observacao":forms.Textarea(attrs={"class":"form-control","rows":2})}
+    def __init__(self,*args,documento=None,**kwargs):
+        super().__init__(*args,**kwargs); self.documento=documento or getattr(self.instance,"documento",None)
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-control")
+    def clean(self):
+        dados=super().clean()
+        if self.documento and self.documento.parcelas.filter(parcela_financeira__isnull=False).exclude(pk=self.instance.pk).exists(): raise ValidationError("As parcelas integradas ao Financeiro estão congeladas.")
+        return dados
+
+
+class GerarParcelasDocumentoForm(forms.Form):
+    tipo=forms.ChoiceField(label="Condição",choices=[("VISTA","À vista"),("30","30 dias"),("30_60","30/60 dias"),("30_60_90","30/60/90 dias"),("IGUAIS","Parcelas iguais")],widget=forms.Select(attrs={"class":"form-select"}))
+    quantidade=forms.IntegerField(label="Quantidade",required=False,min_value=1,max_value=120,widget=forms.NumberInput(attrs={"class":"form-control","min":1}))
+    primeiro_vencimento_dias=forms.IntegerField(label="Primeiro vencimento (dias)",required=False,min_value=0,initial=30,widget=forms.NumberInput(attrs={"class":"form-control","min":0}))
+    intervalo_dias=forms.IntegerField(label="Intervalo (dias)",required=False,min_value=1,initial=30,widget=forms.NumberInput(attrs={"class":"form-control","min":1}))
+    def clean(self):
+        dados=super().clean(); tipo=dados.get("tipo")
+        mapa={"VISTA":(1,0),"30":(1,30),"30_60":(2,30),"30_60_90":(3,30)}
+        if tipo in mapa: dados["quantidade"],dados["primeiro_vencimento_dias"]=mapa[tipo]; dados["intervalo_dias"]=30
+        elif not dados.get("quantidade"): self.add_error("quantidade","Informe a quantidade de parcelas.")
+        return dados
