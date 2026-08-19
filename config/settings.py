@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'financeiro',
     'comercial',
     'compras',
+    'rh',
 ]
 
 MIDDLEWARE = [

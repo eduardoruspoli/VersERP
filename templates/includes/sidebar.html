@@ -48,10 +48,7 @@
             </a>
         {% endif %}
 
-        <a href="javascript:void(0);" class="sidebar-disabled">
-            <i class="bi bi-person-badge"></i>
-            <span>RH</span>
-        </a>
+        {% if perms.rh.view_rh %}<a href="{% url 'rh:dashboard' %}" {% if request.resolver_match.app_name == "rh" %}class="active" aria-current="page"{% endif %}><i class="bi bi-person-badge"></i><span>RH</span></a>{% endif %}
 
         <a href="javascript:void(0);" class="sidebar-disabled">
             <i class="bi bi-bar-chart"></i>

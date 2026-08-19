@@ -1,0 +1,1 @@
+<form method="get" class="rh-filter"><label for="empresa">Empresa</label><select id="empresa" name="empresa" class="form-select" onchange="this.form.submit()">{% for item in empresas %}<option value="{{ item.pk }}"{% if empresa.pk == item.pk %} selected{% endif %}>{{ item }}</option>{% endfor %}</select>{% block filtro_extra %}{% endblock %}</form>
