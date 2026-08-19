@@ -1,244 +1,41 @@
 {% extends "base.html" %}
-
-{% block title %}
-Financeiro | VersERP
-{% endblock %}
-
+{% load static %}
+{% block title %}Financeiro | VersERP{% endblock %}
 {% block content %}
+<div class="page-header"><div><h1>Dashboard Financeiro</h1><p>Posição executiva de caixa, títulos e resultado por competência.</p></div></div>
 
-<div class="page-header">
+<div class="dashboard-panel executivo-filtros"><div class="panel-header"><div><h2>Filtros</h2><span>Caixa por movimentação · Resultado por competência</span></div></div><form method="get" class="verserp-form"><div class="form-grid">{% for field in form %}<div class="form-group"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>{% endfor %}<div class="form-group form-group-wide"><div class="form-actions"><a href="{% url 'financeiro:index' %}" class="btn btn-light">Período atual</a><button type="submit" class="btn btn-primary"><i class="bi bi-arrow-clockwise"></i> Atualizar dashboard</button></div></div></div></form></div>
 
-    <div>
-        <h1>Financeiro</h1>
-        <p>
-            Gestão de contas, bancos e movimentações financeiras
-        </p>
-    </div>
+{% if dashboard %}
+<section class="executivo-alertas">{% for alerta in dashboard.alertas %}<div class="executivo-alerta"><i class="bi bi-exclamation-triangle"></i><span>{{ alerta.texto }}</span></div>{% empty %}<div class="executivo-alerta executivo-alerta-ok"><i class="bi bi-check-circle"></i><span>Nenhum alerta financeiro crítico no momento.</span></div>{% endfor %}</section>
 
+<section class="executivo-secao"><div class="panel-header"><div><h2>Resumo executivo</h2><span>Posição atual e visão até {{ form.cleaned_data.data_final|date:"d/m/Y" }}</span></div></div><div class="executivo-kpis">
+<article class="relatorio-card {% if dashboard.posicao_bancaria.saldo_total < 0 %}relatorio-card-negativo{% endif %}"><span>Saldo bancário atual</span><strong>R$ {{ dashboard.posicao_bancaria.saldo_total|floatformat:"2g" }}</strong><small>Somente contas ativas</small></article>
+<article class="relatorio-card"><span>Total a receber</span><strong>R$ {{ dashboard.receber.em_aberto|floatformat:"2g" }}</strong><small>Principal em aberto</small></article>
+<article class="relatorio-card relatorio-card-saida"><span>Total a pagar</span><strong>R$ {{ dashboard.pagar.em_aberto|floatformat:"2g" }}</strong><small>Principal em aberto</small></article>
+<article class="relatorio-card {% if dashboard.fluxo.saldo_projetado < 0 %}relatorio-card-negativo{% endif %}"><span>Saldo projetado até {{ form.cleaned_data.data_final|date:"d/m/Y" }}</span><strong>R$ {{ dashboard.fluxo.saldo_projetado|floatformat:"2g" }}</strong><small>Considera títulos financeiros cadastrados.</small></article>
+<article class="relatorio-card relatorio-card-destaque {% if dashboard.dre.resumo.resultado_periodo < 0 %}relatorio-card-negativo{% endif %}"><span>Resultado do período</span><strong>R$ {{ dashboard.dre.resumo.resultado_periodo|floatformat:"2g" }}</strong><small>Por competência</small></article>
+</div></section>
+
+<section class="dashboard-panel"><div class="panel-header"><div><h2>Posição bancária</h2><span>Transferências internas afetam as contas, mas anulam-se no consolidado.</span></div><a href="{% url 'financeiro:contas_bancarias' %}">Ver contas</a></div><div class="table-responsive"><table class="verserp-table executivo-bancos-table"><thead><tr><th>Banco / Conta</th><th>Saldo inicial</th><th>Entradas</th><th>Saídas</th><th>Saldo atual</th></tr></thead><tbody>{% for conta in dashboard.posicao_bancaria.contas %}<tr><td>{{ conta }}</td><td>R$ {{ conta.saldo_inicial|floatformat:"2g" }}</td><td>R$ {{ conta.entradas_agregadas|floatformat:"2g" }}</td><td>R$ {{ conta.saidas_agregadas|floatformat:"2g" }}</td><td class="{% if conta.saldo_dashboard < 0 %}executivo-valor-negativo{% endif %}"><strong>R$ {{ conta.saldo_dashboard|floatformat:"2g" }}</strong></td></tr>{% empty %}<tr><td colspan="5" class="relatorio-sem-dados">Nenhuma conta bancária ativa.</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="dashboard-panel"><div class="panel-header"><div><h2>Fluxo de Caixa</h2><span>Realizado por movimentação; previsão somente por títulos cadastrados.</span></div></div><div class="executivo-fluxo-cards"><div><span>Entradas realizadas</span><strong>R$ {{ dashboard.fluxo.entradas_realizadas|floatformat:"2g" }}</strong></div><div><span>Saídas realizadas</span><strong>R$ {{ dashboard.fluxo.saidas_realizadas|floatformat:"2g" }}</strong></div><div><span>Saldo líquido</span><strong>R$ {{ dashboard.fluxo.saldo_liquido|floatformat:"2g" }}</strong></div><div><span>Entradas previstas</span><strong>R$ {{ dashboard.fluxo.entradas_previstas|floatformat:"2g" }}</strong></div><div><span>Saídas previstas</span><strong>R$ {{ dashboard.fluxo.saidas_previstas|floatformat:"2g" }}</strong></div><div><span>Saldo projetado</span><strong>R$ {{ dashboard.fluxo.saldo_projetado|floatformat:"2g" }}</strong></div></div><div class="executivo-grafico"><canvas id="grafico-fluxo-caixa" aria-label="Gráfico de fluxo de caixa"></canvas></div>{{ dashboard.fluxo.grafico|json_script:"dados-grafico-fluxo-caixa" }}</section>
+
+<div class="executivo-duas-colunas">
+<section class="dashboard-panel"><div class="panel-header"><div><h2>Contas a Receber</h2><span>Principal e recebimentos efetivos</span></div><a href="{% url 'financeiro:contas_receber' %}">Ver todas</a></div><div class="executivo-titulos-resumo"><div><span>Em aberto</span><strong>R$ {{ dashboard.receber.em_aberto|floatformat:"2g" }}</strong></div><div><span>Vencido</span><strong>R$ {{ dashboard.receber.vencido|floatformat:"2g" }}</strong></div><div><span>A vencer</span><strong>R$ {{ dashboard.receber.a_vencer|floatformat:"2g" }}</strong></div><div><span>Recebido</span><strong>R$ {{ dashboard.receber.realizado_periodo|floatformat:"2g" }}</strong></div></div><h3 class="executivo-subtitulo">Próximos vencimentos</h3><div class="executivo-lista">{% for parcela in dashboard.receber.proximos %}<div><span>{{ parcela.vencimento|date:"d/m/Y" }} · {{ parcela.lancamento.pessoa }}</span><strong>R$ {{ parcela.saldo_dashboard|floatformat:"2g" }}</strong></div>{% empty %}<p>Nenhum recebimento futuro.</p>{% endfor %}</div></section>
+<section class="dashboard-panel"><div class="panel-header"><div><h2>Contas a Pagar</h2><span>Principal e pagamentos efetivos</span></div><a href="{% url 'financeiro:contas_pagar' %}">Ver todas</a></div><div class="executivo-titulos-resumo"><div><span>Em aberto</span><strong>R$ {{ dashboard.pagar.em_aberto|floatformat:"2g" }}</strong></div><div><span>Vencido</span><strong>R$ {{ dashboard.pagar.vencido|floatformat:"2g" }}</strong></div><div><span>A vencer</span><strong>R$ {{ dashboard.pagar.a_vencer|floatformat:"2g" }}</strong></div><div><span>Pago</span><strong>R$ {{ dashboard.pagar.realizado_periodo|floatformat:"2g" }}</strong></div></div><h3 class="executivo-subtitulo">Próximos vencimentos</h3><div class="executivo-lista">{% for parcela in dashboard.pagar.proximos %}<div><span>{{ parcela.vencimento|date:"d/m/Y" }} · {{ parcela.lancamento.pessoa }}</span><strong>R$ {{ parcela.saldo_dashboard|floatformat:"2g" }}</strong></div>{% empty %}<p>Nenhum pagamento futuro.</p>{% endfor %}</div></section>
 </div>
 
-
-<div class="dashboard-grid">
-
-
-    <!-- CONTAS A PAGAR -->
-
-    <a
-        href="{% url 'financeiro:contas_pagar' %}"
-        class="dashboard-card"
-    >
-
-        <div class="dashboard-card-icon">
-            <i class="bi bi-cash-stack"></i>
-        </div>
-
-        <div>
-
-            <h3>
-                Contas a Pagar
-            </h3>
-
-            <p>
-                Lançamentos, parcelas e pagamentos
-            </p>
-
-        </div>
-
-    </a>
-
-
-    <!-- CONTAS A RECEBER -->
-
-    <a
-        href="{% url 'financeiro:contas_receber' %}"
-        class="dashboard-card"
-    >
-
-        <div class="dashboard-card-icon">
-            <i class="bi bi-wallet2"></i>
-        </div>
-
-        <div>
-
-            <h3>
-                Contas a Receber
-            </h3>
-
-            <p>
-                Recebimentos e notas emitidas
-            </p>
-
-        </div>
-
-    </a>
-
-
-    <!-- CONTAS BANCÁRIAS -->
-
-    <a
-        href="{% url 'financeiro:contas_bancarias' %}"
-        class="dashboard-card"
-    >
-
-        <div class="dashboard-card-icon">
-            <i class="bi bi-bank"></i>
-        </div>
-
-        <div>
-
-            <h3>
-                Contas Bancárias
-            </h3>
-
-            <p>
-                Bancos, saldos e extratos por conta
-            </p>
-
-        </div>
-
-    </a>
-
-
-    <!-- TRANSFERÊNCIAS BANCÁRIAS -->
-
-    {% if perms.financeiro.view_transferenciabancaria %}
-
-        <a
-            href="{% url 'financeiro:transferencias_bancarias' %}"
-            class="dashboard-card"
-        >
-
-            <div class="dashboard-card-icon">
-                <i class="bi bi-arrow-left-right"></i>
-            </div>
-
-            <div>
-
-                <h3>
-                    Transferências Bancárias
-                </h3>
-
-                <p>
-                    Movimentações entre contas bancárias
-                </p>
-
-            </div>
-
-        </a>
-
-    {% endif %}
-
-
-    <!-- CONCILIAÇÃO BANCÁRIA -->
-
-    <a
-        href="{% url 'financeiro:conciliacao_bancaria' %}"
-        class="dashboard-card"
-    >
-
-        <div class="dashboard-card-icon">
-            <i class="bi bi-file-earmark-arrow-up"></i>
-        </div>
-
-        <div>
-
-            <h3>
-                Conciliação Bancária
-            </h3>
-
-            <p>
-                Importação OFX e conferência de extratos
-            </p>
-
-        </div>
-
-    </a>
-
-
-    <!-- PLANO DE CONTAS -->
-
-    {% if perms.financeiro.view_planoconta %}
-
-        <a
-            href="{% url 'financeiro:plano_contas' %}"
-            class="dashboard-card"
-        >
-
-            <div class="dashboard-card-icon">
-                <i class="bi bi-diagram-3"></i>
-            </div>
-
-            <div>
-
-                <h3>
-                    Plano de Contas
-                </h3>
-
-                <p>
-                    Classificação de receitas e despesas
-                </p>
-
-            </div>
-
-        </a>
-
-    {% endif %}
-
-
-    <!-- CENTROS DE CUSTO -->
-
-    {% if perms.financeiro.view_centrocusto %}
-
-    <a
-        href="{% url 'financeiro:centros_custo' %}"
-        class="dashboard-card"
-    >
-
-        <div class="dashboard-card-icon">
-            <i class="bi bi-building"></i>
-        </div>
-
-        <div>
-
-            <h3>
-                Obras / Centros de Custo
-            </h3>
-
-            <p>
-                Custos, receitas e resultado por obra
-            </p>
-
-        </div>
-
-    </a>
-
-    {% endif %}
-
-    {% if perms.financeiro.view_lancamentofinanceiro %}
-
-    <a
-        href="{% url 'financeiro:relatorio_gerencial_obra' %}"
-        class="dashboard-card"
-    >
-        <div class="dashboard-card-icon">
-            <i class="bi bi-graph-up-arrow"></i>
-        </div>
-        <div>
-            <h3>Resultado por Obra</h3>
-            <p>Competência, posição financeira e margem por obra</p>
-        </div>
-    </a>
-
-    {% endif %}
-
-    {% if perms.financeiro.view_lancamentofinanceiro %}
-    <a href="{% url 'financeiro:dre_gerencial' %}" class="dashboard-card">
-        <div class="dashboard-card-icon"><i class="bi bi-table"></i></div>
-        <div><h3>DRE Gerencial</h3><p>Resultado consolidado por competência</p></div>
-    </a>
-    {% endif %}
-
-
+<section class="dashboard-panel"><div class="panel-header"><div><h2>Resultado por competência</h2><span>Calculado diretamente pela DRE Gerencial</span></div><a href="{% url 'financeiro:dre_gerencial' %}?empresa={{ form.cleaned_data.empresa.pk }}&data_inicial={{ form.cleaned_data.data_inicial|date:'Y-m-d' }}&data_final={{ form.cleaned_data.data_final|date:'Y-m-d' }}{% if form.cleaned_data.obra %}&obra={{ form.cleaned_data.obra.pk }}{% endif %}&comparacao=NENHUMA&usar_fallback=on">Abrir DRE</a></div><div class="executivo-resultado-grid"><div><span>Receitas Operacionais</span><strong>R$ {{ dashboard.dre.resumo.receitas_operacionais|floatformat:"2g" }}</strong></div><div><span>Custos</span><strong>R$ {{ dashboard.dre.resumo.custos|floatformat:"2g" }}</strong></div><div><span>Despesas Operacionais</span><strong>R$ {{ dashboard.dre.resumo.despesas_operacionais|floatformat:"2g" }}</strong></div><div><span>Resultado Financeiro</span><strong>R$ {{ dashboard.dre.resumo.resultado_financeiro|floatformat:"2g" }}</strong></div><div><span>Resultado do Período</span><strong>R$ {{ dashboard.dre.resumo.resultado_periodo|floatformat:"2g" }}</strong></div><div><span>Margem</span><strong>{% if dashboard.dre.resumo.margem_periodo is not None %}{{ dashboard.dre.resumo.margem_periodo|floatformat:2 }}%{% else %}—{% endif %}</strong></div></div></section>
+
+<div class="executivo-duas-colunas">
+<section class="dashboard-panel"><div class="panel-header"><div><h2>Obras</h2><span>{{ dashboard.obras.ativas }} ativa{{ dashboard.obras.ativas|pluralize }}</span></div><a href="{% url 'financeiro:relatorio_gerencial_obra' %}">Analisar</a></div><div class="executivo-obras-resumo"><div><span>Receitas</span><strong>R$ {{ dashboard.obras.receitas|floatformat:"2g" }}</strong></div><div><span>Custos/Despesas</span><strong>R$ {{ dashboard.obras.custos_despesas|floatformat:"2g" }}</strong></div><div><span>Resultado</span><strong>R$ {{ dashboard.obras.resultado|floatformat:"2g" }}</strong></div><div><span>Cobertura</span><strong>{% if dashboard.obras.cobertura is not None %}{{ dashboard.obras.cobertura|floatformat:2 }}%{% else %}—{% endif %}</strong></div></div><div class="table-responsive"><table class="verserp-table executivo-ranking-table"><thead><tr><th>Obra</th><th>Resultado</th><th>Margem</th></tr></thead><tbody>{% for item in dashboard.obras.ranking %}<tr><td>{{ item.obra.codigo }} — {{ item.obra.nome }}</td><td>R$ {{ item.resultado|floatformat:"2g" }}</td><td>{% if item.margem is not None %}{{ item.margem|floatformat:2 }}%{% else %}—{% endif %}</td></tr>{% empty %}<tr><td colspan="3" class="relatorio-sem-dados">Nenhuma obra com valores.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="dashboard-panel"><div class="panel-header"><div><h2>Conciliação</h2><span>Pendências e importações OFX</span></div><a href="{% url 'financeiro:conciliacao_bancaria' %}">Ir para Conciliação</a></div><div class="executivo-conciliacao"><div><span>Movimentos pendentes</span><strong>{{ dashboard.conciliacao.pendentes }}</strong></div><div><span>Contas com pendências</span><strong>{{ dashboard.conciliacao.contas_com_pendencias }}</strong></div><div><span>Importações recentes</span><strong>{{ dashboard.conciliacao.importacoes_recentes }}</strong></div><div><span>Última importação</span><strong>{% if dashboard.conciliacao.ultima_importacao %}{{ dashboard.conciliacao.ultima_importacao.criado_em|date:"d/m/Y H:i" }}{% else %}—{% endif %}</strong></div></div></section>
 </div>
+{% else %}<div class="alert alert-danger">Revise os filtros para carregar o dashboard.</div>{% endif %}
 
+<section class="executivo-secao"><div class="panel-header"><div><h2>Acessos rápidos</h2><span>Módulos e relatórios financeiros</span></div></div><div class="dashboard-grid">
+<a href="{% url 'financeiro:contas_pagar' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-cash-stack"></i></div><div><h3>Contas a Pagar</h3><p>Lançamentos, parcelas e pagamentos</p></div></a><a href="{% url 'financeiro:contas_receber' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-wallet2"></i></div><div><h3>Contas a Receber</h3><p>Recebimentos e títulos</p></div></a><a href="{% url 'financeiro:contas_bancarias' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-bank"></i></div><div><h3>Contas Bancárias</h3><p>Bancos, saldos e extratos</p></div></a>{% if perms.financeiro.view_transferenciabancaria %}<a href="{% url 'financeiro:transferencias_bancarias' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-arrow-left-right"></i></div><div><h3>Transferências</h3><p>Movimentações entre contas</p></div></a>{% endif %}<a href="{% url 'financeiro:conciliacao_bancaria' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-file-earmark-arrow-up"></i></div><div><h3>Conciliação Bancária</h3><p>Importação OFX</p></div></a>{% if perms.financeiro.view_planoconta %}<a href="{% url 'financeiro:plano_contas' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-diagram-3"></i></div><div><h3>Plano de Contas</h3><p>Classificação financeira</p></div></a>{% endif %}{% if perms.financeiro.view_centrocusto %}<a href="{% url 'financeiro:centros_custo' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-building"></i></div><div><h3>Obras / Centros de Custo</h3><p>Cadastro e histórico</p></div></a>{% endif %}<a href="{% url 'financeiro:relatorio_gerencial_obra' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-graph-up-arrow"></i></div><div><h3>Resultado por Obra</h3><p>Competência, caixa e margem</p></div></a><a href="{% url 'financeiro:dre_gerencial' %}" class="dashboard-card"><div class="dashboard-card-icon"><i class="bi bi-table"></i></div><div><h3>DRE Gerencial</h3><p>Resultado consolidado</p></div></a>
+</div></section>
+{% if dashboard %}<script src="{% static 'js/dashboard_financeiro.js' %}"></script>{% endif %}
 {% endblock %}

@@ -11,6 +11,7 @@ from pessoas.models import Pessoa
 
 from .forms import (
     CriarLancamentoOFXForm,
+    DashboardFinanceiroFiltroForm,
     DREFiltroForm,
     LancamentoFinanceiroForm,
     RateioCentroCustoFormSet,
@@ -23,12 +24,15 @@ from .models import (
     Empresa,
     ImportacaoOFX,
     LancamentoFinanceiro,
+    MovimentacaoBancaria,
     PlanoConta,
     RateioCentroCusto,
     MovimentoOFX,
     ParcelaFinanceira,
+    TransferenciaBancaria,
 )
 from .services import (
+    calcular_dashboard_financeiro,
     calcular_dre,
     calcular_relatorio_obra,
     distribuir_valor_rateios,
@@ -1299,3 +1303,299 @@ class DREGerencialTests(TestCase):
         self.assertEqual(resposta.context["pagina"].number, 2)
         self.assertEqual(len(resposta.context["pagina"]), 1)
         self.assertContains(resposta, "DRE Gerencial Consolidada")
+
+
+class DashboardFinanceiroExecutivoTests(TestCase):
+    hoje = date(2026, 8, 18)
+    inicio = date(2026, 8, 1)
+    fim = date(2026, 8, 31)
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.empresa = Empresa.objects.create(
+            razao_social="Empresa Dashboard TESTE",
+            cnpj="91.000.000/0001-01",
+            principal=True,
+        )
+        cls.outra_empresa = Empresa.objects.create(
+            razao_social="Outra Empresa Dashboard TESTE",
+            cnpj="92.000.000/0001-02",
+        )
+        cls.pessoa = Pessoa.objects.create(
+            razao_social="Pessoa Dashboard TESTE"
+        )
+        cls.conta_a = ContaBancaria.objects.create(
+            empresa=cls.empresa,
+            banco="Banco A TESTE",
+            agencia="1",
+            conta="A",
+            saldo_inicial=Decimal("1000"),
+        )
+        cls.conta_b = ContaBancaria.objects.create(
+            empresa=cls.empresa,
+            banco="Banco B TESTE",
+            agencia="1",
+            conta="B",
+            saldo_inicial=Decimal("500"),
+        )
+        cls.conta_inativa = ContaBancaria.objects.create(
+            empresa=cls.empresa,
+            banco="Banco Inativo TESTE",
+            saldo_inicial=Decimal("999"),
+            ativa=False,
+        )
+        cls.conta_outra_empresa = ContaBancaria.objects.create(
+            empresa=cls.outra_empresa,
+            banco="Banco Outra Empresa TESTE",
+            saldo_inicial=Decimal("9000"),
+        )
+        cls.obra = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            codigo="DASH-TESTE-1",
+            nome="Obra Dashboard 1",
+        )
+        cls.outra_obra = CentroCusto.objects.create(
+            empresa=cls.empresa,
+            codigo="DASH-TESTE-2",
+            nome="Obra Dashboard 2",
+        )
+        cls.receita = PlanoConta.objects.get(codigo="4.01.01")
+        cls.custo = PlanoConta.objects.get(codigo="5.01.01")
+        cls.despesa = PlanoConta.objects.get(codigo="6.01.01")
+
+    def criar_titulo(
+        self,
+        tipo,
+        conta,
+        valor,
+        vencimento,
+        rateios=(),
+        empresa=None,
+        competencia=date(2026, 8, 10),
+    ):
+        lancamento = LancamentoFinanceiro.objects.create(
+            empresa=empresa or self.empresa,
+            pessoa=self.pessoa,
+            tipo=tipo,
+            descricao=f"Título {tipo} Dashboard TESTE",
+            data_emissao=competencia,
+            data_competencia=competencia,
+            valor_total=valor,
+            plano_conta=conta,
+        )
+        parcela = ParcelaFinanceira.objects.create(
+            lancamento=lancamento,
+            numero=1,
+            vencimento=vencimento,
+            valor=valor,
+        )
+        for obra, parte in rateios:
+            RateioCentroCusto.objects.create(
+                lancamento=lancamento,
+                centro_custo=obra,
+                valor=parte,
+            )
+        return lancamento, parcela
+
+    def dashboard(self, **kwargs):
+        dados = {
+            "empresa": self.empresa,
+            "data_inicial": self.inicio,
+            "data_final": self.fim,
+            "hoje": self.hoje,
+        }
+        dados.update(kwargs)
+        return calcular_dashboard_financeiro(**dados)
+
+    def test_posicao_bancaria_em_lote_exclui_conta_inativa(self):
+        MovimentacaoBancaria.objects.create(
+            conta_bancaria=self.conta_a,
+            data=self.hoje,
+            tipo="ENTRADA",
+            origem="AJUSTE",
+            valor=Decimal("100"),
+        )
+        resultado = self.dashboard()["posicao_bancaria"]
+        self.assertEqual(resultado["saldo_total"], Decimal("1600.00"))
+        self.assertEqual(len(resultado["contas"]), 2)
+
+    def test_transferencia_altera_contas_sem_inflar_fluxo(self):
+        TransferenciaBancaria.objects.create(
+            conta_origem=self.conta_a,
+            conta_destino=self.conta_b,
+            data=self.hoje,
+            valor=Decimal("200"),
+        )
+        dashboard = self.dashboard()
+        saldos = {
+            conta.pk: conta.saldo_dashboard
+            for conta in dashboard["posicao_bancaria"]["contas"]
+        }
+        self.assertEqual(saldos[self.conta_a.pk], Decimal("800.00"))
+        self.assertEqual(saldos[self.conta_b.pk], Decimal("700.00"))
+        self.assertEqual(dashboard["posicao_bancaria"]["saldo_total"], Decimal("1500.00"))
+        self.assertEqual(dashboard["fluxo"]["entradas_realizadas"], Decimal("0.00"))
+        self.assertEqual(dashboard["fluxo"]["saidas_realizadas"], Decimal("0.00"))
+
+    def test_pagar_receber_vencidos_parciais_e_ajustes(self):
+        _, receber = self.criar_titulo(
+            "RECEBER", self.receita, Decimal("100"), date(2026, 8, 10)
+        )
+        _, pagar = self.criar_titulo(
+            "PAGAR", self.custo, Decimal("200"), date(2026, 8, 12)
+        )
+        BaixaFinanceira.objects.create(
+            parcela=receber,
+            conta_bancaria=self.conta_a,
+            data=self.hoje,
+            valor=Decimal("40"),
+            juros=Decimal("5"),
+            desconto=Decimal("2"),
+        )
+        BaixaFinanceira.objects.create(
+            parcela=pagar,
+            conta_bancaria=self.conta_a,
+            data=self.hoje,
+            valor=Decimal("50"),
+            multa=Decimal("10"),
+        )
+        resultado = self.dashboard()
+        self.assertEqual(resultado["receber"]["em_aberto"], Decimal("60.00"))
+        self.assertEqual(resultado["receber"]["vencido"], Decimal("60.00"))
+        self.assertEqual(resultado["receber"]["realizado_periodo"], Decimal("43.00"))
+        self.assertEqual(resultado["pagar"]["em_aberto"], Decimal("150.00"))
+        self.assertEqual(resultado["pagar"]["vencido"], Decimal("150.00"))
+        self.assertEqual(resultado["pagar"]["realizado_periodo"], Decimal("60.00"))
+
+    def test_previsao_e_saldo_projetado(self):
+        self.criar_titulo(
+            "RECEBER", self.receita, Decimal("300"), date(2026, 8, 25)
+        )
+        self.criar_titulo(
+            "PAGAR", self.custo, Decimal("120"), date(2026, 8, 26)
+        )
+        fluxo = self.dashboard()["fluxo"]
+        self.assertEqual(fluxo["entradas_previstas"], Decimal("300.00"))
+        self.assertEqual(fluxo["saidas_previstas"], Decimal("120.00"))
+        self.assertEqual(fluxo["saldo_projetado"], Decimal("1680.00"))
+
+    def test_rateio_por_obra_aplica_titulos_caixa_e_resultado(self):
+        _, parcela = self.criar_titulo(
+            "RECEBER",
+            self.receita,
+            Decimal("100"),
+            date(2026, 8, 25),
+            ((self.obra, Decimal("60")), (self.outra_obra, Decimal("40"))),
+        )
+        BaixaFinanceira.objects.create(
+            parcela=parcela,
+            conta_bancaria=self.conta_a,
+            data=self.hoje,
+            valor=Decimal("50"),
+        )
+        resultado = self.dashboard(obra=self.obra)
+        self.assertEqual(resultado["receber"]["em_aberto"], Decimal("30.00"))
+        self.assertEqual(resultado["receber"]["realizado_periodo"], Decimal("30.00"))
+        self.assertEqual(resultado["dre"]["resumo"]["receitas_operacionais"], Decimal("60.00"))
+        self.assertEqual(resultado["posicao_bancaria"]["saldo_total"], Decimal("1550.00"))
+
+    def test_resultado_fecha_exatamente_com_dre(self):
+        self.criar_titulo(
+            "RECEBER", self.receita, Decimal("500"), date(2026, 8, 25)
+        )
+        self.criar_titulo(
+            "PAGAR", self.custo, Decimal("200"), date(2026, 8, 26)
+        )
+        dashboard = self.dashboard()
+        dre = calcular_dre(self.empresa, self.inicio, self.fim)
+        self.assertEqual(dashboard["dre"]["resumo"], dre["resumo"])
+
+    def test_ranking_obras_e_cobertura(self):
+        self.criar_titulo(
+            "RECEBER", self.receita, Decimal("100"), date(2026, 8, 25),
+            ((self.obra, Decimal("70")), (self.outra_obra, Decimal("30"))),
+        )
+        self.criar_titulo(
+            "PAGAR", self.custo, Decimal("40"), date(2026, 8, 26),
+            ((self.obra, Decimal("20")), (self.outra_obra, Decimal("20"))),
+        )
+        obras = self.dashboard()["obras"]
+        self.assertEqual(obras["ranking"][0]["obra"], self.obra)
+        self.assertEqual(obras["ranking"][0]["resultado"], Decimal("50.00"))
+        self.assertEqual(obras["cobertura"], Decimal("100.00"))
+
+    def test_ofx_pendente_e_alertas(self):
+        importacao = ImportacaoOFX.objects.create(
+            conta_bancaria=self.conta_a,
+            nome_arquivo="dashboard_teste.ofx",
+            status="CONCLUIDA",
+        )
+        MovimentoOFX.objects.create(
+            importacao=importacao,
+            conta_bancaria=self.conta_a,
+            identificador="DASH-OFX-TESTE",
+            data=self.hoje,
+            tipo="ENTRADA",
+            valor=Decimal("10"),
+            status="PENDENTE",
+        )
+        resultado = self.dashboard()
+        self.assertEqual(resultado["conciliacao"]["pendentes"], 1)
+        self.assertEqual(resultado["conciliacao"]["contas_com_pendencias"], 1)
+        self.assertTrue(any(item["tipo"] == "OFX" for item in resultado["alertas"]))
+
+    def test_alertas_de_vencidos_proximos_e_saldo_negativo(self):
+        self.conta_a.saldo_inicial = Decimal("-100")
+        self.conta_a.save(update_fields=["saldo_inicial"])
+        self.criar_titulo("PAGAR", self.custo, Decimal("20"), date(2026, 8, 10))
+        self.criar_titulo("RECEBER", self.receita, Decimal("30"), date(2026, 8, 20))
+        tipos = {item["tipo"] for item in self.dashboard()["alertas"]}
+        self.assertTrue({"PAGAR", "VENCIMENTO", "BANCO"}.issubset(tipos))
+
+    def test_isolamento_por_empresa(self):
+        self.criar_titulo(
+            "RECEBER", self.receita, Decimal("900"), date(2026, 8, 25),
+            empresa=self.outra_empresa,
+        )
+        resultado = self.dashboard()
+        self.assertEqual(resultado["receber"]["em_aberto"], Decimal("0.00"))
+        self.assertEqual(resultado["posicao_bancaria"]["saldo_total"], Decimal("1500.00"))
+
+    def test_estado_sem_dados_financeiros(self):
+        resultado = self.dashboard()
+        self.assertEqual(resultado["receber"]["em_aberto"], Decimal("0.00"))
+        self.assertEqual(resultado["pagar"]["em_aberto"], Decimal("0.00"))
+        self.assertEqual(resultado["obras"]["ranking"], [])
+        self.assertEqual(resultado["alertas"], [])
+
+    def test_form_rejeita_obra_de_outra_empresa(self):
+        form = DashboardFinanceiroFiltroForm({
+            "empresa": self.outra_empresa.pk,
+            "data_inicial": "2026-08-01",
+            "data_final": "2026-08-31",
+            "obra": self.obra.pk,
+        })
+        self.assertFalse(form.is_valid())
+
+    def test_renderizacao_do_dashboard(self):
+        usuario = get_user_model().objects.create_superuser(
+            username="dashboard_view_teste",
+            password="senha-teste",
+            email="dashboard@teste.local",
+        )
+        self.client.force_login(usuario)
+        resposta = self.client.get(
+            reverse("financeiro:index"),
+            {
+                "empresa": self.empresa.pk,
+                "data_inicial": "2026-08-01",
+                "data_final": "2026-08-31",
+            },
+        )
+        self.assertEqual(resposta.status_code, 200)
+        for texto in (
+            "Resumo executivo", "Fluxo de Caixa", "Resultado por competência",
+            "Obras", "Conciliação", "Acessos rápidos",
+            "Considera títulos financeiros cadastrados.",
+        ):
+            self.assertContains(resposta, texto)

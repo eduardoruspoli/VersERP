@@ -2,12 +2,19 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Prefetch, Sum
+from django.db.models import DecimalField, Prefetch, Q, Sum, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from .models import (
     BaixaFinanceira,
+    CentroCusto,
+    ContaBancaria,
+    ImportacaoOFX,
     LancamentoFinanceiro,
+    MovimentacaoBancaria,
+    MovimentoOFX,
+    ParcelaFinanceira,
     PlanoConta,
     RateioCentroCusto,
 )
@@ -633,4 +640,461 @@ def drilldown_dre(
     return {
         "itens": itens,
         "total": moeda(sum((item["valor"] for item in itens), ZERO)),
+    }
+
+
+def _mes_seguinte(valor):
+    return (valor.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+
+def _posicao_bancaria_dashboard(empresa, data_inicial, data_final):
+    campo_decimal = DecimalField(max_digits=15, decimal_places=2)
+    contas = list(
+        ContaBancaria.objects.filter(empresa=empresa, ativa=True)
+        .annotate(
+            entradas_agregadas=Coalesce(
+                Sum(
+                    "movimentacoes_bancarias__valor",
+                    filter=Q(movimentacoes_bancarias__tipo="ENTRADA"),
+                ),
+                Value(ZERO),
+                output_field=campo_decimal,
+            ),
+            saidas_agregadas=Coalesce(
+                Sum(
+                    "movimentacoes_bancarias__valor",
+                    filter=Q(movimentacoes_bancarias__tipo="SAIDA"),
+                ),
+                Value(ZERO),
+                output_field=campo_decimal,
+            ),
+        )
+        .order_by("banco", "agencia", "conta")
+    )
+    saldo_total = ZERO
+    contas_negativas = 0
+    for conta in contas:
+        conta.saldo_dashboard = moeda(
+            conta.saldo_inicial
+            + conta.entradas_agregadas
+            - conta.saidas_agregadas
+        )
+        saldo_total += conta.saldo_dashboard
+        if conta.saldo_dashboard < ZERO:
+            contas_negativas += 1
+
+    movimentos = MovimentacaoBancaria.objects.filter(
+        conta_bancaria__empresa=empresa,
+        conta_bancaria__ativa=True,
+        data__range=(data_inicial, data_final),
+    ).exclude(origem="TRANSFERENCIA")
+    agregados = movimentos.aggregate(
+        entradas=Sum("valor", filter=Q(tipo="ENTRADA")),
+        saidas=Sum("valor", filter=Q(tipo="SAIDA")),
+    )
+    return {
+        "contas": contas,
+        "saldo_total": moeda(saldo_total),
+        "entradas_periodo": moeda(agregados["entradas"]),
+        "saidas_periodo": moeda(agregados["saidas"]),
+        "contas_negativas": contas_negativas,
+    }
+
+
+def _titulos_dashboard(
+    empresa,
+    tipo,
+    data_inicial,
+    data_final,
+    hoje,
+    obra=None,
+):
+    parcelas = list(
+        ParcelaFinanceira.objects.filter(
+            lancamento__empresa=empresa,
+            lancamento__tipo=tipo,
+        )
+        .exclude(status="CANCELADA")
+        .exclude(lancamento__status="CANCELADO")
+        .select_related("lancamento__pessoa", "lancamento__plano_conta")
+        .prefetch_related(
+            "baixas",
+            "lancamento__rateios_centro_custo",
+        )
+        .order_by("vencimento", "id")
+    )
+    total_aberto = ZERO
+    vencido = ZERO
+    a_vencer = ZERO
+    previsto = ZERO
+    proximos = []
+    vencendo_sete_dias = 0
+    fim_alerta = hoje + timedelta(days=7)
+    inicio_previsao = max(hoje, data_inicial)
+
+    for parcela in parcelas:
+        baixado = sum((baixa.valor for baixa in parcela.baixas.all()), ZERO)
+        saldo = max(parcela.valor - baixado, ZERO)
+        if saldo <= ZERO:
+            continue
+        rateios = list(parcela.lancamento.rateios_centro_custo.all())
+        if obra:
+            rateio_obra = next(
+                (rateio for rateio in rateios if rateio.centro_custo_id == obra.pk),
+                None,
+            )
+            if not rateio_obra:
+                continue
+            saldo = distribuir_valor_rateios(saldo, rateios).get(
+                rateio_obra.pk, ZERO
+            )
+            if saldo <= ZERO:
+                continue
+
+        parcela.saldo_dashboard = moeda(saldo)
+        total_aberto += saldo
+        if parcela.vencimento < hoje:
+            vencido += saldo
+        else:
+            a_vencer += saldo
+            if len(proximos) < 5:
+                proximos.append(parcela)
+        if hoje <= parcela.vencimento <= fim_alerta:
+            vencendo_sete_dias += 1
+        if inicio_previsao <= parcela.vencimento <= data_final:
+            previsto += saldo
+
+    realizado = ZERO
+    baixas_periodo = BaixaFinanceira.objects.filter(
+        parcela__lancamento__empresa=empresa,
+        parcela__lancamento__tipo=tipo,
+        data__range=(data_inicial, data_final),
+    ).exclude(parcela__lancamento__status="CANCELADO")
+    if obra:
+        baixas_periodo = baixas_periodo.select_related(
+            "parcela__lancamento"
+        ).prefetch_related("parcela__lancamento__rateios_centro_custo")
+        for baixa in baixas_periodo:
+            rateios = list(baixa.parcela.lancamento.rateios_centro_custo.all())
+            rateio_obra = next(
+                (rateio for rateio in rateios if rateio.centro_custo_id == obra.pk),
+                None,
+            )
+            if rateio_obra:
+                realizado += distribuir_valor_rateios(
+                    baixa.valor_movimento, rateios
+                ).get(rateio_obra.pk, ZERO)
+    else:
+        realizado = (
+            baixas_periodo.aggregate(total=Sum("valor"))["total"] or ZERO
+        )
+        ajustes = baixas_periodo.aggregate(
+            juros=Sum("juros"), multa=Sum("multa"), desconto=Sum("desconto")
+        )
+        realizado += (
+            (ajustes["juros"] or ZERO)
+            + (ajustes["multa"] or ZERO)
+            - (ajustes["desconto"] or ZERO)
+        )
+
+    return {
+        "em_aberto": moeda(total_aberto),
+        "vencido": moeda(vencido),
+        "a_vencer": moeda(a_vencer),
+        "realizado_periodo": moeda(realizado),
+        "previsto": moeda(previsto),
+        "proximos": proximos,
+        "vencendo_sete_dias": vencendo_sete_dias,
+        "parcelas": parcelas,
+    }
+
+
+def _fluxo_mensal_dashboard(
+    empresa,
+    data_inicial,
+    data_final,
+    hoje,
+    saldo_atual,
+    obra=None,
+):
+    meses = defaultdict(
+        lambda: {
+            "entradas_realizadas": ZERO,
+            "saidas_realizadas": ZERO,
+            "entradas_previstas": ZERO,
+            "saidas_previstas": ZERO,
+        }
+    )
+
+    if obra:
+        baixas = (
+            BaixaFinanceira.objects.filter(
+                parcela__lancamento__empresa=empresa,
+                data__range=(data_inicial, data_final),
+            )
+            .exclude(parcela__lancamento__status="CANCELADO")
+            .select_related("parcela__lancamento")
+            .prefetch_related("parcela__lancamento__rateios_centro_custo")
+        )
+        for baixa in baixas:
+            rateios = list(baixa.parcela.lancamento.rateios_centro_custo.all())
+            rateio = next(
+                (item for item in rateios if item.centro_custo_id == obra.pk), None
+            )
+            if not rateio:
+                continue
+            valor = distribuir_valor_rateios(
+                baixa.valor_movimento, rateios
+            ).get(rateio.pk, ZERO)
+            chave = baixa.data.replace(day=1)
+            campo = (
+                "entradas_realizadas"
+                if baixa.parcela.lancamento.tipo == "RECEBER"
+                else "saidas_realizadas"
+            )
+            meses[chave][campo] += valor
+    else:
+        realizados = (
+            MovimentacaoBancaria.objects.filter(
+                conta_bancaria__empresa=empresa,
+                conta_bancaria__ativa=True,
+                data__range=(data_inicial, data_final),
+            )
+            .exclude(origem="TRANSFERENCIA")
+            .values("data", "tipo")
+            .annotate(total=Sum("valor"))
+        )
+        for item in realizados:
+            campo = (
+                "entradas_realizadas"
+                if item["tipo"] == "ENTRADA"
+                else "saidas_realizadas"
+            )
+            meses[item["data"].replace(day=1)][campo] += item["total"]
+
+    inicio_previsao = max(hoje, data_inicial)
+    parcelas = (
+        ParcelaFinanceira.objects.filter(
+            lancamento__empresa=empresa,
+            vencimento__range=(inicio_previsao, data_final),
+        )
+        .exclude(status="CANCELADA")
+        .exclude(lancamento__status="CANCELADO")
+        .select_related("lancamento")
+        .prefetch_related("baixas", "lancamento__rateios_centro_custo")
+    )
+    for parcela in parcelas:
+        saldo = max(
+            parcela.valor
+            - sum((baixa.valor for baixa in parcela.baixas.all()), ZERO),
+            ZERO,
+        )
+        if obra:
+            rateios = list(parcela.lancamento.rateios_centro_custo.all())
+            rateio = next(
+                (item for item in rateios if item.centro_custo_id == obra.pk), None
+            )
+            if not rateio:
+                continue
+            saldo = distribuir_valor_rateios(saldo, rateios).get(rateio.pk, ZERO)
+        campo = (
+            "entradas_previstas"
+            if parcela.lancamento.tipo == "RECEBER"
+            else "saidas_previstas"
+        )
+        meses[parcela.vencimento.replace(day=1)][campo] += saldo
+
+    resultado = []
+    atual = data_inicial.replace(day=1)
+    ultimo = data_final.replace(day=1)
+    saldo_projetado = saldo_atual
+    while atual <= ultimo:
+        item = meses[atual]
+        saldo_projetado += (
+            item["entradas_previstas"] - item["saidas_previstas"]
+        )
+        resultado.append({
+            "rotulo": atual.strftime("%m/%Y"),
+            **{chave: float(moeda(valor)) for chave, valor in item.items()},
+            "saldo_projetado": float(moeda(saldo_projetado)),
+        })
+        atual = _mes_seguinte(atual)
+    return resultado
+
+
+def _obras_dashboard(empresa, data_inicial, data_final, dre, obra=None):
+    contas, por_id = _mapa_contas_dre()
+    receitas_financeiras = next(
+        (conta for conta in contas if conta.codigo == "4.02"), None
+    )
+    despesas_financeiras = next(
+        (conta for conta in contas if conta.codigo == "6.09"), None
+    )
+    rateios = (
+        RateioCentroCusto.objects.filter(
+            centro_custo__empresa=empresa,
+            lancamento__empresa=empresa,
+            lancamento__plano_conta__aceita_lancamento=True,
+        )
+        .exclude(lancamento__status="CANCELADO")
+        .annotate(
+            data_referencia=Coalesce(
+                "lancamento__data_competencia", "lancamento__data_emissao"
+            )
+        )
+        .filter(data_referencia__range=(data_inicial, data_final))
+        .select_related("centro_custo", "lancamento__plano_conta")
+    )
+    if obra:
+        rateios = rateios.filter(centro_custo=obra)
+
+    por_obra = {}
+    total_apropriado = ZERO
+    for rateio in rateios:
+        conta = rateio.lancamento.plano_conta
+        secao = _secao_conta_dre(
+            conta,
+            por_id,
+            receitas_financeiras.pk if receitas_financeiras else None,
+            despesas_financeiras.pk if despesas_financeiras else None,
+        )
+        sinal = Decimal("-1") if conta.conta_redutora else Decimal("1")
+        valor = rateio.valor * sinal
+        dados = por_obra.setdefault(
+            rateio.centro_custo_id,
+            {
+                "obra": rateio.centro_custo,
+                "receitas": ZERO,
+                "custos_despesas": ZERO,
+                "resultado": ZERO,
+            },
+        )
+        total_apropriado += abs(rateio.valor)
+        if secao in ("receitas_operacionais", "receitas_financeiras"):
+            dados["receitas"] += valor
+            dados["resultado"] += valor
+        else:
+            dados["custos_despesas"] += valor
+            dados["resultado"] -= valor
+
+    ranking = []
+    for dados in por_obra.values():
+        dados["receitas"] = moeda(dados["receitas"])
+        dados["custos_despesas"] = moeda(dados["custos_despesas"])
+        dados["resultado"] = moeda(dados["resultado"])
+        dados["margem"] = (
+            moeda(dados["resultado"] * Decimal("100") / dados["receitas"])
+            if dados["receitas"] else None
+        )
+        ranking.append(dados)
+    ranking.sort(
+        key=lambda item: (-item["resultado"], item["obra"].codigo)
+    )
+
+    resumo = dre["resumo"]
+    base_dre = sum(
+        abs(resumo[chave])
+        for chave in (
+            "receitas_operacionais", "custos", "despesas_operacionais",
+            "receitas_financeiras", "despesas_financeiras",
+        )
+    )
+    return {
+        "ativas": CentroCusto.objects.filter(empresa=empresa, ativo=True).count(),
+        "receitas": moeda(sum((item["receitas"] for item in ranking), ZERO)),
+        "custos_despesas": moeda(
+            sum((item["custos_despesas"] for item in ranking), ZERO)
+        ),
+        "resultado": moeda(sum((item["resultado"] for item in ranking), ZERO)),
+        "cobertura": (
+            moeda(total_apropriado * Decimal("100") / base_dre)
+            if base_dre else None
+        ),
+        "ranking": ranking[:5],
+    }
+
+
+def calcular_dashboard_financeiro(
+    empresa,
+    data_inicial,
+    data_final,
+    obra=None,
+    hoje=None,
+):
+    hoje = hoje or timezone.localdate()
+    bancos = _posicao_bancaria_dashboard(empresa, data_inicial, data_final)
+    receber = _titulos_dashboard(
+        empresa, "RECEBER", data_inicial, data_final, hoje, obra
+    )
+    pagar = _titulos_dashboard(
+        empresa, "PAGAR", data_inicial, data_final, hoje, obra
+    )
+    saldo_projetado = bancos["saldo_total"] + receber["previsto"] - pagar["previsto"]
+    dre = calcular_dre(
+        empresa,
+        data_inicial,
+        data_final,
+        obra=obra,
+        usar_fallback=True,
+    )
+    obras = _obras_dashboard(empresa, data_inicial, data_final, dre, obra)
+
+    pendentes_qs = MovimentoOFX.objects.filter(
+        conta_bancaria__empresa=empresa,
+        status="PENDENTE",
+    )
+    importacoes_recentes = ImportacaoOFX.objects.filter(
+        conta_bancaria__empresa=empresa,
+        criado_em__gte=timezone.now() - timedelta(days=30),
+    ).select_related("conta_bancaria")
+    conciliacao = {
+        "pendentes": pendentes_qs.count(),
+        "contas_com_pendencias": pendentes_qs.values(
+            "conta_bancaria_id"
+        ).distinct().count(),
+        "importacoes_recentes": importacoes_recentes.count(),
+        "ultima_importacao": importacoes_recentes.order_by("-criado_em").first(),
+    }
+
+    alertas = []
+    if pagar["vencido"]:
+        alertas.append({"tipo": "PAGAR", "texto": "Contas a pagar vencidas"})
+    if receber["vencido"]:
+        alertas.append({"tipo": "RECEBER", "texto": "Contas a receber vencidas"})
+    vencendo = pagar["vencendo_sete_dias"] + receber["vencendo_sete_dias"]
+    if vencendo:
+        alertas.append({"tipo": "VENCIMENTO", "texto": "Títulos vencendo nos próximos 7 dias"})
+    if bancos["contas_negativas"]:
+        alertas.append({"tipo": "BANCO", "texto": "Contas bancárias com saldo negativo"})
+    if conciliacao["pendentes"]:
+        alertas.append({"tipo": "OFX", "texto": "Movimentos OFX pendentes"})
+
+    entradas_realizadas = (
+        receber["realizado_periodo"]
+        if obra else bancos["entradas_periodo"]
+    )
+    saidas_realizadas = (
+        pagar["realizado_periodo"]
+        if obra else bancos["saidas_periodo"]
+    )
+    return {
+        "posicao_bancaria": bancos,
+        "receber": receber,
+        "pagar": pagar,
+        "fluxo": {
+            "entradas_realizadas": entradas_realizadas,
+            "saidas_realizadas": saidas_realizadas,
+            "saldo_liquido": moeda(entradas_realizadas - saidas_realizadas),
+            "entradas_previstas": receber["previsto"],
+            "saidas_previstas": pagar["previsto"],
+            "saldo_projetado": moeda(saldo_projetado),
+            "grafico": _fluxo_mensal_dashboard(
+                empresa, data_inicial, data_final, hoje,
+                bancos["saldo_total"], obra,
+            ),
+        },
+        "dre": dre,
+        "obras": obras,
+        "conciliacao": conciliacao,
+        "alertas": alertas,
     }

@@ -575,6 +575,50 @@
 
 
 /* ==========================================
+   DASHBOARD FINANCEIRO EXECUTIVO
+========================================== */
+
+.executivo-secao { margin-bottom: 24px; }
+.executivo-alertas { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.executivo-alerta { display: flex; align-items: center; gap: 8px; padding: 11px 14px; color: var(--danger, #b42318); background: rgba(180, 35, 24, 0.06); border: 1px solid rgba(180, 35, 24, 0.18); border-radius: var(--radius-sm); font-size: 13px; }
+.executivo-alerta-ok { color: var(--success, #027a48); background: rgba(2, 122, 72, 0.06); border-color: rgba(2, 122, 72, 0.18); }
+.executivo-kpis { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 14px; }
+.executivo-kpis small { display: block; margin-top: 7px; color: var(--text-light); font-size: 11px; }
+.executivo-bancos-table { min-width: 780px; }
+.executivo-bancos-table th:not(:first-child), .executivo-bancos-table td:not(:first-child) { text-align: right; }
+.executivo-valor-negativo { color: var(--danger, #b42318); }
+.executivo-fluxo-cards, .executivo-resultado-grid { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 1px; margin-bottom: 20px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.executivo-fluxo-cards > div, .executivo-resultado-grid > div { padding: 14px; background: var(--surface); }
+.executivo-fluxo-cards span, .executivo-resultado-grid span, .executivo-titulos-resumo span, .executivo-obras-resumo span, .executivo-conciliacao span { display: block; margin-bottom: 6px; color: var(--text-light); font-size: 11px; }
+.executivo-grafico { width: 100%; min-height: 340px; overflow-x: auto; }
+.executivo-grafico canvas { min-width: 720px; }
+.executivo-duas-colunas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.executivo-titulos-resumo, .executivo-obras-resumo, .executivo-conciliacao { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.executivo-titulos-resumo > div, .executivo-obras-resumo > div, .executivo-conciliacao > div { padding: 13px; background: var(--background); border-radius: var(--radius-sm); }
+.executivo-subtitulo { margin: 20px 0 10px; font-size: 14px; }
+.executivo-lista { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.executivo-lista > div { display: flex; justify-content: space-between; gap: 12px; padding: 11px; background: var(--surface); font-size: 12px; }
+.executivo-lista p { padding: 14px; margin: 0; background: var(--surface); color: var(--text-light); }
+.executivo-ranking-table { min-width: 520px; }
+.executivo-ranking-table th:not(:first-child), .executivo-ranking-table td:not(:first-child) { text-align: right; }
+
+@media (max-width: 1100px) {
+    .executivo-kpis { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+    .executivo-fluxo-cards, .executivo-resultado-grid { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+}
+
+@media (max-width: 800px) {
+    .executivo-duas-colunas { grid-template-columns: 1fr; }
+    .executivo-kpis { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+}
+
+@media (max-width: 520px) {
+    .executivo-kpis, .executivo-fluxo-cards, .executivo-resultado-grid, .executivo-titulos-resumo, .executivo-obras-resumo, .executivo-conciliacao { grid-template-columns: 1fr; }
+    .executivo-alertas { flex-direction: column; }
+}
+
+
+/* ==========================================
    DRE GERENCIAL
 ========================================== */
 

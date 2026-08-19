@@ -21,6 +21,7 @@ from .forms import (
     BaixaFinanceiraForm,
     CentroCustoForm,
     CriarLancamentoOFXForm,
+    DashboardFinanceiroFiltroForm,
     DREFiltroForm,
     ImportacaoOFXForm,
     LancamentoFinanceiroForm,
@@ -48,7 +49,12 @@ from .ofx import (
     ErroOFX,
     ler_ofx,
 )
-from .services import calcular_dre, calcular_relatorio_obra, drilldown_dre
+from .services import (
+    calcular_dashboard_financeiro,
+    calcular_dre,
+    calcular_relatorio_obra,
+    drilldown_dre,
+)
 
 
 # ============================================================
@@ -1111,9 +1117,35 @@ def preparar_movimentos_para_tela(
     raise_exception=True,
 )
 def financeiro_index(request):
+    hoje = timezone.localdate()
+    inicio = hoje.replace(day=1)
+    proximo_mes = (inicio.replace(day=28) + timedelta(days=4)).replace(day=1)
+    fim = proximo_mes - timedelta(days=1)
+    empresa_inicial = (
+        Empresa.objects.filter(ativa=True, principal=True).first()
+        or Empresa.objects.filter(ativa=True).first()
+    )
+    dados_filtro = request.GET or {
+        "empresa": empresa_inicial.pk if empresa_inicial else "",
+        "data_inicial": inicio.isoformat(),
+        "data_final": fim.isoformat(),
+        "obra": "",
+    }
+    form = DashboardFinanceiroFiltroForm(dados_filtro)
+    dashboard = None
+    if form.is_valid():
+        dados = form.cleaned_data
+        dashboard = calcular_dashboard_financeiro(
+            empresa=dados["empresa"],
+            data_inicial=dados["data_inicial"],
+            data_final=dados["data_final"],
+            obra=dados["obra"],
+            hoje=hoje,
+        )
     return render(
         request,
         "financeiro/index.html",
+        {"form": form, "dashboard": dashboard, "hoje": hoje},
     )
 
 

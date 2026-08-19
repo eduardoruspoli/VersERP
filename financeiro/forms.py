@@ -443,6 +443,56 @@ class DREFiltroForm(forms.Form):
         return dados
 
 
+class DashboardFinanceiroFiltroForm(forms.Form):
+    empresa = forms.ModelChoiceField(
+        label="Empresa",
+        queryset=Empresa.objects.none(),
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    data_inicial = forms.DateField(
+        label="Data inicial",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    data_final = forms.DateField(
+        label="Data final",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    obra = forms.ModelChoiceField(
+        label="Obra / Centro de Custo",
+        queryset=CentroCusto.objects.none(),
+        required=False,
+        empty_label="Todas as obras / Consolidado",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["empresa"].queryset = Empresa.objects.filter(
+            ativa=True
+        ).order_by("razao_social")
+        obras = CentroCusto.objects.select_related("empresa").order_by(
+            "empresa__razao_social", "codigo"
+        )
+        empresa_id = self.data.get("empresa") if self.is_bound else None
+        if empresa_id and str(empresa_id).isdigit():
+            obras = obras.filter(empresa_id=empresa_id)
+        self.fields["obra"].queryset = obras
+
+    def clean(self):
+        dados = super().clean()
+        empresa = dados.get("empresa")
+        obra = dados.get("obra")
+        inicio = dados.get("data_inicial")
+        fim = dados.get("data_final")
+        if empresa and obra and obra.empresa_id != empresa.pk:
+            self.add_error("obra", "A obra deve pertencer à empresa selecionada.")
+        if inicio and fim and inicio > fim:
+            self.add_error(
+                "data_final", "A data final deve ser igual ou posterior à inicial."
+            )
+        return dados
+
+
 class PlanoContaForm(forms.ModelForm):
 
     class Meta:
