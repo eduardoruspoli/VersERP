@@ -128,7 +128,7 @@
                             <td>{{ item.data_referencia|date:"d/m/Y" }}</td>
                             <td>{{ item.lancamento.numero_documento|default:"—" }}</td>
                             <td>{{ item.lancamento.pessoa }}<br><small>{{ item.lancamento.descricao }}</small></td>
-                            <td>{{ item.lancamento.plano_conta.codigo }} — {{ item.lancamento.plano_conta.nome }}</td>
+                            <td>{% for classificacao in item.classificacoes %}{{ classificacao.plano_conta.codigo }} — {{ classificacao.plano_conta.nome }}: R$ {{ classificacao.valor|floatformat:"2g" }}{% if not forloop.last %}<br>{% endif %}{% empty %}—{% endfor %}</td>
                             <td>R$ {{ item.valor_rateado|floatformat:"2g" }}</td>
                             <td>R$ {{ item.movimento_periodo|floatformat:"2g" }}</td>
                             <td>R$ {{ item.saldo|floatformat:"2g" }}</td>

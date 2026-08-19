@@ -1,10 +1,10 @@
 from collections import defaultdict
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import DecimalField, Prefetch, Q, Sum, Value
+from django.db.models import DecimalField, Prefetch, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -114,6 +114,70 @@ def distribuir_valor_rateios(valor, rateios):
     return distribuicao
 
 
+def distribuir_classificacoes_por_rateios(lancamento):
+    """Cruza classificações e obras sem persistir matriz, fechando linhas e colunas."""
+    classificacoes = sorted(
+        list(lancamento.classificacoes_contabeis.all()),
+        key=lambda item: (item.ordem, item.plano_conta_id, item.pk),
+    )
+    rateios = sorted(
+        list(lancamento.rateios_centro_custo.all()),
+        key=lambda item: (item.centro_custo_id, item.pk),
+    )
+    total = moeda(lancamento.valor_total)
+    if sum((item.valor for item in classificacoes), ZERO) != total:
+        raise ValidationError("As classificações não fecham com o valor do lançamento.")
+    if sum((item.valor for item in rateios), ZERO) != total:
+        raise ValidationError("Os rateios não fecham com o valor do lançamento.")
+    if not classificacoes or not rateios:
+        return {}
+
+    brutos = {}
+    matriz = {}
+    for classificacao in classificacoes:
+        for rateio in rateios:
+            chave = (classificacao.pk, rateio.pk)
+            bruto = classificacao.valor * rateio.valor / total
+            brutos[chave] = bruto
+            matriz[chave] = bruto.quantize(CENTAVO, rounding=ROUND_DOWN)
+
+    residuos_linha = {
+        item.pk: int(((item.valor - sum(
+            (matriz[(item.pk, rateio.pk)] for rateio in rateios), ZERO
+        )) / CENTAVO).to_integral_value())
+        for item in classificacoes
+    }
+    residuos_coluna = {
+        item.pk: int(((item.valor - sum(
+            (matriz[(classificacao.pk, item.pk)] for classificacao in classificacoes), ZERO
+        )) / CENTAVO).to_integral_value())
+        for item in rateios
+    }
+    candidatos = sorted(
+        ((classificacao, rateio) for classificacao in classificacoes for rateio in rateios),
+        key=lambda par: (
+            -(brutos[(par[0].pk, par[1].pk)] - matriz[(par[0].pk, par[1].pk)]),
+            par[0].ordem, par[0].plano_conta_id, par[1].centro_custo_id,
+            par[0].pk, par[1].pk,
+        ),
+    )
+    restantes = sum(residuos_linha.values())
+    while restantes:
+        distribuiu = False
+        for classificacao, rateio in candidatos:
+            if residuos_linha[classificacao.pk] and residuos_coluna[rateio.pk]:
+                matriz[(classificacao.pk, rateio.pk)] += CENTAVO
+                residuos_linha[classificacao.pk] -= 1
+                residuos_coluna[rateio.pk] -= 1
+                restantes -= 1
+                distribuiu = True
+                if not restantes:
+                    break
+        if not distribuiu:
+            raise ValidationError("Não foi possível fechar os centavos da matriz contábil por obra.")
+    return matriz
+
+
 def _contas_hierarquicas(valores_por_conta):
     contas = list(
         PlanoConta.objects.filter(
@@ -176,10 +240,11 @@ def calcular_relatorio_obra(obra, data_inicial, data_final):
             )
         )
         .filter(data_referencia__range=(data_inicial, data_final))
-        .select_related("lancamento__plano_conta", "lancamento__pessoa")
+        .select_related("lancamento__pessoa")
         .prefetch_related(
             "lancamento__parcelas__baixas",
             "lancamento__rateios_centro_custo",
+            "lancamento__classificacoes_contabeis__plano_conta",
         )
         .order_by("-data_referencia", "-lancamento_id")
     )
@@ -193,17 +258,18 @@ def calcular_relatorio_obra(obra, data_inicial, data_final):
 
     for rateio in rateios:
         lancamento = rateio.lancamento
-        valor = moeda(rateio.valor)
-        valores_por_conta[lancamento.plano_conta_id] += valor
+        matriz = distribuir_classificacoes_por_rateios(lancamento)
+        classificacoes_obra = []
+        for classificacao in lancamento.classificacoes_contabeis.all():
+            valor = moeda(matriz[(classificacao.pk, rateio.pk)])
+            valores_por_conta[classificacao.plano_conta_id] += valor
+            classificacoes_obra.append({"classificacao":classificacao,"plano_conta":classificacao.plano_conta,"valor":valor})
+            if classificacao.plano_conta.tipo == "RECEITA": receitas += valor
+            elif classificacao.plano_conta.tipo == "CUSTO": custos += valor
+            elif classificacao.plano_conta.tipo == "DESPESA": despesas += valor
+        rateio.classificacoes_obra = classificacoes_obra
         rateio_por_lancamento[lancamento.pk] = rateio
         lancamentos_por_id[lancamento.pk] = lancamento
-
-        if lancamento.plano_conta.tipo == "RECEITA":
-            receitas += valor
-        elif lancamento.plano_conta.tipo == "CUSTO":
-            custos += valor
-        elif lancamento.plano_conta.tipo == "DESPESA":
-            despesas += valor
 
     resultado_bruto = receitas - custos
     resultado_obra = resultado_bruto - despesas
@@ -285,15 +351,15 @@ def calcular_relatorio_obra(obra, data_inicial, data_final):
             a_pagar += saldo_obra
 
         mes = rateio.data_referencia.replace(day=1)
-        if lancamento.plano_conta.tipo == "RECEITA":
-            competencia_mensal[mes]["receitas"] += rateio.valor
-        else:
-            competencia_mensal[mes]["custos_despesas"] += rateio.valor
+        for dado in rateio.classificacoes_obra:
+            if dado["plano_conta"].tipo == "RECEITA": competencia_mensal[mes]["receitas"] += dado["valor"]
+            else: competencia_mensal[mes]["custos_despesas"] += dado["valor"]
 
         detalhes.append({
             "lancamento": lancamento,
             "data_referencia": rateio.data_referencia,
             "valor_rateado": moeda(rateio.valor),
+            "classificacoes": rateio.classificacoes_obra,
             "movimento_periodo": moeda(caixa_por_lancamento[lancamento.pk]),
             "saldo": moeda(saldo_obra),
         })
@@ -403,47 +469,54 @@ def _valores_dre(
     if conta_filtro:
         ids_contas = ids_descendentes_conta(conta_filtro, contas)
 
-    if obra:
-        queryset = RateioCentroCusto.objects.filter(
-            centro_custo=obra,
-            lancamento__empresa=empresa,
-            lancamento__plano_conta__aceita_lancamento=True,
-            lancamento__plano_conta__tipo__in=("RECEITA", "CUSTO", "DESPESA"),
-        ).exclude(lancamento__status="CANCELADO")
-        prefixo = "lancamento__"
-        campo_valor = "valor"
-        campo_conta = "lancamento__plano_conta_id"
-    else:
-        queryset = LancamentoFinanceiro.objects.filter(
-            empresa=empresa,
-            plano_conta__aceita_lancamento=True,
-            plano_conta__tipo__in=("RECEITA", "CUSTO", "DESPESA"),
-        ).exclude(status="CANCELADO")
-        prefixo = ""
-        campo_valor = "valor_total"
-        campo_conta = "plano_conta_id"
-
+    prefixo = "lancamento__"
+    classificacoes = LancamentoFinanceiroClassificacao.objects.filter(
+        lancamento__empresa=empresa,
+        plano_conta__aceita_lancamento=True,
+        plano_conta__tipo__in=("RECEITA", "CUSTO", "DESPESA"),
+    ).exclude(lancamento__status="CANCELADO")
     if ids_contas is not None:
-        queryset = queryset.filter(**{f"{prefixo}plano_conta_id__in": ids_contas})
-
-    campo_competencia = f"{prefixo}data_competencia"
-    campo_emissao = f"{prefixo}data_emissao"
+        classificacoes = classificacoes.filter(plano_conta_id__in=ids_contas)
+    campo_competencia = "lancamento__data_competencia"
+    campo_emissao = "lancamento__data_emissao"
     if usar_fallback:
-        queryset = queryset.annotate(
+        classificacoes = classificacoes.annotate(
             data_referencia=Coalesce(campo_competencia, campo_emissao)
         ).filter(data_referencia__range=(data_inicial, data_final))
-        fallback = queryset.filter(**{f"{campo_competencia}__isnull": True}).count()
+        fallback = classificacoes.filter(lancamento__data_competencia__isnull=True).values("lancamento_id").distinct().count()
     else:
-        queryset = queryset.filter(
-            **{f"{campo_competencia}__range": (data_inicial, data_final)}
-        )
+        classificacoes = classificacoes.filter(lancamento__data_competencia__range=(data_inicial, data_final))
         fallback = 0
+    if not obra:
+        agregados = classificacoes.values("plano_conta_id").annotate(total=Sum("valor"))
+        valores = {item["plano_conta_id"]: moeda(item["total"]) for item in agregados}
+        return valores, fallback
 
-    agregados = queryset.values(campo_conta).annotate(total=Sum(campo_valor))
-    valores = {
-        item[campo_conta]: moeda(item["total"])
-        for item in agregados
-    }
+    ids_lancamentos = RateioCentroCusto.objects.filter(
+        centro_custo=obra,
+        lancamento__empresa=empresa,
+    ).values("lancamento_id")
+    classificacoes = classificacoes.filter(lancamento_id__in=Subquery(ids_lancamentos))
+    if usar_fallback:
+        fallback = classificacoes.filter(lancamento__data_competencia__isnull=True).values("lancamento_id").distinct().count()
+    ids_filtrados = set(classificacoes.values_list("pk", flat=True))
+    lancamentos = (
+        LancamentoFinanceiro.objects.filter(pk__in=Subquery(classificacoes.values("lancamento_id")))
+        .prefetch_related(
+            Prefetch("classificacoes_contabeis", queryset=LancamentoFinanceiroClassificacao.objects.select_related("plano_conta")),
+            "rateios_centro_custo",
+        )
+    )
+    valores = defaultdict(lambda: ZERO)
+    for lancamento in lancamentos:
+        matriz = distribuir_classificacoes_por_rateios(lancamento)
+        rateio_obra = next((r for r in lancamento.rateios_centro_custo.all() if r.centro_custo_id == obra.pk), None)
+        if not rateio_obra:
+            continue
+        for classificacao in lancamento.classificacoes_contabeis.all():
+            if classificacao.pk in ids_filtrados:
+                valores[classificacao.plano_conta_id] += matriz[(classificacao.pk, rateio_obra.pk)]
+    valores = {conta_id: moeda(valor) for conta_id, valor in valores.items()}
     return valores, fallback
 
 
@@ -644,27 +717,11 @@ def drilldown_dre(
     if not conta.aceita_lancamento:
         return {"itens": [], "total": ZERO}
     sinal = Decimal("-1") if conta.conta_redutora else Decimal("1")
-    if obra:
-        queryset = RateioCentroCusto.objects.filter(
-            centro_custo=obra,
-            lancamento__empresa=empresa,
-            lancamento__plano_conta=conta,
-        ).exclude(lancamento__status="CANCELADO")
-        prefixo = "lancamento__"
-        campo_valor = "valor"
-        queryset = queryset.select_related(
-            "lancamento__pessoa", "lancamento__plano_conta"
-        )
-    else:
-        queryset = LancamentoFinanceiro.objects.filter(
-            empresa=empresa,
-            plano_conta=conta,
-        ).exclude(status="CANCELADO").select_related("pessoa", "plano_conta")
-        prefixo = ""
-        campo_valor = "valor_total"
-
-    competencia = f"{prefixo}data_competencia"
-    emissao = f"{prefixo}data_emissao"
+    queryset = LancamentoFinanceiroClassificacao.objects.filter(
+        lancamento__empresa=empresa, plano_conta=conta,
+    ).exclude(lancamento__status="CANCELADO").select_related("lancamento__pessoa", "plano_conta")
+    competencia = "lancamento__data_competencia"
+    emissao = "lancamento__data_emissao"
     if usar_fallback:
         queryset = queryset.annotate(
             data_referencia=Coalesce(competencia, emissao)
@@ -674,16 +731,28 @@ def drilldown_dre(
             **{f"{competencia}__range": (data_inicial, data_final)}
         )
 
-    ordem_data = "-data_referencia" if usar_fallback else f"-{competencia}"
+    ordem_data = "-data_referencia" if usar_fallback else "-lancamento__data_competencia"
     itens = []
+    if obra:
+        ids = RateioCentroCusto.objects.filter(centro_custo=obra,lancamento__empresa=empresa).values("lancamento_id")
+        queryset = queryset.filter(lancamento_id__in=Subquery(ids))
+        lancamentos = {l.pk:l for l in LancamentoFinanceiro.objects.filter(pk__in=Subquery(queryset.values("lancamento_id"))).prefetch_related("classificacoes_contabeis","rateios_centro_custo")}
     for item in queryset.order_by(ordem_data, "-id"):
-        lancamento = item.lancamento if obra else item
-        valor = moeda(getattr(item, campo_valor) * sinal)
+        lancamento = item.lancamento
+        valor_base = item.valor
+        rateio = None
+        if obra:
+            lancamento_matriz = lancamentos[lancamento.pk]
+            rateio = next((r for r in lancamento_matriz.rateios_centro_custo.all() if r.centro_custo_id==obra.pk),None)
+            valor_base = distribuir_classificacoes_por_rateios(lancamento_matriz).get((item.pk,rateio.pk),ZERO) if rateio else ZERO
+        valor = moeda(valor_base * sinal)
         data_referencia = (
             item.data_referencia if usar_fallback else lancamento.data_competencia
         )
         itens.append({
             "lancamento": lancamento,
+            "classificacao": item,
+            "plano_conta": item.plano_conta,
             "data_referencia": data_referencia,
             "valor": valor,
             "usou_fallback": lancamento.data_competencia is None,
@@ -985,7 +1054,6 @@ def _obras_dashboard(empresa, data_inicial, data_final, dre, obra=None):
         RateioCentroCusto.objects.filter(
             centro_custo__empresa=empresa,
             lancamento__empresa=empresa,
-            lancamento__plano_conta__aceita_lancamento=True,
         )
         .exclude(lancamento__status="CANCELADO")
         .annotate(
@@ -994,7 +1062,8 @@ def _obras_dashboard(empresa, data_inicial, data_final, dre, obra=None):
             )
         )
         .filter(data_referencia__range=(data_inicial, data_final))
-        .select_related("centro_custo", "lancamento__plano_conta")
+        .select_related("centro_custo", "lancamento")
+        .prefetch_related("lancamento__classificacoes_contabeis__plano_conta","lancamento__rateios_centro_custo")
     )
     if obra:
         rateios = rateios.filter(centro_custo=obra)
@@ -1002,15 +1071,6 @@ def _obras_dashboard(empresa, data_inicial, data_final, dre, obra=None):
     por_obra = {}
     total_apropriado = ZERO
     for rateio in rateios:
-        conta = rateio.lancamento.plano_conta
-        secao = _secao_conta_dre(
-            conta,
-            por_id,
-            receitas_financeiras.pk if receitas_financeiras else None,
-            despesas_financeiras.pk if despesas_financeiras else None,
-        )
-        sinal = Decimal("-1") if conta.conta_redutora else Decimal("1")
-        valor = rateio.valor * sinal
         dados = por_obra.setdefault(
             rateio.centro_custo_id,
             {
@@ -1021,12 +1081,17 @@ def _obras_dashboard(empresa, data_inicial, data_final, dre, obra=None):
             },
         )
         total_apropriado += abs(rateio.valor)
-        if secao in ("receitas_operacionais", "receitas_financeiras"):
-            dados["receitas"] += valor
-            dados["resultado"] += valor
-        else:
-            dados["custos_despesas"] += valor
-            dados["resultado"] -= valor
+        matriz = distribuir_classificacoes_por_rateios(rateio.lancamento)
+        for classificacao in rateio.lancamento.classificacoes_contabeis.all():
+            conta = classificacao.plano_conta
+            if not conta.aceita_lancamento: continue
+            secao = _secao_conta_dre(conta,por_id,receitas_financeiras.pk if receitas_financeiras else None,despesas_financeiras.pk if despesas_financeiras else None)
+            sinal = Decimal("-1") if conta.conta_redutora else Decimal("1")
+            valor = matriz[(classificacao.pk,rateio.pk)] * sinal
+            if secao in ("receitas_operacionais", "receitas_financeiras"):
+                dados["receitas"] += valor; dados["resultado"] += valor
+            else:
+                dados["custos_despesas"] += valor; dados["resultado"] -= valor
 
     ranking = []
     for dados in por_obra.values():

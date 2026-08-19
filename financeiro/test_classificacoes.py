@@ -7,13 +7,16 @@ from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
 from pessoas.models import Pessoa
 from .models import (CentroCusto, Empresa, LancamentoFinanceiro,
     LancamentoFinanceiroClassificacao, ParcelaFinanceira, PlanoConta,
     RateioCentroCusto)
 from .services import (calcular_dre, calcular_relatorio_obra,
-    salvar_classificacoes_lancamento, verificar_integridade_classificacoes)
+    calcular_dashboard_financeiro, distribuir_classificacoes_por_rateios,
+    drilldown_dre, salvar_classificacoes_lancamento,
+    verificar_integridade_classificacoes)
 
 
 class ClassificacaoFinanceiraBase(TestCase):
@@ -87,3 +90,38 @@ class ClassificacaoCompatibilidadeTests(ClassificacaoFinanceiraBase):
         obra=CentroCusto.objects.create(empresa=self.empresa,codigo="TESTE-OBRA-DRE",nome="Obra"); l=self.lancamento(valor=120); RateioCentroCusto.objects.create(lancamento=l,centro_custo=obra,valor=120); dre=calcular_dre(self.empresa,date(2026,8,1),date(2026,8,31)); relatorio=calcular_relatorio_obra(obra,date(2026,8,1),date(2026,8,31)); self.assertEqual(dre["resumo"]["custos"],Decimal("120.00")); self.assertEqual(relatorio["custos"],Decimal("120.00"))
     def test_toda_criacao_manual_fica_classificada(self):
         criados=[self.lancamento(),self.lancamento(plano=self.despesa,descricao="TESTE D"),self.lancamento(tipo="RECEBER",descricao="TESTE R")]; self.assertTrue(verificar_integridade_classificacoes(LancamentoFinanceiro.objects.filter(pk__in=[l.pk for l in criados]))["integro"])
+
+
+class DistribuicaoClassificacaoObraTests(ClassificacaoFinanceiraBase):
+    def preparar_multiplo(self,total=Decimal("100.00"),valores=(Decimal("60.00"),Decimal("40.00")),rateios=(Decimal("70.00"),Decimal("30.00"))):
+        l=self.lancamento(valor=total); l.classificacoes_contabeis.all().delete()
+        classificacoes=LancamentoFinanceiroClassificacao.objects.bulk_create([
+            LancamentoFinanceiroClassificacao(lancamento=l,plano_conta=self.custo,valor=valores[0],ordem=1),
+            LancamentoFinanceiroClassificacao(lancamento=l,plano_conta=self.despesa,valor=valores[1],ordem=2),
+        ])
+        obras=[CentroCusto.objects.create(empresa=self.empresa,codigo=f"TESTE-MAT-{i}",nome=f"Obra {i}") for i in (1,2)]
+        objetos=[RateioCentroCusto.objects.create(lancamento=l,centro_custo=obra,valor=valor) for obra,valor in zip(obras,rateios)]
+        return l,classificacoes,objetos
+    def test_exemplo_fecha_linhas_colunas_e_total(self):
+        l,c,r=self.preparar_multiplo(); matriz=distribuir_classificacoes_por_rateios(l)
+        self.assertEqual([matriz[(c[0].pk,x.pk)] for x in r],[Decimal("42.00"),Decimal("18.00")]); self.assertEqual([matriz[(c[1].pk,x.pk)] for x in r],[Decimal("28.00"),Decimal("12.00")])
+        self.assertEqual(sum(matriz.values(),Decimal("0")),l.valor_total)
+    def test_centavos_fecham_cada_linha_e_coluna(self):
+        l,c,r=self.preparar_multiplo(Decimal("100.01"),(Decimal("33.34"),Decimal("66.67")),(Decimal("50.00"),Decimal("50.01"))); matriz=distribuir_classificacoes_por_rateios(l)
+        for item in c: self.assertEqual(sum((matriz[(item.pk,x.pk)] for x in r),Decimal("0")),item.valor)
+        for item in r: self.assertEqual(sum((matriz[(x.pk,item.pk)] for x in c),Decimal("0")),item.valor)
+        self.assertEqual(sum(matriz.values(),Decimal("0")),Decimal("100.01"))
+    def test_dre_sem_obra_le_exclusivamente_classificacoes(self):
+        l,c,r=self.preparar_multiplo(); dre=calcular_dre(self.empresa,date(2026,8,1),date(2026,8,31)); self.assertEqual(dre["resumo"]["custos"],Decimal("60.00")); self.assertEqual(dre["resumo"]["despesas_operacionais"],Decimal("40.00"))
+    def test_dre_por_obra_e_drilldown_usam_matriz(self):
+        l,c,r=self.preparar_multiplo(); dre=calcular_dre(self.empresa,date(2026,8,1),date(2026,8,31),obra=r[0].centro_custo); self.assertEqual(dre["resumo"]["custos"],Decimal("42.00")); self.assertEqual(dre["resumo"]["despesas_operacionais"],Decimal("28.00")); drill=drilldown_dre(self.empresa,self.custo,date(2026,8,1),date(2026,8,31),obra=r[0].centro_custo); self.assertEqual(drill["total"],Decimal("42.00")); self.assertEqual(drill["itens"][0]["classificacao"].pk,c[0].pk)
+    def test_relatorio_obra_classifica_sem_duplicar_rateio(self):
+        l,c,r=self.preparar_multiplo(); relatorio=calcular_relatorio_obra(r[0].centro_custo,date(2026,8,1),date(2026,8,31)); self.assertEqual((relatorio["custos"],relatorio["despesas"]),(Decimal("42.00"),Decimal("28.00"))); self.assertEqual(relatorio["detalhes"][0]["valor_rateado"],Decimal("70.00")); self.assertEqual(sum((x["valor"] for x in relatorio["detalhes"][0]["classificacoes"]),Decimal("0")),Decimal("70.00"))
+    def test_dashboard_reutiliza_dre_e_matriz(self):
+        l,c,r=self.preparar_multiplo(); dashboard=calcular_dashboard_financeiro(self.empresa,date(2026,8,1),date(2026,8,31),hoje=date(2026,8,19)); self.assertEqual(dashboard["dre"]["resumo"]["custos"],Decimal("60.00")); self.assertEqual(dashboard["obras"]["custos_despesas"],Decimal("100.00"))
+    def test_isolamento_por_empresa(self):
+        l,c,r=self.preparar_multiplo(); outra=Empresa.objects.create(razao_social="TESTE Outra Matriz",cnpj="59.999.999/0001-59"); dre=calcular_dre(outra,date(2026,8,1),date(2026,8,31)); self.assertEqual(dre["resumo"]["custos"],Decimal("0.00"))
+    def test_consultas_relatorio_permanecem_controladas(self):
+        l,c,r=self.preparar_multiplo()
+        with CaptureQueriesContext(connection) as consultas: calcular_relatorio_obra(r[0].centro_custo,date(2026,8,1),date(2026,8,31))
+        self.assertLessEqual(len(consultas),15)

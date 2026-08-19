@@ -250,19 +250,18 @@ def calcular_previsto_realizado(proposta):
     detalhes = []
     realizados_por_conta = {}
     for detalhe in realizado["detalhes"]:
-        lancamento = detalhe["lancamento"]
         detalhes.append(detalhe)
-        if lancamento.plano_conta.tipo not in {"CUSTO", "DESPESA"}:
-            continue
-        realizados_por_conta[lancamento.plano_conta_id] = realizados_por_conta.get(lancamento.plano_conta_id, ZERO) + detalhe["valor_rateado"]
+        for classificacao in detalhe.get("classificacoes", []):
+            conta = classificacao["plano_conta"]
+            if conta.tipo not in {"CUSTO", "DESPESA"}: continue
+            realizados_por_conta[conta.pk] = realizados_por_conta.get(conta.pk, ZERO) + classificacao["valor"]
 
     for conta_id, valor in realizados_por_conta.items():
         chave = ("CONTA", conta_id)
         if chave in categorias:
             categorias[chave]["realizado"] = valor
         else:
-            detalhe = next(item for item in realizado["detalhes"] if item["lancamento"].plano_conta_id == conta_id)
-            conta = detalhe["lancamento"].plano_conta
+            conta = next(c["plano_conta"] for item in realizado["detalhes"] for c in item.get("classificacoes",[]) if c["plano_conta"].pk == conta_id)
             categorias[("NAO_PREVISTO", conta_id)] = {"chave": ("NAO_PREVISTO", conta_id), "nome": f"Não previsto — {conta.codigo} — {conta.nome}", "tipos": set(), "plano_conta": conta, "previsto": ZERO, "realizado": valor}
 
     linhas = list(categorias.values()) + list(sem_classificacao.values())
