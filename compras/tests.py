@@ -13,8 +13,11 @@ from comercial.models import Proposta, PropostaItem, PropostaRevisao
 from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
 
-from .models import HistoricoSolicitacaoCompra, SolicitacaoCompra, SolicitacaoCompraItem
-from .services import abrir_solicitacao, cancelar_solicitacao
+from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoItem,
+                     ProcessoCotacao, ProcessoCotacaoItem, SolicitacaoCompra, SolicitacaoCompraItem)
+from .services import (abrir_solicitacao, calcular_custos_cotacao, cancelar_processo_cotacao,
+                       cancelar_solicitacao, concluir_processo_cotacao,
+                       iniciar_processo_cotacao, montar_mapa_comparativo, selecionar_oferta)
 
 
 class ComprasBase(TestCase):
@@ -244,3 +247,101 @@ class SolicitacaoViewsTests(ComprasBase):
         ids = [item["id"] for item in self.client.get(reverse("compras:itens_previstos_obra", args=[self.obra.pk])).json()["itens"]]
         self.assertEqual(ids, [item_um.pk])
         self.assertNotIn(self.proposta_item.pk, ids)
+
+
+class ProcessoCotacaoTests(ComprasBase):
+    def setUp(self):
+        super().setUp()
+        self.solic = self.solicitacao(); self.item_sc = self.item(solicitacao=self.solic)
+        self.solic.status = SolicitacaoCompra.Status.ABERTA; self.solic.save(update_fields=["status"])
+        self.processo = ProcessoCotacao.objects.create(empresa=self.empresa, responsavel=self.usuario, criado_por=self.usuario)
+        self.pi = ProcessoCotacaoItem.objects.create(processo=self.processo, solicitacao_item=self.item_sc, quantidade_cotada=10, unidade="UN")
+        self.f1 = Pessoa.objects.create(razao_social="Fornecedor TESTE A", classificacao=Pessoa.Classificacao.FORNECEDOR)
+        self.f2 = Pessoa.objects.create(razao_social="Fornecedor TESTE B", classificacao=Pessoa.Classificacao.AMBOS)
+
+    def cotacao(self, fornecedor=None, **kwargs):
+        dados={"processo":self.processo,"fornecedor":fornecedor or self.f1,"registrada_por":self.usuario,"status":CotacaoFornecedor.Status.RECEBIDA}; dados.update(kwargs)
+        return CotacaoFornecedor.objects.create(**dados)
+
+    def oferta(self, cotacao=None, item=None, **kwargs):
+        dados={"cotacao":cotacao or self.cotacao(),"processo_item":item or self.pi,"quantidade_ofertada":10,"unidade":"UN","preco_unitario":Decimal("10")}; dados.update(kwargs)
+        return CotacaoFornecedorItem.objects.create(**dados)
+
+    def test_item_de_outra_empresa_e_rejeitado(self):
+        obra=CentroCusto.objects.create(empresa=self.outra_empresa,codigo="TESTE-COT-2",nome="Outra")
+        sc=self.solicitacao(obra=obra,empresa=self.outra_empresa); it=self.item(solicitacao=sc); sc.status="ABERTA"; sc.save(update_fields=["status"])
+        with self.assertRaises(ValidationError): ProcessoCotacaoItem.objects.create(processo=self.processo,solicitacao_item=it,quantidade_cotada=1,unidade="UN")
+
+    def test_item_duplicado_e_bloqueado(self):
+        with self.assertRaises(ValidationError): ProcessoCotacaoItem.objects.create(processo=self.processo,solicitacao_item=self.item_sc,quantidade_cotada=1,unidade="UN")
+
+    def test_solicitacao_invalida_e_item_cancelado(self):
+        sc=self.solicitacao(); it=self.item(solicitacao=sc)
+        with self.assertRaises(ValidationError): ProcessoCotacaoItem.objects.create(processo=self.processo,solicitacao_item=it,quantidade_cotada=1,unidade="UN")
+        SolicitacaoCompraItem.objects.filter(pk=self.item_sc.pk).update(cancelado=True); self.item_sc.refresh_from_db()
+        with self.assertRaises(ValidationError): self.pi.full_clean()
+
+    def test_fornecedor_inativo_ou_cliente_e_rejeitado(self):
+        self.f1.ativo=False; self.f1.save()
+        with self.assertRaises(ValidationError): self.cotacao(self.f1)
+        with self.assertRaises(ValidationError): self.cotacao(self.cliente)
+
+    def test_multiplos_fornecedores_e_ausencia_de_oferta(self):
+        c1=self.cotacao(self.f1); c2=self.cotacao(self.f2); self.oferta(c1)
+        self.assertEqual(self.processo.cotacoes_fornecedor.count(),2); self.assertFalse(c2.itens.exists())
+
+    def test_preco_desconto_impostos_frete_e_despesas(self):
+        c=self.cotacao(valor_frete=Decimal("10"),desconto_global=Decimal("5"),impostos_globais=Decimal("2"),outras_despesas=Decimal("3"))
+        o=self.oferta(c,desconto_item=Decimal("4"),impostos_item=Decimal("1"))
+        self.assertEqual(o.preco_total,Decimal("100.00")); self.assertEqual(calcular_custos_cotacao(c)[o.pk]["custo_efetivo"],Decimal("107.00"))
+
+    def test_rateio_fecha_centavos_deterministicamente(self):
+        sc2=self.solicitacao(); i2=self.item(solicitacao=sc2,descricao="B"); sc2.status="ABERTA"; sc2.save(update_fields=["status"])
+        pi2=ProcessoCotacaoItem.objects.create(processo=self.processo,solicitacao_item=i2,quantidade_cotada=1,unidade="UN")
+        c=self.cotacao(valor_frete=Decimal("0.01")); o1=self.oferta(c,preco_unitario=1); o2=self.oferta(c,item=pi2,preco_unitario=1,quantidade_ofertada=10)
+        custos=calcular_custos_cotacao(c); self.assertEqual(sum(x["frete_rateado"] for x in custos.values()),Decimal("0.01")); self.assertEqual(custos[min(o1.pk,o2.pk)]["frete_rateado"],Decimal("0.01"))
+
+    def test_inicio_atualiza_solicitacao_e_historico(self):
+        self.permissao("change_processocotacao"); iniciar_processo_cotacao(self.processo,self.usuario); self.solic.refresh_from_db()
+        self.assertEqual(self.solic.status,"EM_COTACAO"); self.assertEqual(self.processo.historico.count(),1)
+
+    def test_escolha_menor_custo_e_fornecedores_diferentes(self):
+        c1=self.cotacao(self.f1); c2=self.cotacao(self.f2); o1=self.oferta(c1,preco_unitario=10); o2=self.oferta(c2,preco_unitario=11)
+        self.permissao("change_processocotacao","selecionar_fornecedor"); iniciar_processo_cotacao(self.processo,self.usuario)
+        escolha=selecionar_oferta(self.pi,o1,self.usuario); self.assertTrue(escolha.era_menor_preco)
+
+    def test_escolha_mais_cara_exige_justificativa(self):
+        c1=self.cotacao(self.f1); c2=self.cotacao(self.f2); self.oferta(c1,preco_unitario=10); cara=self.oferta(c2,preco_unitario=11)
+        self.permissao("change_processocotacao","selecionar_fornecedor"); iniciar_processo_cotacao(self.processo,self.usuario)
+        with self.assertRaises(ValidationError): selecionar_oferta(self.pi,cara,self.usuario)
+        self.assertEqual(selecionar_oferta(self.pi,cara,self.usuario,"Melhor prazo").justificativa,"Melhor prazo")
+
+    def test_indisponivel_e_vencida_nao_podem_ser_escolhidas(self):
+        c=self.cotacao(validade=date(2020,1,1)); o=self.oferta(c)
+        self.permissao("change_processocotacao","selecionar_fornecedor"); iniciar_processo_cotacao(self.processo,self.usuario)
+        with self.assertRaises(ValidationError): selecionar_oferta(self.pi,o,self.usuario)
+        c.validade=None; c.save(); o.disponivel=False; o.save()
+        with self.assertRaises(ValidationError): selecionar_oferta(self.pi,o,self.usuario)
+
+    def test_conclusao_exige_escolha_e_congela(self):
+        c=self.cotacao(); o=self.oferta(c); self.permissao("change_processocotacao","selecionar_fornecedor"); iniciar_processo_cotacao(self.processo,self.usuario)
+        with self.assertRaises(ValidationError): concluir_processo_cotacao(self.processo,self.usuario)
+        selecionar_oferta(self.pi,o,self.usuario); concluir_processo_cotacao(self.processo,self.usuario)
+        o.preco_unitario=12
+        with self.assertRaises(ValidationError): o.save()
+
+    def test_cancelamento_e_permissoes(self):
+        with self.assertRaises(PermissionDenied): cancelar_processo_cotacao(self.processo,self.usuario,"motivo")
+        self.permissao("cancelar_cotacao"); cancelar_processo_cotacao(self.processo,self.usuario,"motivo")
+        self.assertEqual(self.processo.status,"CANCELADA"); self.assertEqual(self.processo.historico.get().observacao,"motivo")
+
+    def test_mapa_nao_cria_escolha_automatica(self):
+        self.oferta(self.cotacao()); mapa=montar_mapa_comparativo(self.processo)
+        self.assertEqual(len(mapa),1); self.assertFalse(EscolhaCotacaoItem.objects.exists())
+
+    def test_views_exigem_permissao_e_renderizam(self):
+        self.client.force_login(self.usuario)
+        self.assertEqual(self.client.get(reverse("compras:cotacao_lista")).status_code,403)
+        self.permissao("view_processocotacao")
+        self.assertEqual(self.client.get(reverse("compras:cotacao_lista")).status_code,200)
+        self.assertContains(self.client.get(reverse("compras:cotacao_detalhe",args=[self.processo.pk])),self.processo.identificacao)

@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from comercial.models import PropostaItem
 from financeiro.models import CentroCusto, Empresa, PlanoConta
+from pessoas.models import Pessoa
 
 
 class SolicitacaoCompra(models.Model):
@@ -165,3 +166,177 @@ class HistoricoSolicitacaoCompra(models.Model):
 
     def get_status_anterior_display(self):
         return dict(SolicitacaoCompra.Status.choices).get(self.status_anterior, self.status_anterior)
+
+
+class ProcessoCotacao(models.Model):
+    class Status(models.TextChoices):
+        RASCUNHO = "RASCUNHO", "Rascunho"
+        EM_ANDAMENTO = "EM_ANDAMENTO", "Em andamento"
+        CONCLUIDA = "CONCLUIDA", "Concluída"
+        CANCELADA = "CANCELADA", "Cancelada"
+
+    empresa = models.ForeignKey(Empresa, on_delete=models.PROTECT, related_name="processos_cotacao")
+    responsavel = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="processos_cotacao_responsavel")
+    data_abertura = models.DateField(default=timezone.localdate)
+    data_limite = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RASCUNHO)
+    observacao = models.TextField(blank=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="processos_cotacao_criados")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-data_abertura", "-id"]
+        permissions = [
+            ("realizar_cotacao", "Pode registrar cotações de fornecedores"),
+            ("selecionar_fornecedor", "Pode selecionar fornecedor vencedor"),
+            ("cancelar_cotacao", "Pode cancelar processo de cotação"),
+        ]
+
+    @property
+    def identificacao(self):
+        return f"COT-{self.pk:05d}" if self.pk else "Nova cotação"
+
+    def __str__(self):
+        return self.identificacao
+
+
+class ProcessoCotacaoItem(models.Model):
+    processo = models.ForeignKey(ProcessoCotacao, on_delete=models.CASCADE, related_name="itens")
+    solicitacao_item = models.ForeignKey(SolicitacaoCompraItem, on_delete=models.PROTECT, related_name="itens_processo_cotacao")
+    quantidade_cotada = models.DecimalField(max_digits=15, decimal_places=4)
+    unidade = models.CharField(max_length=20)
+    observacao = models.TextField(blank=True)
+    nao_comprar = models.BooleanField(default=False)
+    justificativa_nao_compra = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [models.UniqueConstraint(fields=["processo", "solicitacao_item"], name="uq_item_solicitacao_por_processo_cotacao")]
+
+    def clean(self):
+        errors = {}
+        if self.quantidade_cotada is not None and self.quantidade_cotada <= 0:
+            errors["quantidade_cotada"] = "A quantidade cotada deve ser positiva."
+        if self.solicitacao_item_id:
+            solicitacao = self.solicitacao_item.solicitacao
+            if solicitacao.empresa_id != self.processo.empresa_id:
+                errors["solicitacao_item"] = "O item deve pertencer à mesma empresa do processo."
+            if solicitacao.status not in {SolicitacaoCompra.Status.ABERTA, SolicitacaoCompra.Status.EM_COTACAO}:
+                errors["solicitacao_item"] = "O item deve pertencer a uma solicitação aberta ou em cotação."
+            if self.solicitacao_item.cancelado:
+                errors["solicitacao_item"] = "Item cancelado não pode entrar em cotação."
+        if self.nao_comprar and not self.justificativa_nao_compra.strip():
+            errors["justificativa_nao_compra"] = "Informe a justificativa para não comprar o item."
+        if self.processo_id and ProcessoCotacao.objects.filter(pk=self.processo_id, status__in=[ProcessoCotacao.Status.CONCLUIDA, ProcessoCotacao.Status.CANCELADA]).exists():
+            errors["processo"] = "O processo está congelado."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean(); return super().save(*args, **kwargs)
+
+
+class CotacaoFornecedor(models.Model):
+    class Status(models.TextChoices):
+        PENDENTE = "PENDENTE", "Pendente"
+        RECEBIDA = "RECEBIDA", "Recebida"
+        INVALIDADA = "INVALIDADA", "Invalidada"
+        CANCELADA = "CANCELADA", "Cancelada"
+
+    processo = models.ForeignKey(ProcessoCotacao, on_delete=models.CASCADE, related_name="cotacoes_fornecedor")
+    fornecedor = models.ForeignKey(Pessoa, on_delete=models.PROTECT, related_name="cotacoes_compras")
+    nome_contato = models.CharField(max_length=150, blank=True)
+    telefone = models.CharField(max_length=30, blank=True)
+    email = models.EmailField(blank=True)
+    data_cotacao = models.DateField(default=timezone.localdate)
+    validade = models.DateField(null=True, blank=True)
+    prazo_entrega = models.CharField(max_length=150, blank=True)
+    condicao_pagamento = models.TextField(blank=True)
+    tipo_frete = models.CharField(max_length=50, blank=True)
+    valor_frete = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    desconto_global = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    impostos_globais = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    impostos_compoem_custo = models.BooleanField(default=True)
+    outras_despesas = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    disponibilidade = models.CharField(max_length=150, blank=True)
+    observacao = models.TextField(blank=True)
+    status = models.CharField(max_length=15, choices=Status.choices, default=Status.PENDENTE)
+    registrada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="cotacoes_fornecedor_registradas")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["fornecedor__razao_social", "id"]
+        constraints = [models.UniqueConstraint(fields=["processo", "fornecedor"], name="uq_fornecedor_por_processo_cotacao")]
+
+    def clean(self):
+        errors = {}
+        if self.fornecedor_id and (not self.fornecedor.ativo or self.fornecedor.classificacao not in {Pessoa.Classificacao.FORNECEDOR, Pessoa.Classificacao.AMBOS}):
+            errors["fornecedor"] = "Selecione um fornecedor ativo."
+        for campo in ("valor_frete", "desconto_global", "impostos_globais", "outras_despesas"):
+            if getattr(self, campo) < 0: errors[campo] = "O valor não pode ser negativo."
+        if self.processo_id and ProcessoCotacao.objects.filter(pk=self.processo_id, status__in=[ProcessoCotacao.Status.CONCLUIDA, ProcessoCotacao.Status.CANCELADA]).exists():
+            errors["processo"] = "O processo está congelado."
+        if errors: raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean(); return super().save(*args, **kwargs)
+
+
+class CotacaoFornecedorItem(models.Model):
+    cotacao = models.ForeignKey(CotacaoFornecedor, on_delete=models.CASCADE, related_name="itens")
+    processo_item = models.ForeignKey(ProcessoCotacaoItem, on_delete=models.PROTECT, related_name="ofertas")
+    quantidade_ofertada = models.DecimalField(max_digits=15, decimal_places=4)
+    unidade = models.CharField(max_length=20)
+    preco_unitario = models.DecimalField(max_digits=15, decimal_places=4)
+    preco_total = models.DecimalField(max_digits=15, decimal_places=2, editable=False, default=0)
+    desconto_item = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    impostos_item = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    prazo_item = models.CharField(max_length=150, blank=True)
+    disponivel = models.BooleanField(default=True)
+    marca_modelo = models.CharField(max_length=150, blank=True)
+    observacao = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["processo_item", "cotacao"]
+        constraints = [models.UniqueConstraint(fields=["cotacao", "processo_item"], name="uq_oferta_item_por_fornecedor")]
+
+    def clean(self):
+        errors = {}
+        if self.processo_item_id and self.cotacao_id and self.processo_item.processo_id != self.cotacao.processo_id:
+            errors["processo_item"] = "A oferta deve pertencer ao mesmo processo da cotação."
+        if self.quantidade_ofertada is not None and self.quantidade_ofertada <= 0: errors["quantidade_ofertada"] = "Informe quantidade positiva."
+        if self.preco_unitario is not None and self.preco_unitario < 0: errors["preco_unitario"] = "O preço não pode ser negativo."
+        if self.desconto_item < 0 or self.impostos_item < 0: errors["desconto_item"] = "Desconto e impostos não podem ser negativos."
+        if self.cotacao_id and ProcessoCotacao.objects.filter(pk=self.cotacao.processo_id, status__in=[ProcessoCotacao.Status.CONCLUIDA, ProcessoCotacao.Status.CANCELADA]).exists(): errors["cotacao"] = "O processo está congelado."
+        self.preco_total = (self.quantidade_ofertada * self.preco_unitario).quantize(Decimal("0.01")) if self.quantidade_ofertada is not None and self.preco_unitario is not None else 0
+        if errors: raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean(); return super().save(*args, **kwargs)
+
+
+class EscolhaCotacaoItem(models.Model):
+    processo_item = models.OneToOneField(ProcessoCotacaoItem, on_delete=models.CASCADE, related_name="escolha")
+    oferta_escolhida = models.ForeignKey(CotacaoFornecedorItem, on_delete=models.PROTECT, related_name="escolhas")
+    escolhido_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="escolhas_cotacao")
+    escolhido_em = models.DateTimeField(auto_now_add=True)
+    justificativa = models.TextField(blank=True)
+    era_menor_preco = models.BooleanField(default=False)
+    observacao = models.TextField(blank=True)
+
+    def __str__(self): return f"{self.processo_item} — {self.oferta_escolhida.cotacao.fornecedor}"
+
+
+class HistoricoProcessoCotacao(models.Model):
+    processo = models.ForeignKey(ProcessoCotacao, on_delete=models.CASCADE, related_name="historico")
+    status_anterior = models.CharField(max_length=20, blank=True)
+    status_novo = models.CharField(max_length=20, choices=ProcessoCotacao.Status.choices)
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    observacao = models.TextField(blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta: ordering = ["-criado_em", "-id"]
+
+    def get_status_anterior_display(self): return dict(ProcessoCotacao.Status.choices).get(self.status_anterior, self.status_anterior)

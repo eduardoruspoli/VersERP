@@ -3,8 +3,10 @@ from django.forms import BaseInlineFormSet, inlineformset_factory
 
 from comercial.models import PropostaItem
 from financeiro.models import CentroCusto, Empresa
+from pessoas.models import Pessoa
 
-from .models import SolicitacaoCompra, SolicitacaoCompraItem
+from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
+                     ProcessoCotacaoItem, SolicitacaoCompra, SolicitacaoCompraItem)
 
 
 class SolicitacaoCompraForm(forms.ModelForm):
@@ -99,3 +101,44 @@ SolicitacaoCompraItemFormSet = inlineformset_factory(
 
 class MotivoCancelamentoForm(forms.Form):
     motivo = forms.CharField(label="Motivo do cancelamento", min_length=3, widget=forms.Textarea(attrs={"class": "form-control", "rows": 4}))
+
+
+class ProcessoCotacaoForm(forms.ModelForm):
+    itens_solicitacao = forms.ModelMultipleChoiceField(queryset=SolicitacaoCompraItem.objects.none(), label="Itens de solicitações abertas", widget=forms.CheckboxSelectMultiple)
+    class Meta:
+        model = ProcessoCotacao
+        fields = ["empresa", "responsavel", "data_abertura", "data_limite", "observacao"]
+        widgets = {"empresa": forms.Select(attrs={"class":"form-select"}), "responsavel": forms.Select(attrs={"class":"form-select"}), "data_abertura": forms.DateInput(attrs={"class":"form-control","type":"date"}), "data_limite": forms.DateInput(attrs={"class":"form-control","type":"date"}), "observacao": forms.Textarea(attrs={"class":"form-control","rows":3})}
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        empresa_id = self.data.get("empresa") or getattr(self.instance, "empresa_id", None)
+        qs = SolicitacaoCompraItem.objects.filter(cancelado=False, solicitacao__status__in=[SolicitacaoCompra.Status.ABERTA, SolicitacaoCompra.Status.EM_COTACAO]).select_related("solicitacao__obra")
+        if empresa_id: qs = qs.filter(solicitacao__empresa_id=empresa_id)
+        self.fields["itens_solicitacao"].queryset = qs
+
+
+class CotacaoFornecedorForm(forms.ModelForm):
+    class Meta:
+        model = CotacaoFornecedor
+        exclude = ["processo", "registrada_por"]
+        widgets = {name: forms.TextInput(attrs={"class":"form-control"}) for name in ["nome_contato","telefone","email","prazo_entrega","tipo_frete","disponibilidade"]}
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["fornecedor"].queryset = Pessoa.objects.filter(ativo=True, classificacao__in=[Pessoa.Classificacao.FORNECEDOR, Pessoa.Classificacao.AMBOS])
+        for field in self.fields.values(): field.widget.attrs.setdefault("class", "form-select" if isinstance(field.widget, forms.Select) else "form-control")
+
+
+class CotacaoFornecedorItemForm(forms.ModelForm):
+    class Meta:
+        model = CotacaoFornecedorItem
+        exclude = ["cotacao", "preco_total"]
+    def __init__(self, *args, cotacao=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if cotacao: self.fields["processo_item"].queryset = cotacao.processo.itens.all()
+        for field in self.fields.values(): field.widget.attrs.setdefault("class", "form-select" if isinstance(field.widget, forms.Select) else "form-control")
+
+
+class EscolhaOfertaForm(forms.Form):
+    oferta = forms.IntegerField(widget=forms.HiddenInput)
+    justificativa = forms.CharField(required=False, widget=forms.Textarea(attrs={"class":"form-control","rows":2}))
+    observacao = forms.CharField(required=False, widget=forms.Textarea(attrs={"class":"form-control","rows":2}))

@@ -1,6 +1,8 @@
 from django.contrib import admin
 
-from .models import HistoricoSolicitacaoCompra, SolicitacaoCompra, SolicitacaoCompraItem
+from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoItem,
+                     HistoricoProcessoCotacao, HistoricoSolicitacaoCompra,
+                     ProcessoCotacao, ProcessoCotacaoItem, SolicitacaoCompra, SolicitacaoCompraItem)
 
 
 class SolicitacaoCompraItemInline(admin.TabularInline):
@@ -16,3 +18,5 @@ class SolicitacaoCompraAdmin(admin.ModelAdmin):
 
 
 admin.site.register(HistoricoSolicitacaoCompra)
+admin.site.register([ProcessoCotacao, ProcessoCotacaoItem, CotacaoFornecedor,
+                     CotacaoFornecedorItem, EscolhaCotacaoItem, HistoricoProcessoCotacao])
