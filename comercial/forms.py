@@ -66,3 +66,11 @@ class PropostaTributoForm(ClasseCssMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.aplicar_classes()
+
+
+class MotivoStatusForm(ClasseCssMixin, forms.Form):
+    motivo = forms.CharField(label="Motivo", widget=forms.Textarea(attrs={"rows": 4}), min_length=3)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.aplicar_classes()

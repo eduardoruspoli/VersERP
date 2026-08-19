@@ -2,9 +2,12 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
+
+from financeiro.models import CentroCusto
 
 from .models import (
     ModeloConteudoProposta,
@@ -18,9 +21,37 @@ from .models import (
 
 CENTAVO = Decimal("0.01")
 
+TRANSICOES_PERMITIDAS = {
+    Proposta.Status.RASCUNHO: {Proposta.Status.ENVIADA, Proposta.Status.CANCELADA},
+    Proposta.Status.EM_REVISAO: {Proposta.Status.ENVIADA, Proposta.Status.CANCELADA},
+    Proposta.Status.ENVIADA: {Proposta.Status.EM_NEGOCIACAO, Proposta.Status.APROVADA, Proposta.Status.REJEITADA, Proposta.Status.CANCELADA, Proposta.Status.EM_REVISAO},
+    Proposta.Status.EM_NEGOCIACAO: {Proposta.Status.APROVADA, Proposta.Status.REJEITADA, Proposta.Status.CANCELADA, Proposta.Status.EM_REVISAO},
+    Proposta.Status.APROVADA: {Proposta.Status.CANCELADA},
+    Proposta.Status.REJEITADA: set(),
+    Proposta.Status.CANCELADA: set(),
+}
+
 
 def _dinheiro(valor):
     return Decimal(valor or 0).quantize(CENTAVO, rounding=ROUND_HALF_UP)
+
+
+def _validar_transicao(proposta, novo_status):
+    if novo_status not in TRANSICOES_PERMITIDAS.get(proposta.status, set()):
+        raise ValidationError(f"Não é permitido alterar a proposta de {proposta.get_status_display()} para {dict(Proposta.Status.choices)[novo_status]}.")
+
+
+def _exigir_permissao(usuario, permissao):
+    if not usuario or not usuario.has_perm(f"comercial.{permissao}"):
+        raise PermissionDenied("Você não possui permissão para esta ação.")
+
+
+def _registrar_status(proposta, novo_status, usuario, observacao=""):
+    anterior = proposta.status
+    _validar_transicao(proposta, novo_status)
+    proposta.status = novo_status
+    proposta.save(update_fields=["status", "atualizado_em"])
+    PropostaHistoricoStatus.objects.create(proposta=proposta, status_anterior=anterior, status_novo=novo_status, usuario=usuario, observacao=observacao)
 
 
 def calcular_precificacao(revisao):
@@ -84,6 +115,7 @@ def enviar_proposta(revisao, usuario=None):
     revisao = PropostaRevisao.objects.select_for_update().select_related("proposta__empresa", "proposta__cliente").get(pk=revisao.pk)
     if revisao.congelada:
         raise ValidationError("Esta revisão já foi enviada.")
+    _validar_transicao(revisao.proposta, Proposta.Status.ENVIADA)
     calculo = calcular_precificacao(revisao)
     revisao.preco_venda_final = calculo["preco_final"]
     validar_fechamento_publico(revisao)
@@ -95,11 +127,7 @@ def enviar_proposta(revisao, usuario=None):
     revisao.enviada_em = timezone.now()
     revisao.congelada = True
     revisao.save()
-    proposta = revisao.proposta
-    anterior = proposta.status
-    proposta.status = Proposta.Status.ENVIADA
-    proposta.save(update_fields=["status", "atualizado_em"])
-    PropostaHistoricoStatus.objects.create(proposta=proposta, status_anterior=anterior, status_novo=proposta.status, usuario=usuario)
+    _registrar_status(revisao.proposta, Proposta.Status.ENVIADA, usuario)
     return revisao
 
 
@@ -109,6 +137,7 @@ def criar_nova_revisao(revisao, usuario=None):
     if not origem.congelada:
         raise ValidationError("Envie a revisão atual antes de criar uma nova.")
     proposta = origem.proposta
+    _validar_transicao(proposta, Proposta.Status.EM_REVISAO)
     novo_numero = (proposta.revisoes.aggregate(maximo=Max("numero"))["maximo"] or 0) + 1
     campos = [f.name for f in PropostaRevisao._meta.fields if f.name not in {"id", "numero", "congelada", "enviada_em", "criado_em", "criado_por", "empresa_nome_snapshot", "empresa_documento_snapshot", "cliente_nome_snapshot", "cliente_documento_snapshot"}]
     dados = {campo: getattr(origem, campo) for campo in campos if campo != "proposta"}
@@ -119,9 +148,66 @@ def criar_nova_revisao(revisao, usuario=None):
             objeto.revisao = nova
             objeto.save()
     proposta.revisao_atual = novo_numero
-    proposta.status = Proposta.Status.EM_REVISAO
-    proposta.save(update_fields=["revisao_atual", "status", "atualizado_em"])
+    proposta.save(update_fields=["revisao_atual", "atualizado_em"])
+    _registrar_status(proposta, Proposta.Status.EM_REVISAO, usuario, f"Criada revisão {novo_numero}.")
     return nova
+
+
+@transaction.atomic
+def colocar_em_negociacao(proposta, usuario):
+    proposta = Proposta.objects.select_for_update().get(pk=proposta.pk)
+    revisao = proposta.revisoes.get(numero=proposta.revisao_atual)
+    if not revisao.congelada:
+        raise ValidationError("A revisão atual precisa estar enviada e congelada.")
+    _registrar_status(proposta, Proposta.Status.EM_NEGOCIACAO, usuario)
+    return proposta
+
+
+@transaction.atomic
+def aprovar_proposta(proposta, usuario):
+    _exigir_permissao(usuario, "aprovar_proposta")
+    _exigir_permissao(usuario, "criar_obra_proposta")
+    proposta = Proposta.objects.select_for_update().select_related("empresa", "cliente", "centro_custo").get(pk=proposta.pk)
+    _validar_transicao(proposta, Proposta.Status.APROVADA)
+    revisao = proposta.revisoes.select_for_update().get(numero=proposta.revisao_atual)
+    if not revisao.congelada or not revisao.enviada_em:
+        raise ValidationError("Somente uma revisão enviada e congelada pode ser aprovada.")
+    if revisao.preco_venda_final <= 0:
+        raise ValidationError("O valor final da revisão deve ser positivo.")
+    if not revisao.valida_ate or revisao.valida_ate < timezone.localdate():
+        raise ValidationError("A revisão está fora da validade e não pode ser aprovada.")
+    if proposta.centro_custo_id:
+        raise ValidationError("Esta proposta já possui uma obra vinculada.")
+    if CentroCusto.objects.select_for_update().filter(empresa=proposta.empresa, codigo=proposta.codigo).exists():
+        raise ValidationError(f"Já existe uma obra com o código {proposta.codigo} nesta empresa. A aprovação foi bloqueada sem realizar vínculo automático.")
+    obra = CentroCusto.objects.create(empresa=proposta.empresa, cliente=proposta.cliente, codigo=proposta.codigo, nome=revisao.nome_servico, descricao=f"Obra criada a partir da proposta {proposta.codigo}, revisão {revisao.numero}.", ativo=True)
+    proposta.centro_custo = obra
+    proposta.revisao_aprovada = revisao
+    proposta.aprovada_por = usuario
+    proposta.aprovada_em = timezone.now()
+    proposta.save(update_fields=["centro_custo", "revisao_aprovada", "aprovada_por", "aprovada_em", "atualizado_em"])
+    _registrar_status(proposta, Proposta.Status.APROVADA, usuario, f"Obra {obra.codigo} criada e vinculada.")
+    return proposta, obra
+
+
+@transaction.atomic
+def rejeitar_proposta(proposta, usuario, motivo):
+    _exigir_permissao(usuario, "rejeitar_proposta")
+    if not (motivo or "").strip():
+        raise ValidationError("Informe o motivo da rejeição.")
+    proposta = Proposta.objects.select_for_update().get(pk=proposta.pk)
+    _registrar_status(proposta, Proposta.Status.REJEITADA, usuario, motivo.strip())
+    return proposta
+
+
+@transaction.atomic
+def cancelar_proposta(proposta, usuario, motivo):
+    _exigir_permissao(usuario, "cancelar_proposta")
+    if not (motivo or "").strip():
+        raise ValidationError("Informe o motivo do cancelamento.")
+    proposta = Proposta.objects.select_for_update().get(pk=proposta.pk)
+    _registrar_status(proposta, Proposta.Status.CANCELADA, usuario, motivo.strip())
+    return proposta
 
 
 def montar_contexto_publico_proposta(revisao):

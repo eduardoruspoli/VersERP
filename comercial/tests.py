@@ -1,15 +1,18 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied
 from django.test import TestCase
 from django.urls import reverse
+from unittest.mock import patch
 
-from financeiro.models import Empresa
+from financeiro.models import CentroCusto, Empresa
 from pessoas.models import Pessoa
 
 from .models import ModeloConteudoProposta, Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
-from .services import calcular_precificacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, validar_fechamento_publico
+from .services import aprovar_proposta, calcular_precificacao, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta, validar_fechamento_publico
 
 
 class ComercialBase(TestCase):
@@ -149,3 +152,113 @@ class ViewsPropostaTests(ComercialBase):
         resposta = self.client.post(reverse("comercial:proposta_criar"), {"empresa": self.empresa.pk, "cliente": self.cliente.pk, "nome_servico": "Nova tela", "modelo": ""})
         self.assertEqual(resposta.status_code, 302)
         self.assertTrue(Proposta.objects.filter(revisoes__nome_servico="Nova tela").exists())
+
+
+class WorkflowPropostaTests(ComercialBase):
+    def conceder(self, *codenames):
+        self.usuario.user_permissions.add(*Permission.objects.filter(content_type__app_label="comercial", codename__in=codenames))
+
+    def enviar_valida(self):
+        self.item()
+        self.revisao.percentual_formacao = Decimal("50")
+        self.revisao.save()
+        self.linha("150")
+        return enviar_proposta(self.revisao, self.usuario)
+
+    def permitir_aprovacao(self):
+        self.conceder("aprovar_proposta", "criar_obra_proposta")
+
+    def test_transicao_enviada_para_negociacao(self):
+        self.enviar_valida()
+        colocar_em_negociacao(self.proposta, self.usuario)
+        self.proposta.refresh_from_db()
+        self.assertEqual(self.proposta.status, Proposta.Status.EM_NEGOCIACAO)
+
+    def test_transicao_invalida_rascunho_para_negociacao(self):
+        with self.assertRaises(ValidationError):
+            colocar_em_negociacao(self.proposta, self.usuario)
+
+    def test_aprovacao_cria_obra_e_metadados(self):
+        revisao = self.enviar_valida(); self.permitir_aprovacao()
+        proposta, obra = aprovar_proposta(self.proposta, self.usuario)
+        self.assertEqual(obra.empresa, self.empresa)
+        self.assertEqual(obra.cliente, self.cliente)
+        self.assertEqual(obra.codigo, proposta.codigo)
+        self.assertEqual(obra.nome, revisao.nome_servico)
+        self.assertTrue(obra.ativo)
+        self.assertEqual(proposta.revisao_aprovada, revisao)
+        self.assertEqual(proposta.aprovada_por, self.usuario)
+        self.assertIsNotNone(proposta.aprovada_em)
+
+    def test_aprovacao_duplicada_e_bloqueada(self):
+        self.enviar_valida(); self.permitir_aprovacao(); aprovar_proposta(self.proposta, self.usuario)
+        with self.assertRaises(ValidationError):
+            aprovar_proposta(self.proposta, self.usuario)
+        self.assertEqual(CentroCusto.objects.filter(empresa=self.empresa, codigo=self.proposta.codigo).count(), 1)
+
+    def test_colisao_de_codigo_bloqueia_sem_vincular(self):
+        self.enviar_valida(); self.permitir_aprovacao()
+        CentroCusto.objects.create(empresa=self.empresa, codigo=self.proposta.codigo, nome="Obra preexistente")
+        with self.assertRaisesMessage(ValidationError, "aprovação foi bloqueada"):
+            aprovar_proposta(self.proposta, self.usuario)
+        self.proposta.refresh_from_db()
+        self.assertIsNone(self.proposta.centro_custo_id)
+        self.assertEqual(self.proposta.status, Proposta.Status.ENVIADA)
+
+    def test_rollback_remove_obra_e_aprovacao_se_historico_falhar(self):
+        self.enviar_valida(); self.permitir_aprovacao()
+        with patch("comercial.services.PropostaHistoricoStatus.objects.create", side_effect=RuntimeError("falha")):
+            with self.assertRaises(RuntimeError):
+                aprovar_proposta(self.proposta, self.usuario)
+        self.proposta.refresh_from_db()
+        self.assertEqual(self.proposta.status, Proposta.Status.ENVIADA)
+        self.assertIsNone(self.proposta.centro_custo_id)
+        self.assertFalse(CentroCusto.objects.filter(empresa=self.empresa, codigo=self.proposta.codigo).exists())
+
+    def test_rejeicao_exige_motivo_e_registra_historico(self):
+        self.enviar_valida(); self.conceder("rejeitar_proposta")
+        with self.assertRaises(ValidationError):
+            rejeitar_proposta(self.proposta, self.usuario, "")
+        rejeitar_proposta(self.proposta, self.usuario, "Cliente não aprovou o prazo")
+        evento = self.proposta.historico_status.first()
+        self.assertEqual(evento.status_novo, Proposta.Status.REJEITADA)
+        self.assertEqual(evento.observacao, "Cliente não aprovou o prazo")
+
+    def test_cancelamento_preserva_obra(self):
+        self.enviar_valida(); self.permitir_aprovacao(); self.conceder("cancelar_proposta")
+        proposta, obra = aprovar_proposta(self.proposta, self.usuario)
+        cancelar_proposta(proposta, self.usuario, "Cancelada após aprovação")
+        obra.refresh_from_db(); proposta.refresh_from_db()
+        self.assertTrue(obra.ativo)
+        self.assertEqual(proposta.centro_custo, obra)
+        self.assertEqual(proposta.status, Proposta.Status.CANCELADA)
+
+    def test_acoes_exigem_permissoes_backend(self):
+        self.enviar_valida()
+        with self.assertRaises(PermissionDenied): aprovar_proposta(self.proposta, self.usuario)
+        with self.assertRaises(PermissionDenied): rejeitar_proposta(self.proposta, self.usuario, "Motivo")
+        with self.assertRaises(PermissionDenied): cancelar_proposta(self.proposta, self.usuario, "Motivo")
+
+    def test_aprovar_exige_as_duas_permissoes(self):
+        self.enviar_valida(); self.conceder("aprovar_proposta")
+        with self.assertRaises(PermissionDenied):
+            aprovar_proposta(self.proposta, self.usuario)
+
+    def test_revisao_nao_congelada_nao_aprova(self):
+        self.permitir_aprovacao()
+        self.proposta.status = Proposta.Status.ENVIADA; self.proposta.save()
+        with self.assertRaises(ValidationError):
+            aprovar_proposta(self.proposta, self.usuario)
+
+    def test_historico_guarda_usuario_data_e_status_anterior(self):
+        self.enviar_valida(); colocar_em_negociacao(self.proposta, self.usuario)
+        evento = self.proposta.historico_status.first()
+        self.assertEqual(evento.status_anterior, Proposta.Status.ENVIADA)
+        self.assertEqual(evento.status_novo, Proposta.Status.EM_NEGOCIACAO)
+        self.assertEqual(evento.usuario, self.usuario)
+        self.assertIsNotNone(evento.criado_em)
+
+    def test_view_aprovacao_retorna_403_sem_permissao(self):
+        self.enviar_valida(); self.client.force_login(self.usuario)
+        resposta = self.client.post(reverse("comercial:proposta_aprovar", args=[self.proposta.pk]))
+        self.assertEqual(resposta.status_code, 403)

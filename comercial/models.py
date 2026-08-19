@@ -51,12 +51,21 @@ class Proposta(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RASCUNHO)
     revisao_atual = models.PositiveIntegerField(default=0)
     centro_custo = models.OneToOneField("financeiro.CentroCusto", on_delete=models.PROTECT, null=True, blank=True, related_name="proposta_origem")
+    revisao_aprovada = models.ForeignKey("PropostaRevisao", on_delete=models.PROTECT, null=True, blank=True, related_name="propostas_aprovadas")
+    aprovada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="propostas_aprovadas")
+    aprovada_em = models.DateTimeField(null=True, blank=True)
     responsavel_interno = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="propostas_responsavel")
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-criado_em"]
+        permissions = [
+            ("aprovar_proposta", "Pode aprovar proposta"),
+            ("rejeitar_proposta", "Pode rejeitar proposta"),
+            ("cancelar_proposta", "Pode cancelar proposta"),
+            ("criar_obra_proposta", "Pode criar obra ao aprovar proposta"),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["empresa", "codigo"], name="uq_proposta_empresa_codigo"),
             models.UniqueConstraint(fields=["empresa", "numero_sequencial"], name="uq_proposta_empresa_numero"),
@@ -234,3 +243,6 @@ class PropostaHistoricoStatus(models.Model):
 
     class Meta:
         ordering = ["-criado_em"]
+
+    def get_status_anterior_display(self):
+        return dict(Proposta.Status.choices).get(self.status_anterior, self.status_anterior)

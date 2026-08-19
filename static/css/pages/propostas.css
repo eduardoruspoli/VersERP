@@ -4,6 +4,10 @@
 .proposta-resumo span { display: block; color: #64748b; font-size: .8rem; }
 .proposta-resumo strong { font-size: 1.2rem; }
 .proposta-congelada { color: #166534; font-weight: 600; }
+.proposta-fluxo-resumo { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
+.proposta-fluxo-resumo > div { border-left: 3px solid #17365d; background: #f8fafc; padding: .75rem; }
+.proposta-fluxo-resumo span { display: block; color: #64748b; font-size: .78rem; }
+.proposta-acoes { flex-wrap: wrap; }
 
 .documento-proposta { margin: 0; background: #e5e7eb; color: #1f2937; font: 14px/1.5 Arial, sans-serif; }
 .folha-a4 { box-sizing: border-box; width: 210mm; min-height: 297mm; margin: 12mm auto; padding: 16mm; background: #fff; }
@@ -29,6 +33,7 @@
 
 @media (max-width: 900px) {
     .proposta-resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .proposta-fluxo-resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .proposta-filtro, .proposta-cabecalho { flex-direction: column; }
     .proposta-cabecalho div:last-child { text-align: left; }
     .folha-a4 { width: 100%; min-height: auto; margin: 0; padding: 20px; }
@@ -37,6 +42,7 @@
 
 @media (max-width: 560px) {
     .proposta-resumo { grid-template-columns: 1fr; }
+    .proposta-fluxo-resumo { grid-template-columns: 1fr; }
 }
 
 @page { size: A4; margin: 12mm; }
