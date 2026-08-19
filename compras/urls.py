@@ -5,6 +5,20 @@ from . import views
 app_name = "compras"
 
 urlpatterns = [
+    path("documentos/",views.documento_lista,name="documento_lista"),
+    path("documentos/novo/",views.documento_criar,name="documento_criar"),
+    path("documentos/<int:pk>/",views.documento_detalhe,name="documento_detalhe"),
+    path("documentos/<int:pk>/editar/",views.documento_editar,name="documento_editar"),
+    path("documentos/<int:pk>/itens/novo/",views.documento_item,name="documento_item"),
+    path("documentos/<int:pk>/itens/<int:item_pk>/editar/",views.documento_item,name="documento_item_editar"),
+    path("documentos/<int:pk>/pedidos/vincular/",views.documento_pedido,name="documento_pedido"),
+    path("documentos/<int:pk>/itens/<int:item_pk>/recebimentos/vincular/",views.documento_recebimento,name="documento_recebimento"),
+    path("documentos/<int:pk>/conferencia/iniciar/",views.documento_iniciar_conferencia,name="documento_iniciar_conferencia"),
+    path("documentos/<int:pk>/conferencia/concluir/",views.documento_conferir,name="documento_conferir"),
+    path("documentos/<int:pk>/conferencia/reabrir/",views.documento_reabrir,name="documento_reabrir"),
+    path("documentos/<int:pk>/cancelar/",views.documento_cancelar,name="documento_cancelar"),
+    path("documentos/<int:pk>/divergencias/nova/",views.documento_divergencia,name="documento_divergencia"),
+    path("documentos/divergencias/<int:pk>/resolver/",views.documento_divergencia_resolver,name="documento_divergencia_resolver"),
     path("previsto-comprado/",views.previsto_comprado,name="previsto_comprado"),
     path("obras/<int:obra_pk>/previsto-comprado/",views.previsto_comprado,name="previsto_comprado_obra"),
     path("obras/<int:obra_pk>/previsto-comprado/itens/<int:item_pk>/",views.previsto_comprado_item,name="previsto_comprado_item"),

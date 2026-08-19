@@ -5,7 +5,9 @@ from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoIte
                      HistoricoProcessoCotacao, HistoricoSolicitacaoCompra,
                      HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra,
                      ProcessoCotacao, ProcessoCotacaoItem, RecebimentoCompra,
-                     RecebimentoCompraItem, SolicitacaoCompra, SolicitacaoCompraItem)
+                     RecebimentoCompraItem, SolicitacaoCompra, SolicitacaoCompraItem,
+                     DocumentoCompra, DocumentoCompraItem, DocumentoCompraPedido,
+                     DocumentoCompraItemRecebimento, DivergenciaDocumentoCompra)
 
 
 class SolicitacaoCompraItemInline(admin.TabularInline):
@@ -25,3 +27,5 @@ admin.site.register([ProcessoCotacao, ProcessoCotacaoItem, CotacaoFornecedor,
                      CotacaoFornecedorItem, EscolhaCotacaoItem, HistoricoProcessoCotacao,
                      PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra, HistoricoPedidoCompra])
 admin.site.register([RecebimentoCompra,RecebimentoCompraItem,DivergenciaRecebimento])
+admin.site.register([DocumentoCompra, DocumentoCompraItem, DocumentoCompraPedido,
+                     DocumentoCompraItemRecebimento, DivergenciaDocumentoCompra])

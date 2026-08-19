@@ -6,7 +6,9 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from .models import (
-    CotacaoFornecedor, EscolhaCotacaoItem, HistoricoPedidoCompra, HistoricoProcessoCotacao,
+    CotacaoFornecedor, DocumentoCompra, DocumentoCompraItem, DocumentoCompraItemRecebimento,
+    DocumentoCompraPedido, DivergenciaDocumentoCompra, EscolhaCotacaoItem,
+    HistoricoPedidoCompra, HistoricoProcessoCotacao,
     DivergenciaRecebimento, HistoricoSolicitacaoCompra, PedidoCompra, PedidoCompraItem,
     PedidoItemAlocacaoObra, RecebimentoCompra, RecebimentoCompraItem,
     ProcessoCotacao, SolicitacaoCompra, SolicitacaoCompraItem,
@@ -431,3 +433,106 @@ def calcular_previsto_comprado(obra, *, tipo_origem="", status_pedido="", plano_
     previsto_total=sum((p.custo_total for p in previstos),Decimal("0")); solicitado_valor=sum((s.quantidade*(s.custo_unitario_previsto_snapshot or Decimal("0"))) for s in solicitacoes)
     resumo={"custo_previsto":previsto_total,"valor_solicitado":solicitado_valor,"valor_comprado":total_comprado,"valor_recebido":total_recebido,"economia_estouro":previsto_total-total_comprado,"compras_nao_previstas":sum((x["valor"] for x in nao_previstos),Decimal("0")),"itens_sem_compra":sum(1 for x in linhas if not x["compras"]),"pedidos_pendentes_recebimento":len(pedidos_pendentes),"percentual_orcamento_comprado":(total_comprado/previsto_total*100).quantize(CENTAVO) if previsto_total else None,"percentual_comprado_recebido":(total_recebido/total_comprado*100).quantize(CENTAVO) if total_comprado else None}
     return {"disponivel":True,"obra":obra,"proposta":proposta,"revisao":proposta.revisao_aprovada,"resumo":resumo,"itens_previstos":linhas,"nao_previstos":nao_previstos,"substituicoes":substituicoes,"pedidos":list(pedidos_relacionados.values()),"alertas":alertas}
+
+
+def validar_fechamento_documento(documento):
+    itens=list(documento.itens.all())
+    if not itens: raise ValidationError("Inclua ao menos um item no documento.")
+    campos={"valor_bruto":"valor_bruto","desconto":"desconto","frete":"frete_alocado","impostos":"impostos","outras_despesas":"outras_despesas","valor_total":"total"}
+    erros=[]
+    for cabecalho,item_campo in campos.items():
+        soma=sum((getattr(i,item_campo) for i in itens),Decimal("0")).quantize(CENTAVO)
+        if soma!=getattr(documento,cabecalho): erros.append(f"A soma de {cabecalho.replace('_',' ')} dos itens ({soma}) não fecha com o documento ({getattr(documento,cabecalho)}).")
+    pedidos_itens={i.pedido_item.pedido_id for i in itens if i.pedido_item_id}; pedidos_vinculados=set(documento.vinculos_pedidos.values_list("pedido_id",flat=True))
+    if pedidos_itens-pedidos_vinculados: erros.append("Todos os pedidos dos itens devem estar vinculados ao documento.")
+    if erros: raise ValidationError(erros)
+
+
+@transaction.atomic
+def vincular_recebimento_documento(documento_item,recebimento_item,quantidade):
+    documento_item=DocumentoCompraItem.objects.select_for_update().select_related("documento").get(pk=documento_item.pk)
+    recebimento_item=RecebimentoCompraItem.objects.select_for_update().select_related("recebimento","pedido_item__pedido").get(pk=recebimento_item.pk)
+    if documento_item.documento.status!=DocumentoCompra.Status.RASCUNHO: raise ValidationError("Somente documentos em rascunho aceitam vínculos.")
+    existente=DocumentoCompraItemRecebimento.objects.filter(documento_item=documento_item,recebimento_item=recebimento_item).first()
+    usado=DocumentoCompraItemRecebimento.objects.filter(recebimento_item=recebimento_item).exclude(pk=getattr(existente,"pk",None)).aggregate(total=Sum("quantidade_vinculada"))["total"] or Decimal("0")
+    quantidade=Decimal(quantidade)
+    if quantidade<=0 or usado+quantidade>recebimento_item.quantidade_aceita: raise ValidationError("A quantidade vinculada deve ser positiva e não pode superar o saldo aceito.")
+    objeto=existente or DocumentoCompraItemRecebimento(documento_item=documento_item,recebimento_item=recebimento_item)
+    objeto.quantidade_vinculada=quantidade; objeto.save(); return objeto
+
+
+def _criar_divergencia(documento,item,tipo,descricao,quantidade=None,valor=None):
+    existente=DivergenciaDocumentoCompra.objects.filter(documento=documento,documento_item=item,tipo=tipo,automatica=True).order_by("-id").first()
+    if existente: return existente
+    return DivergenciaDocumentoCompra.objects.create(documento=documento,documento_item=item,tipo=tipo,descricao=descricao,quantidade_afetada=quantidade,valor_afetado=valor,bloqueante=True,automatica=True)
+
+
+@transaction.atomic
+def detectar_divergencias_documento(documento,usuario):
+    documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    for item in documento.itens.select_related("pedido_item").prefetch_related("vinculos_recebimentos"):
+        pedido_item=item.pedido_item; vinculado=sum((v.quantidade_vinculada for v in item.vinculos_recebimentos.all()),Decimal("0"))
+        if not pedido_item or not item.vinculos_recebimentos.exists():
+            _criar_divergencia(documento,item,DivergenciaDocumentoCompra.Tipo.ITEM_SEM_VINCULO,"Item sem pedido ou recebimento confirmado vinculado.")
+            continue
+        if item.quantidade_faturada>vinculado: _criar_divergencia(documento,item,DivergenciaDocumentoCompra.Tipo.QUANTIDADE_MAIOR,"Quantidade faturada maior que a quantidade recebida vinculada.",item.quantidade_faturada-vinculado)
+        elif item.quantidade_faturada<vinculado: _criar_divergencia(documento,item,DivergenciaDocumentoCompra.Tipo.QUANTIDADE_MENOR,"Quantidade faturada menor que a quantidade recebida vinculada.",vinculado-item.quantidade_faturada)
+        if item.valor_unitario_faturado!=pedido_item.valor_unitario: _criar_divergencia(documento,item,DivergenciaDocumentoCompra.Tipo.PRECO,"Preço faturado diferente do preço negociado.",valor=(item.valor_unitario_faturado-pedido_item.valor_unitario).quantize(CENTAVO))
+        proporcao=item.quantidade_faturada/pedido_item.quantidade if pedido_item.quantidade else Decimal("0")
+        comparacoes=(("frete_alocado","frete_alocado",DivergenciaDocumentoCompra.Tipo.FRETE),("desconto","desconto",DivergenciaDocumentoCompra.Tipo.DESCONTO),("impostos","impostos",DivergenciaDocumentoCompra.Tipo.IMPOSTO))
+        for campo_doc,campo_pedido,tipo in comparacoes:
+            esperado=(getattr(pedido_item,campo_pedido)*proporcao).quantize(CENTAVO,ROUND_HALF_UP); informado=getattr(item,campo_doc)
+            if informado!=esperado: _criar_divergencia(documento,item,tipo,f"{tipo.label} em relação ao pedido proporcional.",valor=informado-esperado)
+    return documento.divergencias.filter(resolvida=False)
+
+
+def _atualizar_status_documento(documento,status,usuario,**campos):
+    valores={"status":status,**campos}; DocumentoCompra.objects.filter(pk=documento.pk).update(**valores)
+    documento.status=status
+    for campo,valor in campos.items(): setattr(documento,campo,valor)
+    return documento
+
+
+@transaction.atomic
+def iniciar_conferencia_documento(documento,usuario):
+    _exigir(usuario,"conferir_documento_compra")
+    documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    if documento.status!=DocumentoCompra.Status.RASCUNHO: raise ValidationError("Somente documentos em rascunho podem entrar em conferência.")
+    validar_fechamento_documento(documento); agora=timezone.now()
+    return _atualizar_status_documento(documento,DocumentoCompra.Status.EM_CONFERENCIA,usuario,enviado_conferencia_por=usuario,enviado_conferencia_em=agora)
+
+
+@transaction.atomic
+def concluir_conferencia_documento(documento,usuario):
+    _exigir(usuario,"conferir_documento_compra")
+    documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    if documento.status!=DocumentoCompra.Status.EM_CONFERENCIA: raise ValidationError("O documento não está em conferência.")
+    validar_fechamento_documento(documento); abertas=detectar_divergencias_documento(documento,usuario).filter(bloqueante=True).exists()
+    if abertas: return _atualizar_status_documento(documento,DocumentoCompra.Status.DIVERGENTE,usuario)
+    agora=timezone.now(); return _atualizar_status_documento(documento,DocumentoCompra.Status.CONFERIDO,usuario,conferido_por=usuario,conferido_em=agora)
+
+
+@transaction.atomic
+def reabrir_conferencia_documento(documento,usuario):
+    _exigir(usuario,"conferir_documento_compra"); documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    if documento.status!=DocumentoCompra.Status.DIVERGENTE: raise ValidationError("Somente documentos divergentes podem retornar à conferência.")
+    return _atualizar_status_documento(documento,DocumentoCompra.Status.EM_CONFERENCIA,usuario)
+
+
+@transaction.atomic
+def resolver_divergencia_documento(divergencia,usuario,solucao):
+    _exigir(usuario,"resolver_divergencia_documento")
+    if not solucao.strip(): raise ValidationError("Informe a solução da divergência.")
+    referencia=divergencia; divergencia=DivergenciaDocumentoCompra.objects.select_for_update().get(pk=divergencia.pk)
+    if divergencia.resolvida: raise ValidationError("A divergência já foi resolvida.")
+    agora=timezone.now(); DivergenciaDocumentoCompra.objects.filter(pk=divergencia.pk).update(resolvida=True,resolvida_por=usuario,resolvida_em=agora,solucao=solucao.strip())
+    referencia.resolvida=True; referencia.resolvida_por=usuario; referencia.resolvida_em=agora; referencia.solucao=solucao.strip(); return referencia
+
+
+@transaction.atomic
+def cancelar_documento_compra(documento,usuario,motivo):
+    _exigir(usuario,"cancelar_documento_compra")
+    if not motivo.strip(): raise ValidationError("Informe o motivo do cancelamento.")
+    documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    if documento.status==DocumentoCompra.Status.CANCELADO: raise ValidationError("O documento já está cancelado.")
+    agora=timezone.now(); return _atualizar_status_documento(documento,DocumentoCompra.Status.CANCELADO,usuario,cancelado_por=usuario,cancelado_em=agora,motivo_cancelamento=motivo.strip())

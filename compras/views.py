@@ -7,13 +7,16 @@ from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import (CotacaoFornecedorForm, CotacaoFornecedorItemForm, GerarPedidosCotacaoForm,
-                    DivergenciaRecebimentoForm, MotivoCancelamentoForm, PedidoCompraForm, PedidoCompraItemForm,
+                    DivergenciaDocumentoForm, DivergenciaRecebimentoForm, DocumentoCompraForm,
+                    DocumentoCompraItemForm, DocumentoCompraPedidoForm, DocumentoItemRecebimentoForm,
+                    MotivoCancelamentoForm, PedidoCompraForm, PedidoCompraItemForm,
                     PedidoItemAlocacaoForm, ProcessoCotacaoForm, SolicitacaoCompraForm,
                     SolicitacaoCompraItemFormSet, RecebimentoCompraForm,
                     RecebimentoCompraItemFormSet, SolucaoDivergenciaForm,
-                    PrevistoCompradoFiltroForm)
+                    PrevistoCompradoFiltroForm, SolucaoDivergenciaDocumentoForm)
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
-                     DivergenciaRecebimento, ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
+                     DivergenciaDocumentoCompra, DivergenciaRecebimento, DocumentoCompra,
+                     DocumentoCompraItem, DocumentoCompraPedido, ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, SolicitacaoCompra)
 from .models import RecebimentoCompra, RecebimentoCompraItem
 from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_solicitacao,
@@ -23,7 +26,10 @@ from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_so
                        selecionar_oferta, submeter_pedido, aprovar_pedido,
                        cancelar_recebimento, confirmar_recebimento,
                        quantidades_recebimento_pedido, resolver_divergencia,
-                       calcular_previsto_comprado)
+                       calcular_previsto_comprado, cancelar_documento_compra,
+                       concluir_conferencia_documento, iniciar_conferencia_documento,
+                       reabrir_conferencia_documento, resolver_divergencia_documento,
+                       validar_fechamento_documento, vincular_recebimento_documento)
 
 
 @login_required
@@ -404,3 +410,92 @@ def previsto_comprado_item(request,obra_pk,item_pk):
     obra=get_object_or_404(CentroCusto,pk=obra_pk); relatorio=calcular_previsto_comprado(obra); linha=next((x for x in relatorio.get("itens_previstos",[]) if x["previsto"].pk==item_pk),None)
     if not linha: return HttpResponseBadRequest("Item não pertence à revisão aprovada desta obra.")
     return render(request,"compras/previsto_comprado_item.html",{"relatorio":relatorio,"linha":linha})
+
+
+@login_required
+@permission_required("compras.view_documentocompra",raise_exception=True)
+def documento_lista(request):
+    qs=DocumentoCompra.objects.select_related("empresa","fornecedor").annotate(total_itens=Count("itens",distinct=True),total_pedidos=Count("vinculos_pedidos",distinct=True),divergencias_abertas=Count("divergencias",filter=Q(divergencias__resolvida=False),distinct=True))
+    for campo in ("empresa","fornecedor","tipo","status"):
+        if request.GET.get(campo): qs=qs.filter(**{f"{campo}_id" if campo in {"empresa","fornecedor"} else campo:request.GET[campo]})
+    return render(request,"compras/documento_lista.html",{"documentos":qs,"tipo_choices":DocumentoCompra.Tipo.choices,"status_choices":DocumentoCompra.Status.choices})
+
+
+def _salvar_documento(request,documento=None):
+    documento=documento or DocumentoCompra(criado_por=request.user); form=DocumentoCompraForm(request.POST or None,instance=documento)
+    if request.method=="POST" and form.is_valid(): documento=form.save(); messages.success(request,"Documento salvo em rascunho."); return redirect("compras:documento_detalhe",pk=documento.pk)
+    return render(request,"compras/documento_formulario.html",{"form":form,"documento":documento})
+
+@login_required
+@permission_required("compras.add_documentocompra",raise_exception=True)
+def documento_criar(request): return _salvar_documento(request)
+
+@login_required
+@permission_required("compras.change_documentocompra",raise_exception=True)
+def documento_editar(request,pk):
+    documento=get_object_or_404(DocumentoCompra,pk=pk)
+    if documento.status!=DocumentoCompra.Status.RASCUNHO: messages.error(request,"Somente rascunhos podem ser editados."); return redirect("compras:documento_detalhe",pk=pk)
+    return _salvar_documento(request,documento)
+
+@login_required
+@permission_required("compras.view_documentocompra",raise_exception=True)
+def documento_detalhe(request,pk):
+    documento=get_object_or_404(DocumentoCompra.objects.select_related("empresa","fornecedor","conferido_por","cancelado_por"),pk=pk)
+    return render(request,"compras/documento_detalhe.html",{"documento":documento,"itens":documento.itens.select_related("pedido_item__pedido","plano_conta").prefetch_related("vinculos_recebimentos__recebimento_item__recebimento"),"pedidos":documento.vinculos_pedidos.select_related("pedido"),"divergencias":documento.divergencias.select_related("documento_item","resolvida_por")})
+
+@login_required
+@permission_required("compras.change_documentocompra",raise_exception=True)
+def documento_item(request,pk,item_pk=None):
+    documento=get_object_or_404(DocumentoCompra,pk=pk,status=DocumentoCompra.Status.RASCUNHO); instancia=get_object_or_404(DocumentoCompraItem,pk=item_pk,documento=documento) if item_pk else None
+    form=DocumentoCompraItemForm(request.POST or None,instance=instancia,documento=documento)
+    if request.method=="POST" and form.is_valid(): obj=form.save(commit=False); obj.documento=documento; obj.save(); return redirect("compras:documento_detalhe",pk=pk)
+    return render(request,"compras/documento_item_formulario.html",{"form":form,"documento":documento})
+
+@login_required
+@permission_required("compras.change_documentocompra",raise_exception=True)
+def documento_pedido(request,pk):
+    documento=get_object_or_404(DocumentoCompra,pk=pk,status=DocumentoCompra.Status.RASCUNHO); form=DocumentoCompraPedidoForm(request.POST or None,documento=documento)
+    if request.method=="POST" and form.is_valid(): obj=form.save(commit=False); obj.documento=documento; obj.save(); return redirect("compras:documento_detalhe",pk=pk)
+    return render(request,"compras/documento_pedido_formulario.html",{"form":form,"documento":documento})
+
+@login_required
+@permission_required("compras.change_documentocompra",raise_exception=True)
+def documento_recebimento(request,pk,item_pk):
+    documento=get_object_or_404(DocumentoCompra,pk=pk,status=DocumentoCompra.Status.RASCUNHO); item=get_object_or_404(DocumentoCompraItem,pk=item_pk,documento=documento); form=DocumentoItemRecebimentoForm(request.POST or None,documento_item=item)
+    if request.method=="POST" and form.is_valid():
+        try: vincular_recebimento_documento(item,form.cleaned_data["recebimento_item"],form.cleaned_data["quantidade_vinculada"]); return redirect("compras:documento_detalhe",pk=pk)
+        except ValidationError as erro: form.add_error(None," ".join(erro.messages))
+    return render(request,"compras/documento_recebimento_formulario.html",{"form":form,"documento":documento,"item":item})
+
+
+def _acao_documento(request,pk,funcao,sucesso,motivo=False):
+    if request.method!="POST": return HttpResponseBadRequest()
+    documento=get_object_or_404(DocumentoCompra,pk=pk)
+    try: funcao(documento,request.user,request.POST.get("motivo","")) if motivo else funcao(documento,request.user); messages.success(request,sucesso)
+    except (ValidationError,PermissionDenied) as erro: messages.error(request," ".join(getattr(erro,"messages",[str(erro)])))
+    return redirect("compras:documento_detalhe",pk=pk)
+
+@login_required
+def documento_iniciar_conferencia(request,pk): return _acao_documento(request,pk,iniciar_conferencia_documento,"Documento enviado para conferência.")
+@login_required
+def documento_conferir(request,pk): return _acao_documento(request,pk,concluir_conferencia_documento,"Conferência concluída.")
+@login_required
+def documento_reabrir(request,pk): return _acao_documento(request,pk,reabrir_conferencia_documento,"Documento retornou à conferência.")
+@login_required
+def documento_cancelar(request,pk): return _acao_documento(request,pk,cancelar_documento_compra,"Documento cancelado.",True)
+
+@login_required
+@permission_required("compras.conferir_documento_compra",raise_exception=True)
+def documento_divergencia(request,pk):
+    documento=get_object_or_404(DocumentoCompra,pk=pk); form=DivergenciaDocumentoForm(request.POST or None,documento=documento)
+    if request.method=="POST" and form.is_valid(): obj=form.save(commit=False); obj.documento=documento; obj.save(); return redirect("compras:documento_detalhe",pk=pk)
+    return render(request,"compras/documento_divergencia_formulario.html",{"form":form,"documento":documento})
+
+@login_required
+@permission_required("compras.resolver_divergencia_documento",raise_exception=True)
+def documento_divergencia_resolver(request,pk):
+    divergencia=get_object_or_404(DivergenciaDocumentoCompra,pk=pk); form=SolucaoDivergenciaDocumentoForm(request.POST or None)
+    if request.method=="POST" and form.is_valid():
+        try: resolver_divergencia_documento(divergencia,request.user,form.cleaned_data["solucao"]); return redirect("compras:documento_detalhe",pk=divergencia.documento_id)
+        except ValidationError as erro: form.add_error(None," ".join(erro.messages))
+    return render(request,"compras/documento_divergencia_resolver.html",{"form":form,"divergencia":divergencia})

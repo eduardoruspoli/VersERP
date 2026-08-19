@@ -6,7 +6,8 @@ from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
-                     DivergenciaRecebimento,
+                     DivergenciaDocumentoCompra, DivergenciaRecebimento, DocumentoCompra,
+                     DocumentoCompraItem, DocumentoCompraItemRecebimento, DocumentoCompraPedido,
                      ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, RecebimentoCompra, RecebimentoCompraItem,
                      SolicitacaoCompra, SolicitacaoCompraItem)
@@ -238,3 +239,58 @@ class PrevistoCompradoFiltroForm(forms.Form):
             self.fields["obra"].queryset=CentroCusto.objects.filter(empresa_id=empresa_id).order_by("codigo")
             self.fields["proposta"].queryset=Proposta.objects.filter(empresa_id=empresa_id,revisao_aprovada__isnull=False)
             self.fields["plano_conta"].queryset=PlanoConta.objects.filter(empresa_id=empresa_id) if hasattr(PlanoConta,"empresa_id") else PlanoConta.objects.all()
+
+
+class DocumentoCompraForm(forms.ModelForm):
+    class Meta:
+        model=DocumentoCompra
+        fields=["empresa","fornecedor","tipo","numero","serie","chave_fiscal","data_emissao","data_entrada","valor_bruto","desconto","frete","impostos","outras_despesas","condicao_pagamento","observacoes"]
+        widgets={"data_emissao":forms.DateInput(attrs={"type":"date"}),"data_entrada":forms.DateInput(attrs={"type":"date"})}
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs); self.fields["empresa"].queryset=Empresa.objects.filter(ativa=True); self.fields["fornecedor"].queryset=Pessoa.objects.filter(ativo=True,classificacao__in=[Pessoa.Classificacao.FORNECEDOR,Pessoa.Classificacao.AMBOS])
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-select" if isinstance(field.widget,forms.Select) else "form-control")
+
+
+class DocumentoCompraItemForm(forms.ModelForm):
+    class Meta:
+        model=DocumentoCompraItem
+        fields=["pedido_item","descricao_snapshot","quantidade_faturada","unidade","valor_unitario_faturado","desconto","frete_alocado","impostos","outras_despesas","plano_conta","observacao","ordem"]
+    def __init__(self,*args,documento=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        if documento: self.fields["pedido_item"].queryset=PedidoCompraItem.objects.filter(pedido__empresa=documento.empresa,pedido__fornecedor=documento.fornecedor).select_related("pedido")
+        self.fields["plano_conta"].queryset=PlanoConta.objects.filter(ativo=True,estrutural=False,aceita_lancamento=True,tipo__in=["CUSTO","DESPESA"])
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-select" if isinstance(field.widget,forms.Select) else "form-control")
+
+
+class DocumentoCompraPedidoForm(forms.ModelForm):
+    class Meta: model=DocumentoCompraPedido; fields=["pedido"]
+    def __init__(self,*args,documento=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        if documento: self.fields["pedido"].queryset=PedidoCompra.objects.filter(empresa=documento.empresa,fornecedor=documento.fornecedor).exclude(status__in=[PedidoCompra.Status.RASCUNHO,PedidoCompra.Status.AGUARDANDO_APROVACAO,PedidoCompra.Status.REJEITADO,PedidoCompra.Status.CANCELADO])
+        self.fields["pedido"].widget.attrs["class"]="form-select"
+
+
+class DocumentoItemRecebimentoForm(forms.ModelForm):
+    class Meta: model=DocumentoCompraItemRecebimento; fields=["recebimento_item","quantidade_vinculada"]
+    def __init__(self,*args,documento_item=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        qs=RecebimentoCompraItem.objects.filter(recebimento__status=RecebimentoCompra.Status.CONFIRMADO)
+        if documento_item:
+            qs=qs.filter(recebimento__pedido__empresa=documento_item.documento.empresa,recebimento__pedido__fornecedor=documento_item.documento.fornecedor)
+            if documento_item.pedido_item_id: qs=qs.filter(pedido_item=documento_item.pedido_item)
+        self.fields["recebimento_item"].queryset=qs.select_related("recebimento","pedido_item")
+        self.fields["recebimento_item"].widget.attrs["class"]="form-select"; self.fields["quantidade_vinculada"].widget.attrs.update({"class":"form-control","step":"0.0001"})
+
+
+class DivergenciaDocumentoForm(forms.ModelForm):
+    class Meta:
+        model=DivergenciaDocumentoCompra
+        fields=["documento_item","tipo","descricao","quantidade_afetada","valor_afetado","bloqueante"]
+    def __init__(self,*args,documento=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        if documento: self.fields["documento_item"].queryset=documento.itens.all()
+        for field in self.fields.values(): field.widget.attrs.setdefault("class","form-select" if isinstance(field.widget,forms.Select) else "form-control")
+
+
+class SolucaoDivergenciaDocumentoForm(forms.Form):
+    solucao=forms.CharField(widget=forms.Textarea(attrs={"class":"form-control","rows":3}))

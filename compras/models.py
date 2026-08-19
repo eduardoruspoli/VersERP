@@ -564,3 +564,177 @@ class DivergenciaRecebimento(models.Model):
         self.full_clean(); resultado=super().save(*args,**kwargs)
         RecebimentoCompraItem.objects.filter(pk=self.recebimento_item_id).update(possui_divergencia=True)
         return resultado
+
+
+def _normalizar_identificador(valor):
+    return "".join((valor or "").upper().split())
+
+
+def _normalizar_chave_fiscal(valor):
+    return "".join(c for c in (valor or "").upper() if c.isalnum())
+
+
+class DocumentoCompra(models.Model):
+    class Tipo(models.TextChoices):
+        NOTA_FISCAL="NOTA_FISCAL","Nota Fiscal"
+        FATURA="FATURA","Fatura"
+        BOLETO="BOLETO","Boleto/cobrança"
+        RECIBO="RECIBO","Recibo"
+        OUTRO="OUTRO","Outro"
+    class Status(models.TextChoices):
+        RASCUNHO="RASCUNHO","Rascunho"
+        EM_CONFERENCIA="EM_CONFERENCIA","Em conferência"
+        CONFERIDO="CONFERIDO","Conferido"
+        DIVERGENTE="DIVERGENTE","Divergente"
+        CANCELADO="CANCELADO","Cancelado"
+    empresa=models.ForeignKey(Empresa,on_delete=models.PROTECT,related_name="documentos_compra")
+    fornecedor=models.ForeignKey(Pessoa,on_delete=models.PROTECT,related_name="documentos_compra")
+    tipo=models.CharField(max_length=20,choices=Tipo.choices)
+    numero=models.CharField(max_length=100)
+    numero_normalizado=models.CharField(max_length=100,editable=False)
+    serie=models.CharField(max_length=50,blank=True)
+    serie_normalizada=models.CharField(max_length=50,blank=True,editable=False)
+    chave_fiscal=models.CharField(max_length=100,blank=True)
+    data_emissao=models.DateField()
+    data_entrada=models.DateField(default=timezone.localdate)
+    valor_bruto=models.DecimalField(max_digits=15,decimal_places=2)
+    desconto=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    frete=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    impostos=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    outras_despesas=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    valor_total=models.DecimalField(max_digits=15,decimal_places=2,default=0,editable=False)
+    condicao_pagamento=models.TextField(blank=True)
+    observacoes=models.TextField(blank=True)
+    status=models.CharField(max_length=20,choices=Status.choices,default=Status.RASCUNHO)
+    criado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="documentos_compra_criados")
+    enviado_conferencia_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="documentos_compra_enviados_conferencia")
+    enviado_conferencia_em=models.DateTimeField(null=True,blank=True)
+    conferido_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="documentos_compra_conferidos")
+    conferido_em=models.DateTimeField(null=True,blank=True)
+    cancelado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="documentos_compra_cancelados")
+    cancelado_em=models.DateTimeField(null=True,blank=True)
+    motivo_cancelamento=models.TextField(blank=True)
+    criado_em=models.DateTimeField(auto_now_add=True)
+    atualizado_em=models.DateTimeField(auto_now=True)
+    class Meta:
+        ordering=["-data_emissao","-id"]
+        constraints=[
+            models.UniqueConstraint(fields=["empresa","fornecedor","tipo","numero_normalizado","serie_normalizada"],name="uq_documento_compra_identificacao"),
+            models.UniqueConstraint(fields=["chave_fiscal"],condition=~models.Q(chave_fiscal=""),name="uq_documento_compra_chave_fiscal"),
+        ]
+        permissions=[("conferir_documento_compra","Pode conferir documento de compra"),("resolver_divergencia_documento","Pode resolver divergência de documento"),("cancelar_documento_compra","Pode cancelar documento de compra"),("view_valores_documento_compra","Pode visualizar valores de documento de compra")]
+    @property
+    def identificacao(self): return f"{self.get_tipo_display()} {self.numero}{('/'+self.serie) if self.serie else ''}"
+    def clean(self):
+        errors={}; self.numero=" ".join((self.numero or "").split()); self.serie=" ".join((self.serie or "").split()); self.numero_normalizado=_normalizar_identificador(self.numero); self.serie_normalizada=_normalizar_identificador(self.serie); self.chave_fiscal=_normalizar_chave_fiscal(self.chave_fiscal)
+        if not self.numero_normalizado: errors["numero"]="Informe o número do documento."
+        if self.fornecedor_id and (not self.fornecedor.ativo or self.fornecedor.classificacao not in {Pessoa.Classificacao.FORNECEDOR,Pessoa.Classificacao.AMBOS}): errors["fornecedor"]="Selecione um fornecedor ativo."
+        for campo in ("valor_bruto","desconto","frete","impostos","outras_despesas"):
+            if getattr(self,campo,None) is not None and getattr(self,campo)<0: errors[campo]="O valor não pode ser negativo."
+        if all(getattr(self,c,None) is not None for c in ("valor_bruto","desconto","frete","impostos","outras_despesas")): self.valor_total=(self.valor_bruto-self.desconto+self.frete+self.impostos+self.outras_despesas).quantize(Decimal("0.01"))
+        if self.valor_total<0: errors["valor_total"]="O total não pode ser negativo."
+        if self.pk and type(self).objects.filter(pk=self.pk).exclude(status=self.Status.RASCUNHO).exists(): errors["status"]="Somente documentos em rascunho podem ser editados."
+        if errors: raise ValidationError(errors)
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+    def __str__(self): return self.identificacao
+
+
+class DocumentoCompraItem(models.Model):
+    documento=models.ForeignKey(DocumentoCompra,on_delete=models.CASCADE,related_name="itens")
+    pedido_item=models.ForeignKey(PedidoCompraItem,on_delete=models.PROTECT,null=True,blank=True,related_name="itens_documento_compra")
+    descricao_snapshot=models.CharField(max_length=250)
+    quantidade_faturada=models.DecimalField(max_digits=15,decimal_places=4)
+    unidade=models.CharField(max_length=20)
+    valor_unitario_faturado=models.DecimalField(max_digits=15,decimal_places=4)
+    valor_bruto=models.DecimalField(max_digits=15,decimal_places=2,default=0,editable=False)
+    desconto=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    frete_alocado=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    impostos=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    outras_despesas=models.DecimalField(max_digits=15,decimal_places=2,default=0)
+    total=models.DecimalField(max_digits=15,decimal_places=2,default=0,editable=False)
+    plano_conta=models.ForeignKey(PlanoConta,on_delete=models.PROTECT,related_name="itens_documento_compra")
+    observacao=models.TextField(blank=True)
+    ordem=models.PositiveIntegerField(default=0)
+    class Meta: ordering=["ordem","id"]
+    def clean(self):
+        errors={}
+        if self.quantidade_faturada is not None and self.quantidade_faturada<=0: errors["quantidade_faturada"]="Informe quantidade positiva."
+        if self.valor_unitario_faturado is not None and self.valor_unitario_faturado<0: errors["valor_unitario_faturado"]="O valor não pode ser negativo."
+        for campo in ("desconto","frete_alocado","impostos","outras_despesas"):
+            if getattr(self,campo,None) is not None and getattr(self,campo)<0: errors[campo]="O valor não pode ser negativo."
+        if self.pedido_item_id and self.documento_id:
+            if self.pedido_item.pedido.empresa_id!=self.documento.empresa_id: errors["pedido_item"]="O item do pedido deve pertencer à empresa do documento."
+            if self.pedido_item.pedido.fornecedor_id!=self.documento.fornecedor_id: errors["pedido_item"]="O item do pedido deve pertencer ao fornecedor do documento."
+        if self.plano_conta_id and (not self.plano_conta.ativo or self.plano_conta.estrutural or not self.plano_conta.aceita_lancamento or self.plano_conta.tipo not in {"CUSTO","DESPESA"}): errors["plano_conta"]="Selecione uma conta analítica ativa de custo ou despesa."
+        if self.documento_id and self.documento.status!=DocumentoCompra.Status.RASCUNHO: errors["documento"]="Os itens estão congelados."
+        if self.quantidade_faturada is not None and self.valor_unitario_faturado is not None:
+            self.valor_bruto=(self.quantidade_faturada*self.valor_unitario_faturado).quantize(Decimal("0.01")); self.total=(self.valor_bruto-self.desconto+self.frete_alocado+self.impostos+self.outras_despesas).quantize(Decimal("0.01"))
+            if self.total<0: errors["total"]="O total do item não pode ser negativo."
+        if errors: raise ValidationError(errors)
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+
+
+class DocumentoCompraPedido(models.Model):
+    documento=models.ForeignKey(DocumentoCompra,on_delete=models.CASCADE,related_name="vinculos_pedidos")
+    pedido=models.ForeignKey(PedidoCompra,on_delete=models.PROTECT,related_name="vinculos_documentos")
+    criado_em=models.DateTimeField(auto_now_add=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=["documento","pedido"],name="uq_documento_compra_pedido")]
+    def clean(self):
+        errors={}
+        if self.documento_id and self.pedido_id:
+            if self.documento.empresa_id!=self.pedido.empresa_id: errors["pedido"]="O pedido deve pertencer à empresa do documento."
+            if self.documento.fornecedor_id!=self.pedido.fornecedor_id: errors["pedido"]="O pedido deve pertencer ao fornecedor do documento."
+        if self.documento_id and self.documento.status!=DocumentoCompra.Status.RASCUNHO: errors["documento"]="Os vínculos estão congelados."
+        if errors: raise ValidationError(errors)
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+
+
+class DocumentoCompraItemRecebimento(models.Model):
+    documento_item=models.ForeignKey(DocumentoCompraItem,on_delete=models.CASCADE,related_name="vinculos_recebimentos")
+    recebimento_item=models.ForeignKey(RecebimentoCompraItem,on_delete=models.PROTECT,related_name="vinculos_documentos")
+    quantidade_vinculada=models.DecimalField(max_digits=15,decimal_places=4)
+    criado_em=models.DateTimeField(auto_now_add=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=["documento_item","recebimento_item"],name="uq_documento_item_recebimento")]
+    def clean(self):
+        errors={}
+        if self.quantidade_vinculada is not None and self.quantidade_vinculada<=0: errors["quantidade_vinculada"]="Informe quantidade positiva."
+        if self.documento_item_id and self.recebimento_item_id:
+            if self.recebimento_item.recebimento.status!=RecebimentoCompra.Status.CONFIRMADO: errors["recebimento_item"]="Use um recebimento confirmado."
+            if self.documento_item.pedido_item_id and self.documento_item.pedido_item_id!=self.recebimento_item.pedido_item_id: errors["recebimento_item"]="O recebimento deve corresponder ao item do pedido."
+            if self.recebimento_item.pedido_item.pedido.empresa_id!=self.documento_item.documento.empresa_id or self.recebimento_item.pedido_item.pedido.fornecedor_id!=self.documento_item.documento.fornecedor_id: errors["recebimento_item"]="O recebimento deve pertencer à empresa e fornecedor do documento."
+            usado=type(self).objects.filter(recebimento_item=self.recebimento_item).exclude(pk=self.pk).aggregate(total=models.Sum("quantidade_vinculada"))["total"] or Decimal("0")
+            if self.quantidade_vinculada is not None and usado+self.quantidade_vinculada>self.recebimento_item.quantidade_aceita: errors["quantidade_vinculada"]="A quantidade vinculada supera a quantidade aceita disponível."
+        if self.documento_item_id and self.documento_item.documento.status!=DocumentoCompra.Status.RASCUNHO: errors["documento_item"]="Os vínculos estão congelados."
+        if errors: raise ValidationError(errors)
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
+
+
+class DivergenciaDocumentoCompra(models.Model):
+    class Tipo(models.TextChoices):
+        QUANTIDADE_MAIOR="QUANTIDADE_MAIOR","Quantidade maior"
+        QUANTIDADE_MENOR="QUANTIDADE_MENOR","Quantidade menor"
+        PRECO="PRECO","Preço divergente"
+        FRETE="FRETE","Frete divergente"
+        DESCONTO="DESCONTO","Desconto divergente"
+        IMPOSTO="IMPOSTO","Imposto divergente"
+        DOCUMENTO_DUPLICADO="DOCUMENTO_DUPLICADO","Documento duplicado"
+        ITEM_SEM_VINCULO="ITEM_SEM_VINCULO","Item sem pedido/recebimento"
+        OUTRO="OUTRO","Outro"
+    documento=models.ForeignKey(DocumentoCompra,on_delete=models.PROTECT,related_name="divergencias")
+    documento_item=models.ForeignKey(DocumentoCompraItem,on_delete=models.PROTECT,null=True,blank=True,related_name="divergencias")
+    tipo=models.CharField(max_length=25,choices=Tipo.choices)
+    descricao=models.TextField()
+    quantidade_afetada=models.DecimalField(max_digits=15,decimal_places=4,null=True,blank=True)
+    valor_afetado=models.DecimalField(max_digits=15,decimal_places=2,null=True,blank=True)
+    bloqueante=models.BooleanField(default=True)
+    automatica=models.BooleanField(default=False)
+    resolvida=models.BooleanField(default=False)
+    resolvida_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="divergencias_documento_resolvidas")
+    resolvida_em=models.DateTimeField(null=True,blank=True)
+    solucao=models.TextField(blank=True)
+    criado_em=models.DateTimeField(auto_now_add=True)
+    class Meta: ordering=["resolvida","id"]
+    def clean(self):
+        if self.documento_item_id and self.documento_item.documento_id!=self.documento_id: raise ValidationError({"documento_item":"O item deve pertencer ao documento."})
+        if self.resolvida and (not self.resolvida_por_id or not self.resolvida_em or not self.solucao.strip()): raise ValidationError("Informe responsável, data e solução.")
+    def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)

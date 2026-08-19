@@ -18,6 +18,8 @@ from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoIte
                      DivergenciaRecebimento, HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, ProcessoCotacao, ProcessoCotacaoItem,
                      RecebimentoCompra, RecebimentoCompraItem, SolicitacaoCompra, SolicitacaoCompraItem)
+from .models import (DocumentoCompra, DocumentoCompraItem, DocumentoCompraPedido,
+                     DocumentoCompraItemRecebimento, DivergenciaDocumentoCompra)
 from .services import (abrir_solicitacao, calcular_custos_cotacao, cancelar_processo_cotacao,
                        cancelar_pedido, cancelar_solicitacao, concluir_processo_cotacao,
                        enviar_pedido, gerar_pedidos_da_cotacao, iniciar_processo_cotacao,
@@ -26,6 +28,10 @@ from .services import (abrir_solicitacao, calcular_custos_cotacao, cancelar_proc
                        cancelar_recebimento, confirmar_recebimento,
                        quantidades_recebimento_pedido, resolver_divergencia,
                        calcular_previsto_comprado)
+from .services import (cancelar_documento_compra, concluir_conferencia_documento,
+                       iniciar_conferencia_documento, reabrir_conferencia_documento,
+                       resolver_divergencia_documento, validar_fechamento_documento,
+                       vincular_recebimento_documento)
 
 
 class ComprasBase(TestCase):
