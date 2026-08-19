@@ -30,7 +30,9 @@ class SolicitacaoCompraForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["empresa"].queryset = Empresa.objects.filter(ativa=True)
-        self.fields["obra"].queryset = CentroCusto.objects.filter(ativo=True).select_related("empresa").order_by("empresa", "codigo")
+        empresa_id = self.data.get("empresa") or getattr(self.instance, "empresa_id", None)
+        obras = CentroCusto.objects.filter(ativo=True)
+        self.fields["obra"].queryset = (obras.filter(empresa_id=empresa_id) if empresa_id else obras).select_related("empresa").order_by("empresa", "codigo")
         if self.instance.pk and self.instance.status != SolicitacaoCompra.Status.RASCUNHO:
             self.fields["empresa"].disabled = True
             self.fields["obra"].disabled = True

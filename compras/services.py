@@ -299,6 +299,7 @@ def cancelar_pedido(pedido,usuario,motivo):
 
 @transaction.atomic
 def enviar_pedido(pedido,usuario):
+    _exigir(usuario,"enviar_pedido")
     pedido=PedidoCompra.objects.select_for_update().get(pk=pedido.pk)
     return _mudar_pedido(pedido,usuario,PedidoCompra.Status.ENVIADO_FORNECEDOR,"enviar_pedido")
 

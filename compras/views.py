@@ -100,6 +100,7 @@ def solicitacao_detalhe(request, pk):
 
 
 @login_required
+@permission_required("compras.change_solicitacaocompra", raise_exception=True)
 def solicitacao_abrir(request, pk):
     if request.method != "POST":
         return HttpResponseBadRequest()
@@ -113,6 +114,7 @@ def solicitacao_abrir(request, pk):
 
 
 @login_required
+@permission_required("compras.cancelar_solicitacao", raise_exception=True)
 def solicitacao_cancelar(request, pk):
     solicitacao = get_object_or_404(SolicitacaoCompra, pk=pk)
     form = MotivoCancelamentoForm(request.POST or None)
@@ -211,17 +213,21 @@ def _acao(request, pk, funcao, sucesso):
 
 
 @login_required
+@permission_required("compras.change_processocotacao", raise_exception=True)
 def cotacao_iniciar(request,pk): return _acao(request,pk,iniciar_processo_cotacao,"Cotação iniciada.")
 
 @login_required
+@permission_required("compras.change_processocotacao", raise_exception=True)
 def cotacao_concluir(request,pk): return _acao(request,pk,concluir_processo_cotacao,"Cotação concluída.")
 
 @login_required
+@permission_required("compras.cancelar_cotacao", raise_exception=True)
 def cotacao_cancelar(request,pk):
     if request.method != "POST": return HttpResponseBadRequest()
     return _acao(request,pk,lambda p,u: cancelar_processo_cotacao(p,u,request.POST.get("motivo", "")),"Cotação cancelada.")
 
 @login_required
+@permission_required("compras.selecionar_fornecedor", raise_exception=True)
 def cotacao_selecionar(request,pk,item_pk):
     if request.method != "POST": return HttpResponseBadRequest()
     processo=get_object_or_404(ProcessoCotacao,pk=pk); item=get_object_or_404(processo.itens,pk=item_pk); oferta=get_object_or_404(CotacaoFornecedorItem.objects.select_related("cotacao"),pk=request.POST.get("oferta"))
@@ -309,14 +315,19 @@ def _acao_pedido(request,pk,funcao,sucesso,motivo=False):
     return redirect("compras:pedido_detalhe",pk=pk)
 
 @login_required
+@permission_required("compras.change_pedidocompra", raise_exception=True)
 def pedido_submeter(request,pk): return _acao_pedido(request,pk,submeter_pedido,"Pedido enviado para aprovação.")
 @login_required
+@permission_required("compras.aprovar_pedido", raise_exception=True)
 def pedido_aprovar(request,pk): return _acao_pedido(request,pk,aprovar_pedido,"Pedido aprovado.")
 @login_required
+@permission_required("compras.rejeitar_pedido", raise_exception=True)
 def pedido_rejeitar(request,pk): return _acao_pedido(request,pk,rejeitar_pedido,"Pedido rejeitado.",True)
 @login_required
+@permission_required("compras.cancelar_pedido", raise_exception=True)
 def pedido_cancelar(request,pk): return _acao_pedido(request,pk,cancelar_pedido,"Pedido cancelado.",True)
 @login_required
+@permission_required("compras.enviar_pedido", raise_exception=True)
 def pedido_enviar(request,pk): return _acao_pedido(request,pk,enviar_pedido,"Envio ao fornecedor registrado.")
 
 @login_required
@@ -375,8 +386,10 @@ def _acao_recebimento(request,pk,funcao,sucesso,motivo=False):
     return redirect("compras:recebimento_detalhe",pk=pk)
 
 @login_required
+@permission_required("compras.registrar_recebimento", raise_exception=True)
 def recebimento_confirmar(request,pk): return _acao_recebimento(request,pk,confirmar_recebimento,"Recebimento confirmado.")
 @login_required
+@permission_required("compras.cancelar_recebimento", raise_exception=True)
 def recebimento_cancelar(request,pk): return _acao_recebimento(request,pk,cancelar_recebimento,"Recebimento cancelado.",True)
 
 @login_required
@@ -490,12 +503,16 @@ def _acao_documento(request,pk,funcao,sucesso,motivo=False):
     return redirect("compras:documento_detalhe",pk=pk)
 
 @login_required
+@permission_required("compras.conferir_documento_compra", raise_exception=True)
 def documento_iniciar_conferencia(request,pk): return _acao_documento(request,pk,iniciar_conferencia_documento,"Documento enviado para conferência.")
 @login_required
+@permission_required("compras.conferir_documento_compra", raise_exception=True)
 def documento_conferir(request,pk): return _acao_documento(request,pk,concluir_conferencia_documento,"Conferência concluída.")
 @login_required
+@permission_required("compras.conferir_documento_compra", raise_exception=True)
 def documento_reabrir(request,pk): return _acao_documento(request,pk,reabrir_conferencia_documento,"Documento retornou à conferência.")
 @login_required
+@permission_required("compras.cancelar_documento_compra", raise_exception=True)
 def documento_cancelar(request,pk): return _acao_documento(request,pk,cancelar_documento_compra,"Documento cancelado.",True)
 
 @login_required

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Propostas | VersERP{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1>Propostas comerciais</h1><p>Orçamento, revisão e documento comercial</p></div><a class="btn btn-primary" href="{% url 'comercial:proposta_criar' %}">Nova proposta</a></div>
+<div class="page-header"><div><h1>Propostas comerciais</h1><p>Orçamento, revisão e documento comercial</p></div>{% if perms.comercial.add_proposta %}<a class="btn btn-primary" href="{% url 'comercial:proposta_criar' %}">Nova proposta</a>{% endif %}</div>
 <p><a class="btn btn-light" href="{% url 'comercial:relatorio_propostas' %}">Relatório de Propostas</a></p><form method="get" class="verserp-form proposta-filtro"><input class="form-control" name="q" value="{{ busca }}" placeholder="Código ou cliente"><button class="btn btn-light">Buscar</button></form>
 <div class="table-responsive"><table class="table"><thead><tr><th>Número</th><th>Cliente</th><th>Empresa</th><th>Status</th><th>Revisão</th><th></th></tr></thead><tbody>
 {% for proposta in propostas %}<tr><td>{{ proposta.codigo }}</td><td>{{ proposta.cliente }}</td><td>{{ proposta.empresa }}</td><td>{{ proposta.get_status_display }}</td><td>{{ proposta.revisao_atual }}</td><td><a href="{% url 'comercial:proposta_detalhe' proposta.pk %}">Abrir</a></td></tr>{% empty %}<tr><td colspan="6">Nenhuma proposta encontrada.</td></tr>{% endfor %}

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -251,6 +252,16 @@ class OcorrenciaPonto(models.Model):
     def clean(self):
         if self.data_fim and self.data_fim < self.data_inicio:
             raise ValidationError({"data_fim": "Fim anterior ao início."})
+        if self.funcionario_id and self.data_inicio:
+            fim = self.data_fim or self.data_inicio
+            fechadas = CompetenciaPonto.objects.filter(
+                funcionario=self.funcionario, status=CompetenciaPonto.Status.FECHADO,
+                competencia__lte=fim,
+            ).values_list("competencia", flat=True)
+            for competencia in fechadas:
+                ultimo = (competencia.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+                if ultimo >= self.data_inicio:
+                    raise ValidationError("Não é possível alterar ocorrências de uma competência fechada.")
 
     def save(self,*args,**kwargs): self.full_clean(); return super().save(*args,**kwargs)
 

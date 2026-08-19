@@ -4,13 +4,14 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Prefetch, Q, Sum
 from django.utils import timezone
 
 from .models import (ApuracaoDiaria, CompetenciaPonto, ConferenciaFolha,
                      ContratoFuncionario, EventoFolha, Feriado, HistoricoRH,
                      Jornada, MarcacaoPonto, OcorrenciaPonto,
-                     RetornoContabilidade, ValeAdiantamento, ValeParcela)
+                     RetornoContabilidade, ValeAdiantamento, ValeParcela,
+                     Funcionario)
 
 CENTAVO = Decimal("0.01")
 
@@ -205,14 +206,32 @@ def gerar_parcelas_vale(vale, competencia_inicial):
 
 def calcular_previa_funcionario(funcionario, competencia):
     competencia = primeiro_dia_mes(competencia)
-    contrato = contrato_vigente(funcionario, competencia)
-    ponto = funcionario.competencias_ponto.filter(competencia=competencia).first()
-    eventos = funcionario.eventos_folha.filter(competencia=competencia).exclude(status=EventoFolha.Status.CANCELADO)
-    proventos = eventos.filter(natureza=EventoFolha.Natureza.PROVENTO).aggregate(total=Sum("valor"))["total"] or Decimal("0.00")
-    descontos = eventos.filter(natureza=EventoFolha.Natureza.DESCONTO).aggregate(total=Sum("valor"))["total"] or Decimal("0.00")
+    contratos_cache = getattr(funcionario, "contratos_vigentes_cache", None)
+    contrato = contratos_cache[0] if contratos_cache is not None and contratos_cache else contrato_vigente(funcionario, competencia)
+    pontos_cache = getattr(funcionario, "pontos_competencia_cache", None)
+    ponto = pontos_cache[0] if pontos_cache else None if pontos_cache is not None else funcionario.competencias_ponto.filter(competencia=competencia).first()
+    eventos_cache = getattr(funcionario, "eventos_competencia_cache", None)
+    eventos = eventos_cache if eventos_cache is not None else funcionario.eventos_folha.filter(competencia=competencia).exclude(status=EventoFolha.Status.CANCELADO)
+    proventos = sum((e.valor for e in eventos if e.natureza == EventoFolha.Natureza.PROVENTO), Decimal("0.00"))
+    descontos = sum((e.valor for e in eventos if e.natureza == EventoFolha.Natureza.DESCONTO), Decimal("0.00"))
     return {"funcionario": funcionario, "contrato": contrato, "ponto": ponto, "eventos": eventos,
             "proventos_controlados": proventos, "descontos_controlados": descontos,
             "liquido_gerencial": (contrato.salario_base + proventos - descontos).quantize(CENTAVO)}
+
+
+def calcular_previas_empresa(empresa, competencia):
+    competencia = primeiro_dia_mes(competencia)
+    contratos = ContratoFuncionario.objects.filter(inicio_vigencia__lte=competencia).filter(
+        Q(fim_vigencia__isnull=True) | Q(fim_vigencia__gte=competencia)
+    ).order_by("-inicio_vigencia")
+    pontos = CompetenciaPonto.objects.filter(competencia=competencia)
+    eventos = EventoFolha.objects.filter(competencia=competencia).exclude(status=EventoFolha.Status.CANCELADO)
+    funcionarios = Funcionario.objects.filter(empresa=empresa).exclude(situacao=Funcionario.Situacao.DESLIGADO).select_related("pessoa").prefetch_related(
+        Prefetch("contratos", queryset=contratos, to_attr="contratos_vigentes_cache"),
+        Prefetch("competencias_ponto", queryset=pontos, to_attr="pontos_competencia_cache"),
+        Prefetch("eventos_folha", queryset=eventos, to_attr="eventos_competencia_cache"),
+    )
+    return [calcular_previa_funcionario(funcionario, competencia) for funcionario in funcionarios if funcionario.contratos_vigentes_cache]
 
 
 def comparar_retorno(retorno):

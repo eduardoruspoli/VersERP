@@ -1,7 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Exists, F, OuterRef, Q, Sum
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
@@ -22,6 +22,7 @@ def proposta_lista(request):
 
 
 @login_required
+@permission_required("comercial.add_proposta", raise_exception=True)
 def proposta_criar(request):
     form = PropostaCriacaoForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -36,6 +37,7 @@ def _revisao_atual(proposta):
 
 
 @login_required
+@permission_required("comercial.view_proposta", raise_exception=True)
 def proposta_detalhe(request, pk):
     proposta = get_object_or_404(Proposta.objects.select_related("empresa", "cliente", "centro_custo", "revisao_aprovada"), pk=pk)
     revisao = _revisao_atual(proposta)
@@ -47,6 +49,7 @@ def proposta_detalhe(request, pk):
 
 
 @login_required
+@permission_required("comercial.change_propostarevisao", raise_exception=True)
 def revisao_editar(request, pk):
     revisao = get_object_or_404(PropostaRevisao, pk=pk, congelada=False)
     form = PropostaRevisaoForm(request.POST or None, instance=revisao)
@@ -70,18 +73,22 @@ def _adicionar(request, pk, form_class, titulo):
 
 
 @login_required
+@permission_required("comercial.add_propostaitem", raise_exception=True)
 def item_adicionar(request, pk): return _adicionar(request, pk, PropostaItemForm, "Adicionar item interno")
 
 
 @login_required
+@permission_required("comercial.add_propostalinhapublica", raise_exception=True)
 def linha_adicionar(request, pk): return _adicionar(request, pk, PropostaLinhaPublicaForm, "Adicionar linha pública")
 
 
 @login_required
+@permission_required("comercial.add_propostatributo", raise_exception=True)
 def tributo_adicionar(request, pk): return _adicionar(request, pk, PropostaTributoForm, "Adicionar tributo")
 
 
 @login_required
+@permission_required("comercial.change_proposta", raise_exception=True)
 def proposta_enviar(request, pk):
     if request.method != "POST": return HttpResponseBadRequest()
     revisao = _revisao_atual(get_object_or_404(Proposta, pk=pk))
@@ -94,6 +101,7 @@ def proposta_enviar(request, pk):
 
 
 @login_required
+@permission_required(("comercial.change_proposta", "comercial.add_propostarevisao"), raise_exception=True)
 def revisao_nova(request, pk):
     if request.method != "POST": return HttpResponseBadRequest()
     proposta = get_object_or_404(Proposta, pk=pk)
@@ -118,11 +126,13 @@ def _executar_acao(request, pk, acao, sucesso):
 
 
 @login_required
+@permission_required("comercial.change_proposta", raise_exception=True)
 def proposta_negociar(request, pk):
     return _executar_acao(request, pk, colocar_em_negociacao, "Proposta colocada em negociação.")
 
 
 @login_required
+@permission_required(("comercial.aprovar_proposta", "comercial.criar_obra_proposta"), raise_exception=True)
 def proposta_aprovar(request, pk):
     return _executar_acao(request, pk, aprovar_proposta, "Proposta aprovada e obra criada.")
 
@@ -132,6 +142,9 @@ def proposta_motivo(request, pk, acao):
     proposta = get_object_or_404(Proposta, pk=pk)
     if acao not in {"rejeitar", "cancelar"}:
         return HttpResponseBadRequest()
+    permissao = "comercial.rejeitar_proposta" if acao == "rejeitar" else "comercial.cancelar_proposta"
+    if not request.user.has_perm(permissao):
+        raise PermissionDenied
     form = MotivoStatusForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         servico = rejeitar_proposta if acao == "rejeitar" else cancelar_proposta
@@ -145,6 +158,7 @@ def proposta_motivo(request, pk, acao):
 
 
 @login_required
+@permission_required("comercial.view_proposta", raise_exception=True)
 def documento_publico(request, pk):
     revisao = get_object_or_404(PropostaRevisao.objects.prefetch_related("linhas_publicas"), pk=pk)
     return render(request, "comercial/documento_publico.html", {"documento": montar_contexto_publico_proposta(revisao)})
@@ -193,6 +207,7 @@ def relatorio_propostas(request):
 
 
 @login_required
+@permission_required("comercial.view_proposta", raise_exception=True)
 def previsto_realizado(request, pk):
     proposta = get_object_or_404(Proposta, pk=pk)
     relatorio = calcular_previsto_realizado(proposta)

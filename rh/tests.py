@@ -16,7 +16,7 @@ from .models import (ApuracaoDiaria, CompetenciaPonto, ConferenciaFolha,
                      RetornoContabilidade, ValeAdiantamento)
 from .services import (apurar_competencia, apurar_dia, atualizar_conferencia,
                        calcular_desconto_bh_negativo, calcular_horas_100,
-                       calcular_previa_funcionario, comparar_retorno,
+                       calcular_previa_funcionario, calcular_previas_empresa, comparar_retorno,
                        contrato_vigente, fechar_competencia,
                        gerar_parcelas_vale, minutos_trabalhados,
                        reabrir_competencia, sincronizar_eventos_automaticos)
@@ -115,6 +115,11 @@ class PontoTests(RHBase):
         CompetenciaPonto.objects.create(funcionario=self.funcionario,competencia=date(2026,4,1),status="FECHADO")
         with self.assertRaises(ValidationError): self.marcar(date(2026,4,6),[time(8)])
 
+    def test_competencia_fechada_bloqueia_ocorrencia(self):
+        CompetenciaPonto.objects.create(funcionario=self.funcionario,competencia=date(2026,4,1),status="FECHADO")
+        with self.assertRaises(ValidationError):
+            OcorrenciaPonto.objects.create(funcionario=self.funcionario,data_inicio=date(2026,4,6),tipo="ABONO",descricao="Tardia")
+
 
 class FechamentoBHTests(RHBase):
     def competencia(self,saldo=-120,horas=360,status="APURADO"):
@@ -163,6 +168,11 @@ class EventosValesContabilidadeTests(RHBase):
     def test_previa_gerencial(self):
         EventoFolha.objects.create(empresa=self.empresa,funcionario=self.funcionario,competencia=date(2026,4,1),tipo="PREMIO",descricao="Prêmio",natureza="PROVENTO",valor=100)
         previa=calcular_previa_funcionario(self.funcionario,date(2026,4,1)); self.assertEqual(previa["liquido_gerencial"],Decimal("2300.00"))
+
+    def test_previas_empresa_tem_consultas_em_lote(self):
+        with self.assertNumQueries(4):
+            previas=list(calcular_previas_empresa(self.empresa,date(2026,4,1)))
+        self.assertEqual(len(previas),1)
 
     def test_retorno_preserva_valor_e_nao_calcula_inss(self):
         retorno=RetornoContabilidade.objects.create(funcionario=self.funcionario,competencia=date(2026,4,1),inss=Decimal("201.37"))

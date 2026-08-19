@@ -15,7 +15,7 @@ from .forms import (CompetenciaForm, ConferenciaForm, ContratoForm,
 from .models import (CompetenciaPonto, ConferenciaFolha, EventoFolha, Funcionario,
                      Jornada, RetornoContabilidade, ValeAdiantamento)
 from .services import (apurar_competencia, atualizar_conferencia,
-                       calcular_previa_funcionario, comparar_retorno,
+                       calcular_previas_empresa, comparar_retorno,
                        fechar_competencia, gerar_parcelas_vale,
                        reabrir_competencia)
 
@@ -84,7 +84,7 @@ def funcionario_editar(request,pk):
 
 
 @login_required
-@permission_required("rh.view_dados_bancarios", raise_exception=True)
+@permission_required(("rh.view_dados_bancarios", "rh.change_funcionario"), raise_exception=True)
 def dados_bancarios(request,pk):
     empresa,_=_empresa(request); obj=get_object_or_404(Funcionario,pk=pk,empresa=empresa); form=DadosBancariosForm(request.POST or None,instance=obj)
     if form.is_valid(): form.save(); messages.success(request,"Dados bancários atualizados."); return redirect("rh:funcionario_detalhe",pk=pk)
@@ -215,10 +215,7 @@ def vale_criar(request):
 @permission_required("rh.view_remuneracao", raise_exception=True)
 def pre_fechamento(request):
     empresa,empresas=_empresa(request); texto=request.GET.get("competencia") or date.today().strftime("%Y-%m"); competencia=date.fromisoformat(texto+"-01")
-    previas=[]
-    for funcionario in Funcionario.objects.filter(empresa=empresa).exclude(situacao=Funcionario.Situacao.DESLIGADO) if empresa else []:
-        try: previas.append(calcular_previa_funcionario(funcionario,competencia))
-        except ValidationError: pass
+    previas=calcular_previas_empresa(empresa,competencia) if empresa else []
     return render(request,"rh/pre_fechamento.html",{"previas":previas,"empresa":empresa,"empresas":empresas,"competencia":texto})
 
 

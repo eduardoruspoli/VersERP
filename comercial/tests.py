@@ -159,7 +159,9 @@ class DominioPropostaTests(ComercialBase):
 class ViewsPropostaTests(ComercialBase):
     def setUp(self):
         super().setUp()
-        self.usuario.user_permissions.add(Permission.objects.get(content_type__app_label="comercial", codename="view_proposta"))
+        self.usuario.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="comercial", codename__in=["view_proposta", "add_proposta"]
+        ))
         self.client.force_login(self.usuario)
 
     def test_lista_e_detalhe(self):
@@ -203,6 +205,14 @@ class ViewsPropostaTests(ComercialBase):
         self.usuario.user_permissions.clear()
         resposta = self.client.get(reverse("comercial:proposta_lista"))
         self.assertEqual(resposta.status_code, 403)
+
+    def test_criacao_exige_permissao_adicionar_proposta(self):
+        self.usuario.user_permissions.remove(Permission.objects.get(content_type__app_label="comercial", codename="add_proposta"))
+        self.assertEqual(self.client.get(reverse("comercial:proposta_criar")).status_code, 403)
+
+    def test_documento_publico_exige_permissao_visualizar(self):
+        self.usuario.user_permissions.clear()
+        self.assertEqual(self.client.get(reverse("comercial:documento_publico", args=[self.revisao.pk])).status_code, 403)
 
     def test_pdf_proposta_valido_e_sem_dados_internos(self):
         self.item(); self.linha("150",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=150; self.revisao.observacoes_internas="SEGREDO INTERNO"; self.revisao.save()
@@ -350,6 +360,7 @@ class WorkflowPropostaTests(ComercialBase):
 class PrevistoRealizadoTests(ComercialBase):
     def setUp(self):
         super().setUp()
+        self.usuario.user_permissions.add(Permission.objects.get(content_type__app_label="comercial", codename="view_proposta"))
         self.conta_custo = PlanoConta.objects.create(codigo="9.91.01", nome="Materiais teste", tipo="CUSTO", natureza="DEVEDORA")
         self.conta_custo_sem_movimento = PlanoConta.objects.create(codigo="9.91.02", nome="Terceiros teste", tipo="CUSTO", natureza="DEVEDORA")
         self.conta_despesa = PlanoConta.objects.create(codigo="9.92.01", nome="Despesa não prevista", tipo="DESPESA", natureza="DEVEDORA")
