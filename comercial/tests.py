@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -8,11 +9,11 @@ from django.test import TestCase
 from django.urls import reverse
 from unittest.mock import patch
 
-from financeiro.models import CentroCusto, Empresa
+from financeiro.models import CentroCusto, Empresa, LancamentoFinanceiro, PlanoConta, RateioCentroCusto
 from pessoas.models import Pessoa
 
 from .models import ModeloConteudoProposta, Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
-from .services import aprovar_proposta, calcular_precificacao, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta, validar_fechamento_publico
+from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta, validar_fechamento_publico
 
 
 class ComercialBase(TestCase):
@@ -262,3 +263,107 @@ class WorkflowPropostaTests(ComercialBase):
         self.enviar_valida(); self.client.force_login(self.usuario)
         resposta = self.client.post(reverse("comercial:proposta_aprovar", args=[self.proposta.pk]))
         self.assertEqual(resposta.status_code, 403)
+
+
+class PrevistoRealizadoTests(ComercialBase):
+    def setUp(self):
+        super().setUp()
+        self.conta_custo = PlanoConta.objects.create(codigo="9.91.01", nome="Materiais teste", tipo="CUSTO", natureza="DEVEDORA")
+        self.conta_custo_sem_movimento = PlanoConta.objects.create(codigo="9.91.02", nome="Terceiros teste", tipo="CUSTO", natureza="DEVEDORA")
+        self.conta_despesa = PlanoConta.objects.create(codigo="9.92.01", nome="Despesa não prevista", tipo="DESPESA", natureza="DEVEDORA")
+        self.conta_receita = PlanoConta.objects.create(codigo="9.93.01", nome="Receita serviços teste", tipo="RECEITA", natureza="CREDORA")
+        self.obra = CentroCusto.objects.create(empresa=self.empresa, cliente=self.cliente, codigo=self.proposta.codigo, nome=self.revisao.nome_servico)
+        self.proposta.status = Proposta.Status.APROVADA
+        self.proposta.centro_custo = self.obra
+        self.proposta.revisao_aprovada = self.revisao
+        self.proposta.save()
+
+    def previsto(self):
+        PropostaItem.objects.create(revisao=self.revisao, tipo=PropostaItem.Tipo.MATERIAL, descricao="Material", quantidade=1, custo_unitario=100, plano_conta=self.conta_custo)
+        PropostaItem.objects.create(revisao=self.revisao, tipo=PropostaItem.Tipo.MAO_OBRA, descricao="Sem conta", quantidade=1, custo_unitario=50)
+        PropostaItem.objects.create(revisao=self.revisao, tipo=PropostaItem.Tipo.SERVICO_TERCEIRO, descricao="Terceiros", quantidade=1, custo_unitario=25, plano_conta=self.conta_custo_sem_movimento)
+        self.revisao.percentual_formacao = Decimal("50")
+        self.revisao.save()
+
+    def lancamento(self, tipo, conta, valor, obra=None, status="ABERTO"):
+        lancamento = LancamentoFinanceiro.objects.create(empresa=self.empresa, pessoa=self.cliente, tipo=tipo, descricao=f"TESTE {conta.nome}", data_emissao=date(2026, 8, 1), data_competencia=date(2026, 8, 1), valor_total=Decimal(valor), plano_conta=conta, status=status)
+        if obra:
+            RateioCentroCusto.objects.create(lancamento=lancamento, centro_custo=obra, valor=Decimal(valor))
+        return lancamento
+
+    def realizados(self):
+        self.lancamento("PAGAR", self.conta_custo, "120", self.obra)
+        self.lancamento("PAGAR", self.conta_despesa, "30", self.obra)
+        self.lancamento("RECEBER", self.conta_receita, "200", self.obra)
+
+    def linha_conta(self, relatorio, conta):
+        return next(linha for linha in relatorio["categorias"] if linha["plano_conta"] == conta)
+
+    def test_proposta_sem_aprovacao_ou_sem_obra(self):
+        self.proposta.status = Proposta.Status.ENVIADA; self.proposta.save()
+        self.assertFalse(calcular_previsto_realizado(self.proposta)["disponivel"])
+        self.proposta.status = Proposta.Status.APROVADA; self.proposta.centro_custo = None; self.proposta.save()
+        self.assertFalse(calcular_previsto_realizado(self.proposta)["disponivel"])
+
+    def test_usa_revisao_aprovada_e_nao_revisao_atual(self):
+        self.previsto()
+        posterior = PropostaRevisao.objects.create(proposta=self.proposta, numero=1, data_proposta=date(2026, 8, 2), nome_servico="Posterior", preco_venda_final=999, formacao_preco=PropostaRevisao.FormacaoPreco.MANUAL)
+        self.proposta.revisao_atual = posterior.numero; self.proposta.save()
+        relatorio = calcular_previsto_realizado(self.proposta)
+        self.assertEqual(relatorio["revisao"], self.revisao)
+        self.assertEqual(relatorio["resumo"]["custo_previsto"], Decimal("175.00"))
+
+    def test_previsto_por_item_plano_e_sem_classificacao(self):
+        self.previsto(); relatorio = calcular_previsto_realizado(self.proposta)
+        self.assertEqual(self.linha_conta(relatorio, self.conta_custo)["previsto"], Decimal("100.00"))
+        self.assertTrue(any("Sem classificação prevista" in linha["nome"] and linha["previsto"] == Decimal("50.00") for linha in relatorio["categorias"]))
+
+    def test_custos_despesas_receitas_resultado_e_margens(self):
+        self.previsto(); self.realizados(); resumo = calcular_previsto_realizado(self.proposta)["resumo"]
+        self.assertEqual(resumo["receita_realizada"], Decimal("200.00"))
+        self.assertEqual(resumo["custos_realizados"], Decimal("120.00"))
+        self.assertEqual(resumo["despesas_realizadas"], Decimal("30.00"))
+        self.assertEqual(resumo["resultado_realizado"], Decimal("50.00"))
+        self.assertEqual(resumo["margem_realizada"], Decimal("25.00"))
+        self.assertEqual(resumo["resultado_previsto"], Decimal("87.50"))
+
+    def test_gasto_acima_previsto_e_nao_previsto(self):
+        self.previsto(); self.realizados(); relatorio = calcular_previsto_realizado(self.proposta)
+        material = self.linha_conta(relatorio, self.conta_custo)
+        inesperado = self.linha_conta(relatorio, self.conta_despesa)
+        self.assertEqual((material["diferenca"], material["percentual"], material["situacao"]), (Decimal("-20.00"), Decimal("120.00"), "acima"))
+        self.assertEqual(inesperado["situacao"], "nao_previsto")
+        self.assertIsNone(inesperado["percentual"])
+
+    def test_item_previsto_sem_realizado(self):
+        self.previsto(); linha = self.linha_conta(calcular_previsto_realizado(self.proposta), self.conta_custo_sem_movimento)
+        self.assertEqual(linha["situacao"], "sem_realizado")
+
+    def test_rateio_entre_obras_usa_apenas_parcela_da_obra(self):
+        self.previsto()
+        outra = CentroCusto.objects.create(empresa=self.empresa, codigo="OUTRA-TESTE", nome="Outra")
+        lancamento = self.lancamento("PAGAR", self.conta_custo, "100")
+        RateioCentroCusto.objects.create(lancamento=lancamento, centro_custo=self.obra, valor=40)
+        RateioCentroCusto.objects.create(lancamento=lancamento, centro_custo=outra, valor=60)
+        self.assertEqual(self.linha_conta(calcular_previsto_realizado(self.proposta), self.conta_custo)["realizado"], Decimal("40.00"))
+
+    def test_cancelado_fica_fora_e_nao_ha_duplicidade(self):
+        self.previsto(); self.lancamento("PAGAR", self.conta_custo, "20", self.obra); self.lancamento("PAGAR", self.conta_custo, "80", self.obra, "CANCELADO")
+        relatorio = calcular_previsto_realizado(self.proposta)
+        self.assertEqual(self.linha_conta(relatorio, self.conta_custo)["realizado"], Decimal("20.00"))
+        self.assertEqual(len(relatorio["detalhes"]), 1)
+
+    def test_isolamento_por_empresa(self):
+        self.previsto()
+        outra_empresa = Empresa.objects.create(razao_social="Outra Empresa", cnpj="33.333.333/0001-33")
+        outra_obra = CentroCusto.objects.create(empresa=outra_empresa, codigo="ISOLADA", nome="Isolada")
+        lancamento = LancamentoFinanceiro.objects.create(empresa=outra_empresa, pessoa=self.cliente, tipo="PAGAR", descricao="Fora", data_emissao=date(2026, 8, 1), valor_total=999, plano_conta=self.conta_custo)
+        RateioCentroCusto.objects.create(lancamento=lancamento, centro_custo=outra_obra, valor=999)
+        self.assertEqual(self.linha_conta(calcular_previsto_realizado(self.proposta), self.conta_custo)["realizado"], Decimal("0.00"))
+
+    def test_view_renderiza_resumo_detalhes_e_link(self):
+        self.previsto(); self.realizados(); self.client.force_login(self.usuario)
+        resposta = self.client.get(reverse("comercial:previsto_realizado", args=[self.proposta.pk]))
+        self.assertContains(resposta, "Previsto × Realizado")
+        self.assertContains(resposta, "R$ 200,00")
+        self.assertContains(resposta, reverse("financeiro:detalhe_conta_pagar", args=[LancamentoFinanceiro.objects.filter(tipo="PAGAR").first().pk]))

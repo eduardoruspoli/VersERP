@@ -17,4 +17,5 @@ urlpatterns = [
     path("propostas/<int:pk>/aprovar/", views.proposta_aprovar, name="proposta_aprovar"),
     path("propostas/<int:pk>/<str:acao>/motivo/", views.proposta_motivo, name="proposta_motivo"),
     path("revisoes/<int:pk>/documento/", views.documento_publico, name="documento_publico"),
+    path("propostas/<int:pk>/previsto-realizado/", views.previsto_realizado, name="previsto_realizado"),
 ]

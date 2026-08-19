@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.http import HttpResponseBadRequest
@@ -7,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import MotivoStatusForm, PropostaCriacaoForm, PropostaItemForm, PropostaLinhaPublicaForm, PropostaRevisaoForm, PropostaTributoForm
 from .models import Proposta, PropostaRevisao
-from .services import aprovar_proposta, calcular_precificacao, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta
+from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta
 
 
 @login_required
@@ -146,3 +147,13 @@ def proposta_motivo(request, pk, acao):
 def documento_publico(request, pk):
     revisao = get_object_or_404(PropostaRevisao.objects.prefetch_related("linhas_publicas"), pk=pk)
     return render(request, "comercial/documento_publico.html", {"documento": montar_contexto_publico_proposta(revisao)})
+
+
+@login_required
+def previsto_realizado(request, pk):
+    proposta = get_object_or_404(Proposta, pk=pk)
+    relatorio = calcular_previsto_realizado(proposta)
+    pagina = None
+    if relatorio["disponivel"]:
+        pagina = Paginator(relatorio["detalhes"], 20).get_page(request.GET.get("page"))
+    return render(request, "comercial/previsto_realizado.html", {"proposta": proposta, "relatorio": relatorio, "pagina": pagina})

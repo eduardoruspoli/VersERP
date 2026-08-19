@@ -4,10 +4,13 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Max, Sum
+from django.db.models import Max, Min, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from financeiro.models import CentroCusto
+from financeiro.models import RateioCentroCusto
+from financeiro.services import calcular_relatorio_obra
 
 from .models import (
     ModeloConteudoProposta,
@@ -20,6 +23,7 @@ from .models import (
 )
 
 CENTAVO = Decimal("0.01")
+ZERO = Decimal("0.00")
 
 TRANSICOES_PERMITIDAS = {
     Proposta.Status.RASCUNHO: {Proposta.Status.ENVIADA, Proposta.Status.CANCELADA},
@@ -208,6 +212,97 @@ def cancelar_proposta(proposta, usuario, motivo):
     proposta = Proposta.objects.select_for_update().get(pk=proposta.pk)
     _registrar_status(proposta, Proposta.Status.CANCELADA, usuario, motivo.strip())
     return proposta
+
+
+def calcular_previsto_realizado(proposta):
+    """Compara a revisão aprovada à apropriação financeira da obra, sem persistir derivados."""
+    proposta = Proposta.objects.select_related("empresa", "centro_custo", "revisao_aprovada").get(pk=proposta.pk)
+    if proposta.status not in {Proposta.Status.APROVADA, Proposta.Status.CANCELADA} or not proposta.revisao_aprovada_id:
+        return {"disponivel": False, "motivo": "A proposta ainda não possui uma revisão aprovada."}
+    if not proposta.centro_custo_id:
+        return {"disponivel": False, "motivo": "A proposta aprovada não possui obra vinculada."}
+
+    revisao = proposta.revisao_aprovada
+    obra = proposta.centro_custo
+    precificacao = calcular_precificacao(revisao)
+    periodo = (
+        RateioCentroCusto.objects.filter(centro_custo=obra, lancamento__empresa=proposta.empresa)
+        .exclude(lancamento__status="CANCELADO")
+        .annotate(data_referencia=Coalesce("lancamento__data_competencia", "lancamento__data_emissao"))
+        .aggregate(inicio=Min("data_referencia"), fim=Max("data_referencia"))
+    )
+    inicio = periodo["inicio"] or revisao.data_proposta
+    fim = periodo["fim"] or revisao.data_proposta
+    realizado = calcular_relatorio_obra(obra, inicio, fim)
+
+    categorias = {}
+    sem_classificacao = {}
+    itens = revisao.itens.select_related("plano_conta").order_by("ordem", "pk")
+    for item in itens:
+        if item.plano_conta_id:
+            chave = ("CONTA", item.plano_conta_id)
+            linha = categorias.setdefault(chave, {"chave": chave, "nome": f"{item.plano_conta.codigo} — {item.plano_conta.nome}", "tipos": set(), "plano_conta": item.plano_conta, "previsto": ZERO, "realizado": ZERO})
+            linha["tipos"].add(item.get_tipo_display())
+            linha["previsto"] += item.custo_total
+        else:
+            chave = ("SEM_CONTA", item.tipo)
+            linha = sem_classificacao.setdefault(chave, {"chave": chave, "nome": f"Sem classificação prevista — {item.get_tipo_display()}", "tipos": {item.get_tipo_display()}, "plano_conta": None, "previsto": ZERO, "realizado": ZERO})
+            linha["previsto"] += item.custo_total
+
+    detalhes = []
+    realizados_por_conta = {}
+    for detalhe in realizado["detalhes"]:
+        lancamento = detalhe["lancamento"]
+        detalhes.append(detalhe)
+        if lancamento.plano_conta.tipo not in {"CUSTO", "DESPESA"}:
+            continue
+        realizados_por_conta[lancamento.plano_conta_id] = realizados_por_conta.get(lancamento.plano_conta_id, ZERO) + detalhe["valor_rateado"]
+
+    for conta_id, valor in realizados_por_conta.items():
+        chave = ("CONTA", conta_id)
+        if chave in categorias:
+            categorias[chave]["realizado"] = valor
+        else:
+            detalhe = next(item for item in realizado["detalhes"] if item["lancamento"].plano_conta_id == conta_id)
+            conta = detalhe["lancamento"].plano_conta
+            categorias[("NAO_PREVISTO", conta_id)] = {"chave": ("NAO_PREVISTO", conta_id), "nome": f"Não previsto — {conta.codigo} — {conta.nome}", "tipos": set(), "plano_conta": conta, "previsto": ZERO, "realizado": valor}
+
+    linhas = list(categorias.values()) + list(sem_classificacao.values())
+    alertas = []
+    for linha in linhas:
+        linha["previsto"] = _dinheiro(linha["previsto"])
+        linha["realizado"] = _dinheiro(linha["realizado"])
+        linha["diferenca"] = _dinheiro(linha["previsto"] - linha["realizado"])
+        linha["percentual"] = (linha["realizado"] / linha["previsto"] * 100).quantize(CENTAVO) if linha["previsto"] else None
+        linha["tipos"] = ", ".join(sorted(linha["tipos"]))
+        if linha["previsto"] == ZERO and linha["realizado"] > ZERO:
+            linha["situacao"] = "nao_previsto"; alertas.append(f"Gasto não previsto em {linha['nome']}.")
+        elif linha["realizado"] > linha["previsto"]:
+            linha["situacao"] = "acima"; alertas.append(f"Orçamento excedido em {linha['nome']}.")
+        elif linha["realizado"] == ZERO and linha["previsto"] > ZERO:
+            linha["situacao"] = "sem_realizado"; alertas.append(f"Item previsto ainda sem realização em {linha['nome']}.")
+        else:
+            linha["situacao"] = "abaixo"
+        if linha["chave"][0] == "SEM_CONTA":
+            alertas.append(f"Item sem Plano de Contas previsto: {linha['nome']}.")
+
+    custo_despesa_realizado = _dinheiro(realizado["custos"] + realizado["despesas"])
+    margem_realizada = realizado["margem"]
+    return {
+        "disponivel": True, "proposta": proposta, "revisao": revisao, "obra": obra,
+        "periodo": {"inicio": inicio, "fim": fim},
+        "resumo": {
+            "venda_prevista": precificacao["preco_final"], "receita_realizada": realizado["receitas"],
+            "custo_previsto": precificacao["custo_total"], "impostos_previstos": precificacao["tributos"],
+            "custo_despesa_realizado": custo_despesa_realizado, "custos_realizados": realizado["custos"], "despesas_realizadas": realizado["despesas"],
+            "resultado_previsto": precificacao["resultado"], "resultado_realizado": realizado["resultado_obra"],
+            "margem_prevista": precificacao["margem"], "margem_realizada": margem_realizada,
+            "diferenca_custo": _dinheiro(precificacao["custo_total"] - custo_despesa_realizado),
+            "diferenca_resultado": _dinheiro(precificacao["resultado"] - realizado["resultado_obra"]),
+            "diferenca_margem": _dinheiro(precificacao["margem"] - margem_realizada) if margem_realizada is not None else None,
+        },
+        "categorias": linhas, "detalhes": detalhes, "alertas": alertas,
+    }
 
 
 def montar_contexto_publico_proposta(revisao):

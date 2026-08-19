@@ -8,6 +8,13 @@
 .proposta-fluxo-resumo > div { border-left: 3px solid #17365d; background: #f8fafc; padding: .75rem; }
 .proposta-fluxo-resumo span { display: block; color: #64748b; font-size: .78rem; }
 .proposta-acoes { flex-wrap: wrap; }
+.previsto-resumo { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; }
+.previsto-resumo > div { border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; }
+.previsto-resumo span, .previsto-resumo small { display: block; color: #64748b; }
+.previsto-resumo strong { display: block; margin: .2rem 0; font-size: 1.1rem; }
+.previsto-alertas { border-left: 4px solid #d97706; }
+.situacao-acima, .situacao-nao_previsto { background: #fff1f2; }
+.situacao-sem_realizado { background: #fffbeb; }
 
 .documento-proposta { margin: 0; background: #e5e7eb; color: #1f2937; font: 14px/1.5 Arial, sans-serif; }
 .folha-a4 { box-sizing: border-box; width: 210mm; min-height: 297mm; margin: 12mm auto; padding: 16mm; background: #fff; }
@@ -34,6 +41,7 @@
 @media (max-width: 900px) {
     .proposta-resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .proposta-fluxo-resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .previsto-resumo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .proposta-filtro, .proposta-cabecalho { flex-direction: column; }
     .proposta-cabecalho div:last-child { text-align: left; }
     .folha-a4 { width: 100%; min-height: auto; margin: 0; padding: 20px; }
@@ -43,6 +51,7 @@
 @media (max-width: 560px) {
     .proposta-resumo { grid-template-columns: 1fr; }
     .proposta-fluxo-resumo { grid-template-columns: 1fr; }
+    .previsto-resumo { grid-template-columns: 1fr; }
 }
 
 @page { size: A4; margin: 12mm; }
