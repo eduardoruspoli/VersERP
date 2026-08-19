@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Solicitação de Compra | VersERP{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>{% if solicitacao.pk %}Editar {{ solicitacao.identificacao }}{% else %}Nova Solicitação de Compra{% endif %}</h1><p>Uma solicitação representa necessidades de uma única obra.</p></div><a class="btn btn-light" href="{% url 'compras:solicitacao_lista' %}">Voltar</a></div>
+<form method="post" class="verserp-form solicitacao-form" data-itens-url="{% url 'compras:itens_previstos_obra' 0 %}">{% csrf_token %}{{ form.non_field_errors }}
+<section class="form-section"><div class="form-section-header"><div><h2>Dados gerais</h2><p>Defina a empresa, obra e prioridade.</p></div></div><div class="form-grid">{% for field in form %}<div class="form-group {% if field.name == 'observacao' %}form-group-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}</div>{% endfor %}</div></section>
+<section class="form-section"><div class="form-section-header"><div><h2>Itens solicitados</h2><p>Selecione um item aprovado para preencher a referência prevista, ou deixe sem vínculo para registrar algo não previsto.</p></div></div>{{ formset.management_form }}{{ formset.non_form_errors }}<div class="solicitacao-itens">{% for item_form in formset %}<article class="solicitacao-item">{{ item_form.id }}<div class="form-grid">{% for field in item_form.visible_fields %}<div class="form-group {% if field.name == 'observacao' or field.name == 'descricao' %}form-group-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}</div></article>{% endfor %}</div></section>
+<div class="form-actions"><button class="btn btn-primary" type="submit">Salvar rascunho</button></div></form>
+{% endblock %}
+{% block extra_js %}<script src="{% static 'js/compras_solicitacao.js' %}"></script>{% endblock %}

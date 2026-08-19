@@ -1,0 +1,8 @@
+.compras-filtros { display: flex; align-items: end; gap: .75rem; margin-bottom: 1rem; }
+.solicitacao-itens { display: grid; gap: 1rem; }
+.solicitacao-item { border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; background: #f8fafc; }
+.origem-nao_previsto { background: #fff7ed; }
+.origem-substituicao { background: #fffbeb; }
+.solicitacao-form .errorlist { color: #b91c1c; margin: .25rem 0 0; }
+.solicitacao-item td small, .table td small { display: block; color: #64748b; }
+@media (max-width: 760px) { .compras-filtros { align-items: stretch; flex-direction: column; } }

@@ -41,10 +41,12 @@
 
         {% endif %}
 
-        <a href="javascript:void(0);" class="sidebar-disabled">
-            <i class="bi bi-cart3"></i>
-            <span>Compras</span>
-        </a>
+        {% if perms.compras.view_solicitacaocompra %}
+            <a href="{% url 'compras:solicitacao_lista' %}" {% if request.resolver_match.app_name == "compras" %}class="active" aria-current="page"{% endif %}>
+                <i class="bi bi-cart3"></i>
+                <span>Compras</span>
+            </a>
+        {% endif %}
 
         <a href="javascript:void(0);" class="sidebar-disabled">
             <i class="bi bi-person-badge"></i>
