@@ -5,6 +5,9 @@ from . import views
 app_name = "compras"
 
 urlpatterns = [
+    path("previsto-comprado/",views.previsto_comprado,name="previsto_comprado"),
+    path("obras/<int:obra_pk>/previsto-comprado/",views.previsto_comprado,name="previsto_comprado_obra"),
+    path("obras/<int:obra_pk>/previsto-comprado/itens/<int:item_pk>/",views.previsto_comprado_item,name="previsto_comprado_item"),
     path("pedidos/<int:pedido_pk>/recebimentos/novo/",views.recebimento_criar,name="recebimento_criar"),
     path("recebimentos/<int:pk>/",views.recebimento_detalhe,name="recebimento_detalhe"),
     path("recebimentos/<int:pk>/editar/",views.recebimento_editar,name="recebimento_editar"),

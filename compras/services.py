@@ -9,7 +9,7 @@ from .models import (
     CotacaoFornecedor, EscolhaCotacaoItem, HistoricoPedidoCompra, HistoricoProcessoCotacao,
     DivergenciaRecebimento, HistoricoSolicitacaoCompra, PedidoCompra, PedidoCompraItem,
     PedidoItemAlocacaoObra, RecebimentoCompra, RecebimentoCompraItem,
-    ProcessoCotacao, SolicitacaoCompra,
+    ProcessoCotacao, SolicitacaoCompra, SolicitacaoCompraItem,
 )
 
 
@@ -363,3 +363,71 @@ def resolver_divergencia(divergencia,usuario,solucao):
     divergencia.resolvida=True; divergencia.resolvida_por=usuario; divergencia.resolvida_em=agora; divergencia.solucao=solucao.strip()
     referencia.resolvida=True; referencia.resolvida_por=usuario; referencia.resolvida_em=agora; referencia.solucao=solucao.strip()
     return divergencia
+
+
+QUANTIDADE = Decimal("0.0001")
+
+
+def _ratear_quantidade(valor, alocacoes):
+    valor=Decimal(valor or 0).quantize(QUANTIDADE,ROUND_DOWN); alocacoes=list(alocacoes)
+    if not alocacoes: return {}
+    total=sum((a.quantidade for a in alocacoes),Decimal("0"))
+    if not total: return {a.pk:Decimal("0") for a in alocacoes}
+    resultado={a.pk:(valor*a.quantidade/total).quantize(QUANTIDADE,ROUND_DOWN) for a in alocacoes}
+    restante=valor-sum(resultado.values(),Decimal("0")); passos=int((restante/QUANTIDADE).to_integral_value())
+    ordem=sorted(alocacoes,key=lambda a:(-a.quantidade,a.pk))
+    for indice in range(passos): resultado[ordem[indice%len(ordem)].pk]+=QUANTIDADE
+    return resultado
+
+
+def calcular_previsto_comprado(obra, *, tipo_origem="", status_pedido="", plano_conta_id=None, somente_divergencias=False):
+    """Compara compras da obra com a revisão aprovada, sem persistir derivados."""
+    from django.db.models import Prefetch
+    proposta=getattr(obra,"proposta_origem",None)
+    if not proposta or not proposta.revisao_aprovada_id:
+        return {"disponivel":False,"motivo":"A obra não possui proposta com revisão aprovada.","obra":obra}
+    previstos=list(proposta.revisao_aprovada.itens.select_related("plano_conta").order_by("ordem","id"))
+    if plano_conta_id: previstos=[p for p in previstos if p.plano_conta_id==int(plano_conta_id)]
+    solicitacoes=list(SolicitacaoCompraItem.objects.filter(solicitacao__obra=obra,cancelado=False).select_related("solicitacao","proposta_item"))
+    solicitadas={}
+    for item in solicitacoes:
+        if item.proposta_item_id: solicitadas[item.proposta_item_id]=solicitadas.get(item.proposta_item_id,Decimal("0"))+item.quantidade
+    status_validos=[PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO,PedidoCompra.Status.RECEBIDO]
+    itens_recebidos=RecebimentoCompraItem.objects.filter(recebimento__status=RecebimentoCompra.Status.CONFIRMADO).select_related("recebimento")
+    pedidos_qs=PedidoCompraItem.objects.filter(pedido__status__in=status_validos,alocacoes__obra=obra).select_related("pedido__fornecedor","solicitacao_item","proposta_item").prefetch_related("alocacoes",Prefetch("itens_recebimento",queryset=itens_recebidos),"itens_recebimento__divergencias").distinct()
+    if status_pedido: pedidos_qs=pedidos_qs.filter(pedido__status=status_pedido)
+    itens_pedido=list(pedidos_qs)
+    compras_previstas={p.pk:[] for p in previstos}; nao_previstos=[]; substituicoes=[]; pedidos_relacionados={}
+    total_comprado=Decimal("0"); total_recebido=Decimal("0"); pedidos_pendentes=set(); alertas=[]
+    for item in itens_pedido:
+        alocacoes=list(item.alocacoes.all()); alocacao=next((a for a in alocacoes if a.obra_id==obra.pk),None)
+        if not alocacao or (tipo_origem and alocacao.tipo_origem!=tipo_origem): continue
+        aceita_total=sum((r.quantidade_aceita for r in item.itens_recebimento.all()),Decimal("0"))
+        recebidas_rateadas=_ratear_quantidade(aceita_total,alocacoes); quantidade_recebida=recebidas_rateadas.get(alocacao.pk,Decimal("0"))
+        valor_recebido=(alocacao.valor*quantidade_recebida/alocacao.quantidade).quantize(CENTAVO,ROUND_HALF_UP) if alocacao.quantidade else Decimal("0")
+        divergencias_abertas=sum(1 for r in item.itens_recebimento.all() for d in r.divergencias.all() if not d.resolvida)
+        dado={"pedido_item":item,"alocacao":alocacao,"quantidade":alocacao.quantidade,"valor":alocacao.valor,"quantidade_recebida":quantidade_recebida,"valor_recebido":valor_recebido,"pendente_recebimento":max(alocacao.quantidade-quantidade_recebida,Decimal("0")),"divergencias_abertas":divergencias_abertas}
+        if somente_divergencias and not (divergencias_abertas or alocacao.tipo_origem in {SolicitacaoCompraItem.TipoOrigem.SUBSTITUICAO,SolicitacaoCompraItem.TipoOrigem.NAO_PREVISTO}): continue
+        total_comprado+=alocacao.valor; total_recebido+=valor_recebido
+        if dado["pendente_recebimento"]>0: pedidos_pendentes.add(item.pedido_id)
+        pedidos_relacionados[item.pedido_id]=item.pedido
+        if alocacao.proposta_item_id in compras_previstas: compras_previstas[alocacao.proposta_item_id].append(dado)
+        if alocacao.tipo_origem==SolicitacaoCompraItem.TipoOrigem.SUBSTITUICAO: substituicoes.append(dado)
+        elif not alocacao.proposta_item_id: nao_previstos.append(dado)
+    linhas=[]
+    for previsto in previstos:
+        compras=compras_previstas.get(previsto.pk,[]); qtd_comprada=sum((c["quantidade"] for c in compras),Decimal("0")); valor_comprado=sum((c["valor"] for c in compras),Decimal("0")); qtd_recebida=sum((c["quantidade_recebida"] for c in compras),Decimal("0")); valor_recebido=sum((c["valor_recebido"] for c in compras),Decimal("0")); qtd_solicitada=solicitadas.get(previsto.pk,Decimal("0"))
+        linha={"previsto":previsto,"quantidade_solicitada":qtd_solicitada,"quantidade_comprada":qtd_comprada,"quantidade_recebida":qtd_recebida,"pendente_compra":max(previsto.quantidade-qtd_comprada,Decimal("0")),"diferenca_quantidade":qtd_comprada-previsto.quantidade,"pendente_recebimento":max(qtd_comprada-qtd_recebida,Decimal("0")),"valor_comprado":valor_comprado,"valor_recebido":valor_recebido,"custo_medio":(valor_comprado/qtd_comprada).quantize(Decimal("0.0001"),ROUND_HALF_UP) if qtd_comprada else None,"diferenca_financeira":valor_comprado-previsto.custo_total,"percentual_comprado":(qtd_comprada/previsto.quantidade*100).quantize(CENTAVO) if previsto.quantidade else None,"compras":compras,"alertas":[]}
+        if not compras: linha["situacao"]="NAO_COMPRADO"; linha["alertas"].append("Item previsto sem compra")
+        elif qtd_comprada<previsto.quantidade: linha["situacao"]="PARCIAL"; linha["alertas"].append("Compra parcial")
+        else: linha["situacao"]="COMPRADO"
+        if qtd_comprada>previsto.quantidade: linha["alertas"].append("Quantidade acima do previsto")
+        if valor_comprado>previsto.custo_total: linha["alertas"].append("Custo acima do previsto")
+        if linha["pendente_recebimento"]>0: linha["alertas"].append("Recebimento pendente")
+        if any(c["divergencias_abertas"] for c in compras): linha["alertas"].append("Divergência de recebimento aberta")
+        linhas.append(linha); alertas.extend(f"{previsto.descricao}: {a}." for a in linha["alertas"])
+    for item in nao_previstos: alertas.append(f"Compra não prevista: {item['pedido_item'].descricao_mercadoria}.")
+    for item in substituicoes: alertas.append(f"Substituição: {item['pedido_item'].descricao_mercadoria}.")
+    previsto_total=sum((p.custo_total for p in previstos),Decimal("0")); solicitado_valor=sum((s.quantidade*(s.custo_unitario_previsto_snapshot or Decimal("0"))) for s in solicitacoes)
+    resumo={"custo_previsto":previsto_total,"valor_solicitado":solicitado_valor,"valor_comprado":total_comprado,"valor_recebido":total_recebido,"economia_estouro":previsto_total-total_comprado,"compras_nao_previstas":sum((x["valor"] for x in nao_previstos),Decimal("0")),"itens_sem_compra":sum(1 for x in linhas if not x["compras"]),"pedidos_pendentes_recebimento":len(pedidos_pendentes),"percentual_orcamento_comprado":(total_comprado/previsto_total*100).quantize(CENTAVO) if previsto_total else None,"percentual_comprado_recebido":(total_recebido/total_comprado*100).quantize(CENTAVO) if total_comprado else None}
+    return {"disponivel":True,"obra":obra,"proposta":proposta,"revisao":proposta.revisao_aprovada,"resumo":resumo,"itens_previstos":linhas,"nao_previstos":nao_previstos,"substituicoes":substituicoes,"pedidos":list(pedidos_relacionados.values()),"alertas":alertas}

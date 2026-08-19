@@ -4,8 +4,9 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -23,7 +24,8 @@ from .services import (abrir_solicitacao, calcular_custos_cotacao, cancelar_proc
                        montar_mapa_comparativo, recalcular_pedido, rejeitar_pedido,
                        selecionar_oferta, submeter_pedido, aprovar_pedido,
                        cancelar_recebimento, confirmar_recebimento,
-                       quantidades_recebimento_pedido, resolver_divergencia)
+                       quantidades_recebimento_pedido, resolver_divergencia,
+                       calcular_previsto_comprado)
 
 
 class ComprasBase(TestCase):
@@ -532,3 +534,52 @@ class RecebimentoCompraTests(ComprasBase):
         with self.assertRaises(ValidationError): RecebimentoCompraItem.objects.create(recebimento=r,pedido_item=i2,quantidade_recebida=1,quantidade_aceita=1)
     def test_telas_e_permissoes(self):
         p,i=self.pedido(); r,ri=self.recebimento(p,i,10,10); self.client.force_login(self.usuario); self.assertEqual(self.client.get(reverse("compras:recebimento_detalhe",args=[r.pk])).status_code,403); self.permissao("view_recebimentocompra","view_pedidocompra"); self.assertContains(self.client.get(reverse("compras:recebimento_detalhe",args=[r.pk])),"Material recebido"); self.assertContains(self.client.get(reverse("compras:pedido_detalhe",args=[p.pk])),"Pendente")
+
+
+class PrevistoCompradoTests(ComprasBase):
+    def setUp(self):
+        super().setUp(); self.fornecedor=Pessoa.objects.create(razao_social="Fornecedor Análise",classificacao="FORNECEDOR"); self.seq=0
+    def comprar(self,proposta_item=None,quantidade=10,unitario=10,valor_alocacao=None,obra=None,tipo="PREVISTO",status="APROVADO",recebido=0,rejeitado=0):
+        self.seq+=1; obra=obra or self.obra
+        p=PedidoCompra.objects.create(empresa=obra.empresa,fornecedor=self.fornecedor,origem="DIRETA",justificativa_origem="Teste",numero_pedido_versatile=f"AN-{self.seq}",condicao_pagamento="28 dias",prazo_entrega="5 dias",criado_por=self.usuario)
+        item=PedidoCompraItem.objects.create(pedido=p,proposta_item=proposta_item,descricao_mercadoria=f"Compra {self.seq}",quantidade=quantidade,unidade=proposta_item.unidade if proposta_item else "UN",valor_unitario=unitario); recalcular_pedido(p); item.refresh_from_db()
+        aloc=PedidoItemAlocacaoObra.objects.create(pedido_item=item,obra=obra,proposta_item=proposta_item,quantidade=quantidade,valor=valor_alocacao if valor_alocacao is not None else item.custo_total,tipo_origem=tipo)
+        PedidoCompra.objects.filter(pk=p.pk).update(status=status); p.status=status
+        if recebido or rejeitado:
+            r=RecebimentoCompra.objects.create(pedido=p,responsavel=self.usuario,criado_por=self.usuario); RecebimentoCompraItem.objects.create(recebimento=r,pedido_item=item,quantidade_recebida=recebido+rejeitado,quantidade_aceita=recebido,quantidade_rejeitada=rejeitado); RecebimentoCompra.objects.filter(pk=r.pk).update(status="CONFIRMADO")
+        return p,item,aloc
+    def linha(self,relatorio=None,item=None):
+        item=item or self.proposta_item; return next(x for x in (relatorio or calcular_previsto_comprado(self.obra))["itens_previstos"] if x["previsto"].pk==item.pk)
+    def test_item_previsto_sem_compra(self):
+        l=self.linha(); self.assertEqual(l["situacao"],"NAO_COMPRADO"); self.assertEqual(l["pendente_compra"],Decimal("500"))
+    def test_compra_parcial_total_e_acima(self):
+        self.comprar(self.proposta_item,quantidade=60,unitario=5); l=self.linha(); self.assertEqual((l["percentual_comprado"],l["pendente_compra"]),(Decimal("12.00"),Decimal("440")))
+        self.comprar(self.proposta_item,quantidade=500,unitario=5); l=self.linha(); self.assertIn("Quantidade acima do previsto",l["alertas"])
+    def test_economia_e_custo_acima(self):
+        self.comprar(self.proposta_item,quantidade=500,unitario=4); self.assertEqual(self.linha()["diferenca_financeira"],Decimal("-500.00"))
+        self.comprar(self.proposta_item,quantidade=1,unitario=600); self.assertIn("Custo acima do previsto",self.linha()["alertas"])
+    def test_media_ponderada_varios_pedidos_fornecedores(self):
+        self.comprar(self.proposta_item,quantidade=100,unitario=4); outro=Pessoa.objects.create(razao_social="Outro Fornecedor Análise",classificacao="FORNECEDOR"); self.fornecedor=outro; self.comprar(self.proposta_item,quantidade=300,unitario=6); l=self.linha(); self.assertEqual(l["custo_medio"],Decimal("5.5000")); self.assertEqual(len(l["compras"]),2)
+    def test_custo_efetivo_com_adicionais(self):
+        p,item,a=self.comprar(self.proposta_item,quantidade=10,unitario=10); PedidoCompra.objects.filter(pk=p.pk).update(status="RASCUNHO",frete=10,desconto=5,impostos=2,outras_despesas=3); p.status="RASCUNHO"; p.frete=10;p.desconto=5;p.impostos=2;p.outras_despesas=3; recalcular_pedido(p); item.refresh_from_db(); PedidoItemAlocacaoObra.objects.filter(pk=a.pk).update(valor=item.custo_total); PedidoCompra.objects.filter(pk=p.pk).update(status="APROVADO"); self.assertEqual(self.linha()["valor_comprado"],Decimal("110.00"))
+    def test_multiobra_nao_duplica_valor(self):
+        outra=CentroCusto.objects.create(empresa=self.empresa,codigo="AN-OBRA-2",nome="Outra obra"); p,item,a=self.comprar(self.proposta_item,quantidade=10,unitario=10,valor_alocacao=40); PedidoCompra.objects.filter(pk=p.pk).update(status="RASCUNHO"); p.status="RASCUNHO"; PedidoItemAlocacaoObra.objects.create(pedido_item=item,obra=outra,proposta_item=self.proposta_item,quantidade=15,valor=60,tipo_origem="PREVISTO"); PedidoCompra.objects.filter(pk=p.pk).update(status="APROVADO"); self.assertEqual(self.linha()["valor_comprado"],Decimal("40"))
+    def test_nao_previsto_e_substituicao(self):
+        self.comprar(None,quantidade=2,unitario=20,tipo="NAO_PREVISTO"); self.comprar(self.proposta_item,quantidade=1,unitario=30,tipo="SUBSTITUICAO"); r=calcular_previsto_comprado(self.obra); self.assertEqual(len(r["nao_previstos"]),1); self.assertEqual(len(r["substituicoes"]),1)
+    def test_recebimento_parcial_multiplos_e_rejeitado(self):
+        self.comprar(self.proposta_item,quantidade=100,unitario=5,recebido=30,rejeitado=5); self.comprar(self.proposta_item,quantidade=50,unitario=5,recebido=50); l=self.linha(); self.assertEqual(l["quantidade_recebida"],Decimal("80")); self.assertEqual(l["pendente_recebimento"],Decimal("70"))
+    def test_pedido_cancelado_ou_rejeitado_fora(self):
+        self.comprar(self.proposta_item,status="CANCELADO"); self.comprar(self.proposta_item,status="REJEITADO"); self.assertEqual(self.linha()["quantidade_comprada"],0)
+    def test_revisao_aprovada_exclusiva(self):
+        nova=PropostaRevisao.objects.create(proposta=self.proposta,numero=1,data_proposta=date.today(),nome_servico="Não aprovada"); PropostaItem.objects.create(revisao=nova,tipo="MATERIAL",descricao="Fora",quantidade=999,custo_unitario=1); self.proposta.revisao_atual=1; self.proposta.save(); r=calcular_previsto_comprado(self.obra); self.assertEqual([x["previsto"].descricao for x in r["itens_previstos"]],["Cabo 4 mm"])
+    def test_solicitado_por_vinculo_explicito(self):
+        sc=self.solicitacao(); self.item(solicitacao=sc,proposta_item=self.proposta_item,tipo="PREVISTO",quantidade=25); self.assertEqual(self.linha()["quantidade_solicitada"],Decimal("25"))
+    def test_ausencia_duplicidade_e_queries_controladas(self):
+        self.comprar(self.proposta_item,quantidade=10); self.comprar(self.proposta_item,quantidade=20)
+        with CaptureQueriesContext(connection) as contexto: r=calcular_previsto_comprado(self.obra)
+        self.assertEqual(self.linha(r)["quantidade_comprada"],Decimal("30")); self.assertLessEqual(len(contexto),10)
+    def test_isolamento_empresa(self):
+        outra=CentroCusto.objects.create(empresa=self.outra_empresa,codigo="AN-OUT",nome="Outra"); self.comprar(None,obra=outra)
+        self.assertEqual(self.linha()["quantidade_comprada"],0)
+    def test_view_filtros_drilldown_e_permissao(self):
+        self.comprar(self.proposta_item); self.client.force_login(self.usuario); url=reverse("compras:previsto_comprado_obra",args=[self.obra.pk]); self.assertEqual(self.client.get(url).status_code,403); self.permissao("view_pedidocompra"); resposta=self.client.get(url); self.assertContains(resposta,"Previsto × Comprado"); self.assertContains(self.client.get(reverse("compras:previsto_comprado_item",args=[self.obra.pk,self.proposta_item.pk])),"Drill-down")

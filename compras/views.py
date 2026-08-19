@@ -10,7 +10,8 @@ from .forms import (CotacaoFornecedorForm, CotacaoFornecedorItemForm, GerarPedid
                     DivergenciaRecebimentoForm, MotivoCancelamentoForm, PedidoCompraForm, PedidoCompraItemForm,
                     PedidoItemAlocacaoForm, ProcessoCotacaoForm, SolicitacaoCompraForm,
                     SolicitacaoCompraItemFormSet, RecebimentoCompraForm,
-                    RecebimentoCompraItemFormSet, SolucaoDivergenciaForm)
+                    RecebimentoCompraItemFormSet, SolucaoDivergenciaForm,
+                    PrevistoCompradoFiltroForm)
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
                      DivergenciaRecebimento, ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, SolicitacaoCompra)
@@ -21,7 +22,8 @@ from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_so
                        montar_mapa_comparativo, recalcular_pedido, rejeitar_pedido,
                        selecionar_oferta, submeter_pedido, aprovar_pedido,
                        cancelar_recebimento, confirmar_recebimento,
-                       quantidades_recebimento_pedido, resolver_divergencia)
+                       quantidades_recebimento_pedido, resolver_divergencia,
+                       calcular_previsto_comprado)
 
 
 @login_required
@@ -374,3 +376,31 @@ def divergencia_resolver(request,pk):
         try: resolver_divergencia(divergencia,request.user,form.cleaned_data["solucao"]); return redirect("compras:recebimento_detalhe",pk=divergencia.recebimento_item.recebimento_id)
         except ValidationError as erro: form.add_error(None," ".join(erro.messages))
     return render(request,"compras/divergencia_resolver.html",{"form":form,"divergencia":divergencia})
+
+
+@login_required
+@permission_required("compras.view_pedidocompra",raise_exception=True)
+def previsto_comprado(request,obra_pk=None):
+    from financeiro.models import CentroCusto, Empresa
+    dados=request.GET.copy()
+    if obra_pk:
+        obra_url=get_object_or_404(CentroCusto,pk=obra_pk); dados.setdefault("empresa",str(obra_url.empresa_id)); dados.setdefault("obra",str(obra_url.pk))
+    elif not dados.get("empresa"):
+        principal=Empresa.objects.filter(principal=True,ativa=True).first() or Empresa.objects.filter(ativa=True).first()
+        if principal: dados["empresa"]=str(principal.pk)
+    form=PrevistoCompradoFiltroForm(dados or None)
+    relatorio=None
+    if form.is_valid():
+        obra=form.cleaned_data["obra"]; proposta=form.cleaned_data.get("proposta")
+        if proposta and proposta.centro_custo_id!=obra.pk: form.add_error("proposta","A proposta deve pertencer à obra selecionada.")
+        else: relatorio=calcular_previsto_comprado(obra,tipo_origem=form.cleaned_data.get("tipo_origem", ""),status_pedido=form.cleaned_data.get("status", ""),plano_conta_id=getattr(form.cleaned_data.get("plano_conta"),"pk",None),somente_divergencias=form.cleaned_data.get("somente_divergencias",False))
+    return render(request,"compras/previsto_comprado.html",{"form":form,"relatorio":relatorio})
+
+
+@login_required
+@permission_required("compras.view_pedidocompra",raise_exception=True)
+def previsto_comprado_item(request,obra_pk,item_pk):
+    from financeiro.models import CentroCusto
+    obra=get_object_or_404(CentroCusto,pk=obra_pk); relatorio=calcular_previsto_comprado(obra); linha=next((x for x in relatorio.get("itens_previstos",[]) if x["previsto"].pk==item_pk),None)
+    if not linha: return HttpResponseBadRequest("Item não pertence à revisão aprovada desta obra.")
+    return render(request,"compras/previsto_comprado_item.html",{"relatorio":relatorio,"linha":linha})

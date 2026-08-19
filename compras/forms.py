@@ -1,8 +1,8 @@
 from django import forms
 from django.forms import BaseInlineFormSet, inlineformset_factory
 
-from comercial.models import PropostaItem
-from financeiro.models import CentroCusto, Empresa
+from comercial.models import Proposta, PropostaItem
+from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
@@ -222,3 +222,19 @@ class DivergenciaRecebimentoForm(forms.ModelForm):
 
 class SolucaoDivergenciaForm(forms.Form):
     solucao=forms.CharField(widget=forms.Textarea(attrs={"class":"form-control","rows":3}))
+
+
+class PrevistoCompradoFiltroForm(forms.Form):
+    empresa=forms.ModelChoiceField(queryset=Empresa.objects.all(),required=True,widget=forms.Select(attrs={"class":"form-select"}))
+    obra=forms.ModelChoiceField(queryset=CentroCusto.objects.all(),required=True,widget=forms.Select(attrs={"class":"form-select"}))
+    proposta=forms.ModelChoiceField(queryset=Proposta.objects.all(),required=False,widget=forms.Select(attrs={"class":"form-select"}))
+    tipo_origem=forms.ChoiceField(choices=[("","Todas as origens")]+list(SolicitacaoCompraItem.TipoOrigem.choices),required=False,widget=forms.Select(attrs={"class":"form-select"}))
+    status=forms.ChoiceField(choices=[("","Todos os pedidos")]+list(PedidoCompra.Status.choices),required=False,widget=forms.Select(attrs={"class":"form-select"}))
+    plano_conta=forms.ModelChoiceField(queryset=PlanoConta.objects.all(),required=False,widget=forms.Select(attrs={"class":"form-select"}))
+    somente_divergencias=forms.BooleanField(required=False,widget=forms.CheckboxInput(attrs={"class":"form-check-input"}))
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs); empresa_id=self.data.get("empresa") or self.initial.get("empresa")
+        if empresa_id:
+            self.fields["obra"].queryset=CentroCusto.objects.filter(empresa_id=empresa_id).order_by("codigo")
+            self.fields["proposta"].queryset=Proposta.objects.filter(empresa_id=empresa_id,revisao_aprovada__isnull=False)
+            self.fields["plano_conta"].queryset=PlanoConta.objects.filter(empresa_id=empresa_id) if hasattr(PlanoConta,"empresa_id") else PlanoConta.objects.all()
