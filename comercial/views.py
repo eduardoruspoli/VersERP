@@ -1,5 +1,5 @@
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
 from django.db.models import Q
@@ -12,6 +12,7 @@ from .services import aprovar_proposta, calcular_precificacao, calcular_previsto
 
 
 @login_required
+@permission_required("comercial.view_proposta", raise_exception=True)
 def proposta_lista(request):
     propostas = Proposta.objects.select_related("empresa", "cliente").all()
     busca = request.GET.get("q", "").strip()

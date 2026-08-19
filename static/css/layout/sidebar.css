@@ -87,6 +87,11 @@
 }
 
 
+.sidebar nav a.active {
+    background: var(--sidebar-active);
+}
+
+
 .sidebar nav a i {
     flex: 0 0 auto;
 

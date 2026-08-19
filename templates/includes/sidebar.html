@@ -19,10 +19,18 @@
             </a>
         {% endif %}
 
-        <a href="{% url 'comercial:proposta_lista' %}">
-            <i class="bi bi-file-earmark-text"></i>
-            <span>Comercial</span>
-        </a>
+        {% if perms.comercial.view_proposta %}
+            <a
+                href="{% url 'comercial:proposta_lista' %}"
+                {% if request.resolver_match.app_name == "comercial" %}
+                    class="active"
+                    aria-current="page"
+                {% endif %}
+            >
+                <i class="bi bi-file-earmark-text"></i>
+                <span>Comercial</span>
+            </a>
+        {% endif %}
 
         {% if perms.financeiro.view_lancamentofinanceiro %}
 

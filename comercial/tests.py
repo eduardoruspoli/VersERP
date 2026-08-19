@@ -128,6 +128,7 @@ class DominioPropostaTests(ComercialBase):
 class ViewsPropostaTests(ComercialBase):
     def setUp(self):
         super().setUp()
+        self.usuario.user_permissions.add(Permission.objects.get(content_type__app_label="comercial", codename="view_proposta"))
         self.client.force_login(self.usuario)
 
     def test_lista_e_detalhe(self):
@@ -153,6 +154,19 @@ class ViewsPropostaTests(ComercialBase):
         resposta = self.client.post(reverse("comercial:proposta_criar"), {"empresa": self.empresa.pk, "cliente": self.cliente.pk, "nome_servico": "Nova tela", "modelo": ""})
         self.assertEqual(resposta.status_code, 302)
         self.assertTrue(Proposta.objects.filter(revisoes__nome_servico="Nova tela").exists())
+
+    def test_menu_comercial_e_link_ativo_respeitam_permissao(self):
+        resposta = self.client.get(reverse("comercial:proposta_lista"))
+        self.assertContains(resposta, f'href="{reverse("comercial:proposta_lista")}"')
+        self.assertContains(resposta, 'class="active"')
+        self.usuario.user_permissions.clear()
+        resposta = self.client.get(reverse("core:dashboard"))
+        self.assertNotContains(resposta, ">Comercial<")
+
+    def test_listagem_exige_permissao_visualizar_proposta(self):
+        self.usuario.user_permissions.clear()
+        resposta = self.client.get(reverse("comercial:proposta_lista"))
+        self.assertEqual(resposta.status_code, 403)
 
 
 class WorkflowPropostaTests(ComercialBase):
