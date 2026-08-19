@@ -1,0 +1,14 @@
+<section class="form-section classificacoes-contabeis" data-classificacoes>
+    {{ classificacao_formset.management_form }}
+    <div class="form-section-header"><div><h2>Classificação contábil</h2><p>Mantenha o fluxo simples ou distribua o lançamento entre várias contas.</p></div></div>
+    <div class="form-group">{{ form.classificacao_multipla }} <label for="{{ form.classificacao_multipla.id_for_label }}">{{ form.classificacao_multipla.label }}</label></div>
+    <div data-classificacoes-linhas {% if not form.classificacao_multipla.value %}hidden{% endif %}>
+        {{ classificacao_formset.non_form_errors }}
+        <div class="table-responsive"><table class="table"><thead><tr><th>Plano de Contas</th><th>Valor</th><th>Observação</th><th>Remover</th></tr></thead><tbody data-classificacoes-body>
+        {% for linha in classificacao_formset %}<tr><td>{{ linha.plano_conta }}{{ linha.plano_conta.errors }}</td><td>{{ linha.valor }}{{ linha.valor.errors }}</td><td>{{ linha.observacao }}</td><td>{{ linha.DELETE }}</td></tr>{% endfor %}
+        </tbody></table></div>
+        <button type="button" class="btn btn-light" data-adicionar-classificacao>Adicionar conta</button>
+        <p><strong>Total classificado:</strong> <span data-total-classificado>R$ 0,00</span> · <strong>Saldo restante:</strong> <span data-saldo-classificacao>R$ 0,00</span></p>
+    </div>
+    <template data-classificacao-template><tr><td>{{ classificacao_formset.empty_form.plano_conta }}</td><td>{{ classificacao_formset.empty_form.valor }}</td><td>{{ classificacao_formset.empty_form.observacao }}</td><td>{{ classificacao_formset.empty_form.DELETE }}</td></tr></template>
+</section>

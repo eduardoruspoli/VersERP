@@ -636,6 +636,10 @@ class PlanoContaForm(forms.ModelForm):
 
 class LancamentoFinanceiroForm(forms.ModelForm):
 
+    classificacao_multipla = forms.BooleanField(
+        label="Distribuir em mais de uma conta contábil", required=False,
+    )
+
     modo_rateio = forms.ChoiceField(
         label="Ratear por",
         choices=[
@@ -826,6 +830,59 @@ class LancamentoFinanceiroForm(forms.ModelForm):
                 "codigo"
             )
         )
+        if self.instance.pk and self.instance.classificacoes_contabeis.count() > 1:
+            self.fields["classificacao_multipla"].initial = True
+            self.fields["plano_conta"].required = False
+        if self.is_bound and self.data.get("classificacao_multipla"):
+            self.fields["plano_conta"].required = False
+
+    def clean(self):
+        dados = super().clean()
+        if dados.get("classificacao_multipla"):
+            self.fields["plano_conta"].required = False
+            dados["plano_conta"] = None
+        elif not dados.get("plano_conta"):
+            self.add_error("plano_conta", "Informe o Plano de Contas.")
+        return dados
+
+
+class ClassificacaoContabilForm(forms.Form):
+    plano_conta = forms.ModelChoiceField(queryset=PlanoConta.objects.none(), widget=forms.Select(attrs={"class":"form-select classificacao-conta"}))
+    valor = DecimalBRField(max_digits=15, decimal_places=2, min_value=Decimal("0.01"), widget=forms.TextInput(attrs={"class":"form-control campo-moeda classificacao-valor","inputmode":"decimal"}))
+    observacao = forms.CharField(required=False, widget=forms.TextInput(attrs={"class":"form-control","placeholder":"Observação opcional"}))
+
+    def __init__(self, *args, tipo=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["plano_conta"].queryset = PlanoConta.objects.filter(
+            tipo__in=PlanoConta.tipos_para_lancamento(tipo), ativo=True,
+            estrutural=False, aceita_lancamento=True,
+        ).order_by("codigo")
+
+
+class BaseClassificacaoContabilFormSet(BaseFormSet):
+    def __init__(self, *args, tipo=None, **kwargs):
+        self.tipo = tipo
+        super().__init__(*args, **kwargs)
+        for form in self.forms:
+            form.fields["plano_conta"].queryset = PlanoConta.objects.filter(
+                tipo__in=PlanoConta.tipos_para_lancamento(tipo), ativo=True,
+                estrutural=False, aceita_lancamento=True,
+            ).order_by("codigo")
+
+    def clean(self):
+        if any(self.errors): return
+        contas=[]
+        for form in self.forms:
+            if not form.cleaned_data or form.cleaned_data.get("DELETE"): continue
+            conta=form.cleaned_data.get("plano_conta")
+            if conta in contas: raise forms.ValidationError("Não repita a mesma conta contábil.")
+            contas.append(conta)
+
+
+ClassificacaoContabilFormSet = formset_factory(
+    ClassificacaoContabilForm, formset=BaseClassificacaoContabilFormSet,
+    extra=1, can_delete=True,
+)
 
 
 class ParcelaForm(forms.Form):

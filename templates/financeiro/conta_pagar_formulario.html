@@ -225,6 +225,7 @@
     </section>
 
 
+    {% include "financeiro/_classificacoes_contabeis.html" %}
     {% include "financeiro/_rateio_centro_custo.html" %}
 
 
@@ -1565,3 +1566,5 @@ document.addEventListener(
 </script>
 
 {% endblock %}
+
+{% block extra_js %}{% load static %}<script src="{% static 'js/classificacoes_contabeis.js' %}"></script>{% endblock %}

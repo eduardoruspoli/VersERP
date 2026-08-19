@@ -20,6 +20,7 @@ from django.utils.dateparse import parse_date
 from .forms import (
     BaixaFinanceiraForm,
     CentroCustoForm,
+    ClassificacaoContabilFormSet,
     CriarLancamentoOFXForm,
     DashboardFinanceiroFiltroForm,
     DREFiltroForm,
@@ -54,6 +55,7 @@ from .services import (
     calcular_dre,
     calcular_relatorio_obra,
     drilldown_dre,
+    salvar_classificacoes_lancamento,
 )
 
 
@@ -309,6 +311,32 @@ def salvar_rateios(lancamento, rateio_formset):
         )
 
 
+def preparar_classificacoes(request, form, tipo, lancamento=None):
+    multipla = bool(form.cleaned_data.get("classificacao_multipla")) if form.is_bound and form.is_valid() else False
+    initial = []
+    if lancamento:
+        initial = [{"plano_conta": c.plano_conta, "valor": c.valor, "observacao": c.observacao}
+                   for c in lancamento.classificacoes_contabeis.order_by("ordem", "pk")]
+    if request.method == "POST" and request.POST.get("classificacoes-TOTAL_FORMS") is not None:
+        formset = ClassificacaoContabilFormSet(request.POST, prefix="classificacoes", tipo=tipo)
+    else:
+        formset = ClassificacaoContabilFormSet(initial=initial, prefix="classificacoes", tipo=tipo)
+    if not multipla:
+        return formset, True, [{"plano_conta": form.cleaned_data.get("plano_conta"), "valor": form.cleaned_data.get("valor_total"), "ordem": 1}] if form.is_bound and form.is_valid() else []
+    if not request.user.has_perm("financeiro.change_classificacoes_multiplas"):
+        form.add_error(None, "Você não possui permissão para editar classificações contábeis múltiplas.")
+        return formset, False, []
+    valido = formset.is_valid()
+    dados = []
+    if valido:
+        dados = [linha.cleaned_data for linha in formset.forms if linha.cleaned_data and not linha.cleaned_data.get("DELETE")]
+        if not dados:
+            form.add_error(None, "Informe ao menos uma classificação contábil."); valido = False
+        elif sum((item["valor"] for item in dados), Decimal("0.00")) != form.cleaned_data.get("valor_total"):
+            form.add_error(None, "A soma das classificações deve ser igual ao valor total do lançamento."); valido = False
+    return formset, valido, dados
+
+
 def criar_lancamento_financeiro(
     request,
     tipo,
@@ -332,6 +360,7 @@ def criar_lancamento_financeiro(
         form_valido = (
             form.is_valid()
         )
+        classificacao_formset, classificacoes_validas, classificacoes = preparar_classificacoes(request, form, tipo)
 
         empresa = empresa_enviada(request, form)
         valor_rateio = (
@@ -388,6 +417,7 @@ def criar_lancamento_financeiro(
             form_valido
             and parcelas_validas
             and rateios_validos
+            and classificacoes_validas
         ):
             if not parcelas_completas:
                 form.add_error(
@@ -439,6 +469,7 @@ def criar_lancamento_financeiro(
                         )
 
                         lancamento.save()
+                        salvar_classificacoes_lancamento(lancamento, classificacoes)
 
                         salvar_novas_parcelas(
                             lancamento,
@@ -474,6 +505,7 @@ def criar_lancamento_financeiro(
         rateio_formset = RateioCentroCustoFormSet(
             prefix="rateios",
         )
+        classificacao_formset = ClassificacaoContabilFormSet(prefix="classificacoes", tipo=tipo)
 
     contexto = {
         "form": form,
@@ -481,6 +513,7 @@ def criar_lancamento_financeiro(
             parcela_formset
         ),
         "rateio_formset": rateio_formset,
+        "classificacao_formset": classificacao_formset,
         "tipo_lancamento": tipo,
         "modo_edicao": False,
         "possui_baixas": False,
@@ -535,6 +568,7 @@ def editar_lancamento_financeiro(
         form_valido = (
             form.is_valid()
         )
+        classificacao_formset, classificacoes_validas, classificacoes = preparar_classificacoes(request, form, tipo, lancamento)
 
         empresa = empresa_enviada(request, form)
         valor_rateio = (
@@ -609,6 +643,7 @@ def editar_lancamento_financeiro(
             form_valido
             and parcelas_validas
             and rateios_validos
+            and classificacoes_validas
         ):
             if not parcelas_completas:
                 form.add_error(
@@ -658,6 +693,7 @@ def editar_lancamento_financeiro(
                         )
 
                         lancamento_editado.save()
+                        salvar_classificacoes_lancamento(lancamento_editado, classificacoes)
 
                         (
                             lancamento
@@ -715,6 +751,11 @@ def editar_lancamento_financeiro(
             modo_rateio="VALOR",
             centros_existentes=centros_existentes,
         )
+        classificacao_formset = ClassificacaoContabilFormSet(
+            initial=[{"plano_conta": c.plano_conta, "valor": c.valor, "observacao": c.observacao}
+                     for c in lancamento.classificacoes_contabeis.order_by("ordem", "pk")],
+            prefix="classificacoes", tipo=tipo,
+        )
 
     contexto = {
         "form": form,
@@ -722,6 +763,7 @@ def editar_lancamento_financeiro(
             parcela_formset
         ),
         "rateio_formset": rateio_formset,
+        "classificacao_formset": classificacao_formset,
         "lancamento": lancamento,
         "tipo_lancamento": tipo,
         "modo_edicao": True,
@@ -1840,6 +1882,7 @@ def detalhe_conta_pagar(
         ),
         "saldo_total": saldo_total,
         "rateios": rateios_detalhe(lancamento),
+        "classificacoes": lancamento.classificacoes_contabeis.select_related("plano_conta") if request.user.has_perm("financeiro.view_classificacoes_multiplas") else (),
     }
 
     return render(
@@ -1993,6 +2036,7 @@ def detalhe_conta_receber(
         ),
         "saldo_total": saldo_total,
         "rateios": rateios_detalhe(lancamento),
+        "classificacoes": lancamento.classificacoes_contabeis.select_related("plano_conta") if request.user.has_perm("financeiro.view_classificacoes_multiplas") else (),
     }
 
     return render(

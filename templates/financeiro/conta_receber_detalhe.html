@@ -1,10 +1,12 @@
 {% extends "base.html" %}
+{% load comercial_formatos %}
 
 {% block title %}
 Conta a Receber | VersERP
 {% endblock %}
 
 {% block content %}
+{% if classificacoes %}<section class="form-section"><h2>Classificações contábeis</h2><div class="table-responsive"><table class="table"><thead><tr><th>Conta</th><th>Valor</th><th>Observação</th></tr></thead><tbody>{% for item in classificacoes %}<tr><td>{{ item.plano_conta }}</td><td>R$ {{ item.valor|moeda_br }}</td><td>{{ item.observacao|default:"—" }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
 
 <div class="page-header">
 

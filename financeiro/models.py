@@ -734,6 +734,8 @@ class LancamentoFinanceiro(models.Model):
         on_delete=models.PROTECT,
         related_name="lancamentos",
         verbose_name="Plano de contas",
+        null=True,
+        blank=True,
     )
 
     status = models.CharField(
@@ -844,12 +846,15 @@ class LancamentoFinanceiro(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         with transaction.atomic():
+            criando = self._state.adding
             super().save(*args, **kwargs)
-            from .services import salvar_classificacoes_lancamento
-            salvar_classificacoes_lancamento(
-                self,
-                [{"plano_conta": self.plano_conta, "valor": self.valor_total, "ordem": 1}],
-            )
+            if self.plano_conta_id and (criando or self.classificacoes_contabeis.count() <= 1):
+                from .services import salvar_classificacoes_lancamento
+                salvar_classificacoes_lancamento(self, [{
+                    "plano_conta": self.plano_conta,
+                    "valor": self.valor_total,
+                    "ordem": 1,
+                }])
 
     def __str__(self):
         return f"{self.get_tipo_display()} - {self.descricao}"
@@ -892,6 +897,10 @@ class LancamentoFinanceiroClassificacao(models.Model):
             models.Index(fields=["lancamento", "ordem"], name="fin_class_lanc_ord_idx"),
             models.Index(fields=["plano_conta", "lancamento"], name="fin_class_cont_lanc_idx"),
         ]
+        permissions = [
+            ("view_classificacoes_multiplas", "Pode visualizar classificações contábeis múltiplas"),
+            ("change_classificacoes_multiplas", "Pode editar classificações contábeis múltiplas"),
+        ]
 
     def clean(self):
         super().clean()
@@ -911,12 +920,6 @@ class LancamentoFinanceiroClassificacao(models.Model):
                 errors["plano_conta"] = "Uma conta a pagar deve usar uma conta de custo ou despesa."
             elif self.lancamento.tipo == "RECEBER" and self.plano_conta.tipo != "RECEITA":
                 errors["plano_conta"] = "Uma conta a receber deve usar uma conta de receita."
-            if self.plano_conta_id != self.lancamento.plano_conta_id:
-                errors["plano_conta"] = "A classificação deve usar o mesmo Plano de Contas do lançamento nesta etapa."
-            if self.valor != self.lancamento.valor_total:
-                errors["valor"] = "A classificação deve possuir exatamente o valor total do lançamento."
-            if type(self).objects.filter(lancamento_id=self.lancamento_id).exclude(pk=self.pk).exists():
-                errors["lancamento"] = "Nesta etapa o lançamento aceita exatamente uma classificação contábil."
         if errors:
             raise ValidationError(errors)
 

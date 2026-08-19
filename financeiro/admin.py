@@ -9,6 +9,7 @@ from .models import (
     ContaBancaria,
     Empresa,
     LancamentoFinanceiro,
+    LancamentoFinanceiroClassificacao,
     ParcelaFinanceira,
     PlanoConta,
     RateioCentroCusto,
@@ -166,6 +167,42 @@ class RateioCentroCustoInline(admin.TabularInline):
     )
 
 
+class LancamentoFinanceiroClassificacaoInline(admin.TabularInline):
+    model = LancamentoFinanceiroClassificacao
+    extra = 0
+    fields = ("plano_conta", "valor", "observacao", "ordem")
+
+    class FormSet(BaseInlineFormSet):
+        def clean(self):
+            super().clean()
+            if any(self.errors): return
+            dados=[]
+            for form in self.forms:
+                if form.cleaned_data and not form.cleaned_data.get("DELETE"):
+                    dados.append({campo:form.cleaned_data.get(campo) for campo in ("plano_conta","valor","observacao","ordem")})
+            contas=[item["plano_conta"] for item in dados]
+            if len(contas)!=len(set(contas)): raise ValidationError("Não repita a mesma conta contábil.")
+            if sum((item["valor"] for item in dados),0)!=self.instance.valor_total: raise ValidationError("As classificações devem fechar com o valor total.")
+
+        def save(self, commit=True):
+            from .services import salvar_classificacoes_lancamento
+            dados=[]
+            for form in self.forms:
+                if form.cleaned_data and not form.cleaned_data.get("DELETE"):
+                    dados.append({campo:form.cleaned_data.get(campo) for campo in ("plano_conta","valor","observacao","ordem")})
+            return salvar_classificacoes_lancamento(self.instance,dados) if commit else []
+
+    formset = FormSet
+
+    def has_change_permission(self, request, obj=None):
+        if obj and obj.parcelas.filter(baixas__isnull=False).exists():
+            return False
+        return request.user.has_perm("financeiro.change_classificacoes_multiplas")
+
+    has_add_permission = has_change_permission
+    has_delete_permission = has_change_permission
+
+
 @admin.register(LancamentoFinanceiro)
 class LancamentoFinanceiroAdmin(admin.ModelAdmin):
     list_display = (
@@ -201,6 +238,7 @@ class LancamentoFinanceiroAdmin(admin.ModelAdmin):
     )
 
     inlines = [
+        LancamentoFinanceiroClassificacaoInline,
         ParcelaFinanceiraInline,
         RateioCentroCustoInline,
     ]

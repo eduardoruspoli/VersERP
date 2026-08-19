@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from .models import (
     CotacaoFornecedor, DocumentoCompra, DocumentoCompraItem, DocumentoCompraItemRecebimento,
-    DocumentoCompraParcela,
+    DocumentoCompraParcela, IntegracaoDocumentoFinanceiro,
     DocumentoCompraPedido, DivergenciaDocumentoCompra, EscolhaCotacaoItem,
     HistoricoPedidoCompra, HistoricoProcessoCotacao,
     DivergenciaRecebimento, HistoricoSolicitacaoCompra, PedidoCompra, PedidoCompraItem,
@@ -629,3 +629,72 @@ def montar_preview_financeiro_documento(documento):
         "lancamento":{"tipo":"PAGAR","origem":"FISCAL","pessoa":documento.fornecedor,"descricao":f"{documento.identificacao} — {documento.fornecedor}","numero_documento":documento.numero,"valor_total":documento.valor_total},
         "classificacoes":classificacoes,"total_classificacoes":total_classificacoes,"parcelas":parcelas,"total_parcelas":total_parcelas,
         "rateios":rateios,"total_rateios":total_rateios}
+
+
+@transaction.atomic
+def integrar_documento_financeiro(documento, usuario):
+    """Persiste, de forma idempotente, o contrato validado pelo preview financeiro."""
+    _exigir(usuario, "integrar_documento_financeiro")
+    documento = DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    existente = IntegracaoDocumentoFinanceiro.objects.select_related("lancamento").filter(documento=documento).first()
+    if existente:
+        return existente
+    preview = montar_preview_financeiro_documento(documento)
+    if not preview["pronto"]:
+        raise ValidationError(preview["motivos"])
+    from financeiro.models import LancamentoFinanceiro, ParcelaFinanceira, RateioCentroCusto
+    from financeiro.services import salvar_classificacoes_lancamento
+    lancamento = LancamentoFinanceiro.objects.create(
+        empresa=documento.empresa, pessoa=documento.fornecedor, tipo="PAGAR",
+        origem="FISCAL", descricao=f"Documento de compra {documento.identificacao} - {documento.fornecedor}",
+        numero_documento=documento.numero, data_emissao=documento.data_emissao,
+        data_competencia=preview["competencia"], valor_total=documento.valor_total,
+        plano_conta=None, status="ABERTO", observacoes=f"Origem: Documento de Compra #{documento.pk}",
+    )
+    salvar_classificacoes_lancamento(lancamento, preview["classificacoes"])
+    for parcela_documento in preview["parcelas"]:
+        parcela = ParcelaFinanceira.objects.create(
+            lancamento=lancamento, numero=parcela_documento.numero,
+            vencimento=parcela_documento.vencimento, valor=parcela_documento.valor,
+            observacoes=parcela_documento.observacao,
+        )
+        DocumentoCompraParcela.objects.filter(pk=parcela_documento.pk).update(parcela_financeira=parcela)
+    RateioCentroCusto.objects.bulk_create([
+        RateioCentroCusto(lancamento=lancamento, centro_custo=item["obra"], valor=item["valor"])
+        for item in preview["rateios"]
+    ])
+    integracao = IntegracaoDocumentoFinanceiro.objects.create(
+        documento=documento, lancamento=lancamento,
+        chave_idempotencia=f"DOCUMENTO-COMPRA:{documento.pk}", integrado_por=usuario,
+        observacao="Integração criada a partir do preview financeiro conferido.",
+    )
+    DocumentoCompra.objects.filter(pk=documento.pk).update(status=DocumentoCompra.Status.INTEGRADO_FINANCEIRO)
+    documento.status=DocumentoCompra.Status.INTEGRADO_FINANCEIRO
+    return integracao
+
+
+@transaction.atomic
+def estornar_documento_financeiro(documento, usuario, motivo):
+    _exigir(usuario, "estornar_documento_financeiro")
+    if not (motivo or "").strip(): raise ValidationError("Informe o motivo do estorno.")
+    documento=DocumentoCompra.objects.select_for_update().get(pk=documento.pk)
+    try: integracao=IntegracaoDocumentoFinanceiro.objects.select_for_update().select_related("lancamento").get(documento=documento)
+    except IntegracaoDocumentoFinanceiro.DoesNotExist: raise ValidationError("O documento não possui integração financeira.")
+    if integracao.status==IntegracaoDocumentoFinanceiro.Status.ESTORNADO: return integracao
+    lancamento=integracao.lancamento
+    if lancamento.parcelas.filter(baixas__isnull=False).exists():
+        conciliada=lancamento.parcelas.filter(baixas__movimentos_ofx_conciliados__isnull=False).exists()
+        if conciliada: raise ValidationError("Desfaça a conciliação OFX antes de estornar a integração.")
+        raise ValidationError("Estorne as baixas financeiras antes de estornar a integração.")
+    lancamento.parcelas.update(status="CANCELADA")
+    type(lancamento).objects.filter(pk=lancamento.pk).update(status="CANCELADO")
+    agora=timezone.now()
+    IntegracaoDocumentoFinanceiro.objects.filter(pk=integracao.pk).update(
+        status=IntegracaoDocumentoFinanceiro.Status.ESTORNADO, estornado_por=usuario,
+        estornado_em=agora, observacao=f"{integracao.observacao}\nEstorno: {motivo}".strip(),
+    )
+    DocumentoCompra.objects.filter(pk=documento.pk).update(
+        status=DocumentoCompra.Status.CANCELADO, cancelado_por=usuario,
+        cancelado_em=agora, motivo_cancelamento=motivo,
+    )
+    integracao.refresh_from_db(); return integracao

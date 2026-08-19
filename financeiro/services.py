@@ -29,48 +29,61 @@ ZERO = Decimal("0.00")
 
 @transaction.atomic
 def salvar_classificacoes_lancamento(lancamento, classificacoes):
-    """Mantém a classificação contábil 1:1 exigida na etapa de compatibilidade."""
-    lancamento = LancamentoFinanceiro.objects.select_for_update().select_related("plano_conta").get(pk=lancamento.pk)
+    """Valida e substitui a composição contábil oficial de um lançamento."""
+    lancamento = LancamentoFinanceiro.objects.select_for_update().get(pk=lancamento.pk)
     classificacoes = list(classificacoes)
-    if len(classificacoes) != 1:
-        raise ValidationError("Nesta etapa o lançamento deve possuir exatamente uma classificação contábil.")
-    dados = classificacoes[0]
-    plano = dados.get("plano_conta")
-    valor = moeda(dados.get("valor"))
-    if not plano or plano.pk != lancamento.plano_conta_id:
-        raise ValidationError("A classificação deve usar o mesmo Plano de Contas do lançamento.")
-    if valor != lancamento.valor_total:
-        raise ValidationError("A classificação deve possuir exatamente o valor total do lançamento.")
+    if not classificacoes:
+        raise ValidationError("Informe ao menos uma classificação contábil.")
     existentes = LancamentoFinanceiroClassificacao.objects.select_for_update().filter(lancamento=lancamento)
-    if existentes.count() > 1:
-        raise ValidationError("O lançamento possui mais de uma classificação contábil nesta etapa.")
-    classificacao = existentes.first()
-    if classificacao:
-        classificacao.plano_conta = plano
-        classificacao.valor = valor
-        classificacao.observacao = dados.get("observacao", classificacao.observacao)
-        classificacao.ordem = 1
-        classificacao.save()
-    else:
-        classificacao = LancamentoFinanceiroClassificacao.objects.create(
-            lancamento=lancamento,
-            plano_conta=plano,
-            valor=valor,
-            observacao=dados.get("observacao", ""),
-            ordem=1,
-        )
-    return classificacao
+    if lancamento.parcelas.filter(baixas__isnull=False).exists():
+        normalizadas_existentes = [(c.plano_conta_id, moeda(c.valor), c.observacao) for c in existentes.order_by("ordem", "pk")]
+        normalizadas_novas = [(d.get("plano_conta").pk if d.get("plano_conta") else None, moeda(d.get("valor")), d.get("observacao", "")) for d in classificacoes]
+        if normalizadas_novas != normalizadas_existentes:
+            raise ValidationError("As classificações estão congeladas porque o lançamento possui baixa ou conciliação.")
+        return list(existentes)
+    contas = set()
+    objetos = []
+    total = ZERO
+    for ordem, dados in enumerate(classificacoes, 1):
+        plano = dados.get("plano_conta")
+        valor = moeda(dados.get("valor"))
+        if not plano:
+            raise ValidationError("Informe o Plano de Contas de todas as classificações.")
+        if plano.pk in contas:
+            raise ValidationError("Não repita a mesma conta contábil no lançamento.")
+        contas.add(plano.pk)
+        if valor <= ZERO:
+            raise ValidationError("O valor de cada classificação deve ser maior que zero.")
+        if not plano.ativo or plano.estrutural or not plano.aceita_lancamento:
+            raise ValidationError(f"A conta {plano.codigo} não está disponível para nova classificação.")
+        if lancamento.tipo == "PAGAR" and plano.tipo not in {"CUSTO", "DESPESA"}:
+            raise ValidationError("Contas a pagar aceitam somente contas de custo ou despesa.")
+        if lancamento.tipo == "RECEBER" and plano.tipo != "RECEITA":
+            raise ValidationError("Contas a receber aceitam somente contas de receita.")
+        total += valor
+        objetos.append(LancamentoFinanceiroClassificacao(
+            lancamento=lancamento, plano_conta=plano, valor=valor,
+            observacao=dados.get("observacao", ""), ordem=dados.get("ordem") or ordem,
+        ))
+    if moeda(total) != moeda(lancamento.valor_total):
+        raise ValidationError("A soma das classificações deve ser igual ao valor total do lançamento.")
+    existentes.delete()
+    LancamentoFinanceiroClassificacao.objects.bulk_create(objetos)
+    plano_legado = objetos[0].plano_conta if len(objetos) == 1 else None
+    LancamentoFinanceiro.objects.filter(pk=lancamento.pk).update(plano_conta=plano_legado)
+    lancamento.plano_conta = plano_legado
+    return list(lancamento.classificacoes_contabeis.order_by("ordem", "pk"))
 
 
 def verificar_integridade_classificacoes(queryset=None):
-    """Retorna lançamentos que violam a invariante temporária de classificação 1:1."""
+    """Retorna lançamentos cuja composição não fecha com o valor total."""
     queryset = queryset if queryset is not None else LancamentoFinanceiro.objects.all()
     invalidos = []
     for lancamento in queryset.prefetch_related("classificacoes_contabeis").iterator(chunk_size=1000):
         classificacoes = list(lancamento.classificacoes_contabeis.all())
-        if (len(classificacoes) != 1 or
-                classificacoes[0].plano_conta_id != lancamento.plano_conta_id or
-                classificacoes[0].valor != lancamento.valor_total):
+        total = sum((item.valor for item in classificacoes), ZERO)
+        legado_esperado = classificacoes[0].plano_conta_id if len(classificacoes) == 1 else None
+        if not classificacoes or total != lancamento.valor_total or lancamento.plano_conta_id != legado_esperado:
             invalidos.append(lancamento.pk)
     return {"integro": not invalidos, "lancamentos_invalidos": invalidos}
 

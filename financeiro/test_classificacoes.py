@@ -10,7 +10,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 
 from pessoas.models import Pessoa
-from .models import (CentroCusto, Empresa, LancamentoFinanceiro,
+from .models import (BaixaFinanceira, CentroCusto, ContaBancaria, Empresa, LancamentoFinanceiro,
     LancamentoFinanceiroClassificacao, ParcelaFinanceira, PlanoConta,
     RateioCentroCusto)
 from .services import (calcular_dre, calcular_relatorio_obra,
@@ -46,9 +46,9 @@ class LancamentoClassificacaoModelTests(ClassificacaoFinanceiraBase):
     def test_valor_positivo_e_constraint(self):
         l=self.lancamento()
         with self.assertRaises(ValidationError): LancamentoFinanceiroClassificacao.objects.create(lancamento=l,plano_conta=self.custo,valor=0)
-    def test_segunda_classificacao_e_rejeitada(self):
-        l=self.lancamento()
-        with self.assertRaises(ValidationError): LancamentoFinanceiroClassificacao.objects.create(lancamento=l,plano_conta=self.despesa,valor=100)
+    def test_multiplas_classificacoes_sao_oficiais(self):
+        l=self.lancamento(); salvar_classificacoes_lancamento(l,[{"plano_conta":self.custo,"valor":60},{"plano_conta":self.despesa,"valor":40}]); l.refresh_from_db()
+        self.assertEqual(l.classificacoes_contabeis.count(),2); self.assertIsNone(l.plano_conta)
     def test_conta_estrutural_e_sem_lancamento_rejeitadas(self):
         for indice,atributos in enumerate(({"estrutural":True},{"aceita_lancamento":False}),1):
             conta=PlanoConta.objects.create(codigo=f"TESTE-INV-{indice}",nome="Inválida",tipo="CUSTO",natureza="DEVEDORA")
@@ -66,19 +66,22 @@ class LancamentoClassificacaoModelTests(ClassificacaoFinanceiraBase):
         with self.assertRaises(ValidationError): LancamentoFinanceiroClassificacao.objects.create(lancamento=pagar,plano_conta=self.receita,valor=100)
         receber=self.lancamento(tipo="RECEBER"); LancamentoFinanceiro.objects.filter(pk=receber.pk).update(plano_conta=self.custo); receber.plano_conta=self.custo; receber.classificacoes_contabeis.all().delete()
         with self.assertRaises(ValidationError): LancamentoFinanceiroClassificacao.objects.create(lancamento=receber,plano_conta=self.custo,valor=100)
-    def test_soma_e_plano_legado_devem_coincidir(self):
+    def test_soma_deve_coincidir_e_legado_sincroniza(self):
         l=self.lancamento()
         with self.assertRaises(ValidationError): salvar_classificacoes_lancamento(l,[{"plano_conta":self.custo,"valor":99}])
-        with self.assertRaises(ValidationError): salvar_classificacoes_lancamento(l,[{"plano_conta":self.despesa,"valor":100}])
+        salvar_classificacoes_lancamento(l,[{"plano_conta":self.despesa,"valor":100}]); l.refresh_from_db(); self.assertEqual(l.plano_conta,self.despesa)
+        with self.assertRaises(ValidationError): salvar_classificacoes_lancamento(l,[{"plano_conta":self.despesa,"valor":50},{"plano_conta":self.despesa,"valor":50}])
     def test_alteracao_do_lancamento_sincroniza_classificacao(self):
         l=self.lancamento(); l.plano_conta=self.despesa; l.valor_total=Decimal("125.50"); l.save(); c=l.classificacoes_contabeis.get(); self.assertEqual((c.plano_conta,c.valor),(self.despesa,Decimal("125.50")))
-    def test_rollback_transacional_com_estado_invalido(self):
+    def test_integridade_detecta_soma_invalida(self):
         l=self.lancamento(); LancamentoFinanceiroClassificacao.objects.bulk_create([LancamentoFinanceiroClassificacao(lancamento=l,plano_conta=self.despesa,valor=100)])
-        l.descricao="NÃO DEVE PERSISTIR"
-        with self.assertRaises(ValidationError): l.save()
-        l.refresh_from_db(); self.assertEqual(l.descricao,"TESTE Lançamento")
+        self.assertFalse(verificar_integridade_classificacoes(LancamentoFinanceiro.objects.filter(pk=l.pk))["integro"])
     def test_check_integridade(self):
         a=self.lancamento(); b=self.lancamento(plano=self.despesa,descricao="TESTE B"); self.assertTrue(verificar_integridade_classificacoes()["integro"]); b.classificacoes_contabeis.all().delete(); resultado=verificar_integridade_classificacoes(); self.assertFalse(resultado["integro"]); self.assertEqual(resultado["lancamentos_invalidos"],[b.pk])
+    def test_classificacoes_congeladas_apos_baixa(self):
+        l=self.lancamento(); parcela=ParcelaFinanceira.objects.create(lancamento=l,numero=1,vencimento=date(2026,9,1),valor=100); conta=ContaBancaria.objects.create(empresa=self.empresa,banco="TESTE Banco")
+        BaixaFinanceira.objects.create(parcela=parcela,conta_bancaria=conta,data=date(2026,9,1),valor=10)
+        with self.assertRaises(ValidationError): salvar_classificacoes_lancamento(l,[{"plano_conta":self.despesa,"valor":100}])
 
 
 class ClassificacaoCompatibilidadeTests(ClassificacaoFinanceiraBase):

@@ -19,7 +19,7 @@ from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
                      DivergenciaDocumentoCompra, DivergenciaRecebimento, DocumentoCompra,
                      DocumentoCompraItem, DocumentoCompraPedido, ProcessoCotacaoItem, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, SolicitacaoCompra)
-from .models import DocumentoCompraParcela
+from .models import DocumentoCompraParcela, IntegracaoDocumentoFinanceiro
 from .models import RecebimentoCompra, RecebimentoCompraItem
 from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_solicitacao,
                        cancelar_pedido, concluir_processo_cotacao, enviar_pedido,
@@ -32,7 +32,8 @@ from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_so
                        concluir_conferencia_documento, iniciar_conferencia_documento,
                        reabrir_conferencia_documento, resolver_divergencia_documento,
                        validar_fechamento_documento, vincular_recebimento_documento)
-from .services import gerar_parcelas_documento, montar_preview_financeiro_documento
+from .services import (gerar_parcelas_documento, montar_preview_financeiro_documento,
+                       integrar_documento_financeiro, estornar_documento_financeiro)
 
 
 @login_required
@@ -443,7 +444,7 @@ def documento_editar(request,pk):
 @login_required
 @permission_required("compras.view_documentocompra",raise_exception=True)
 def documento_detalhe(request,pk):
-    documento=get_object_or_404(DocumentoCompra.objects.select_related("empresa","fornecedor","conferido_por","cancelado_por"),pk=pk)
+    documento=get_object_or_404(DocumentoCompra.objects.select_related("empresa","fornecedor","conferido_por","cancelado_por","integracao_financeira__lancamento"),pk=pk)
     return render(request,"compras/documento_detalhe.html",{"documento":documento,"itens":documento.itens.select_related("pedido_item__pedido","plano_conta").prefetch_related("vinculos_recebimentos__recebimento_item__recebimento"),"pedidos":documento.vinculos_pedidos.select_related("pedido"),"divergencias":documento.divergencias.select_related("documento_item","resolvida_por")})
 
 @login_required
@@ -550,3 +551,29 @@ def documento_parcela_excluir(request,pk,parcela_pk):
 def documento_preview_financeiro(request,pk):
     documento=get_object_or_404(DocumentoCompra,pk=pk); preview=montar_preview_financeiro_documento(documento)
     return render(request,"compras/documento_preview_financeiro.html",{"preview":preview,"documento":preview["documento"]})
+
+
+@login_required
+@permission_required("compras.integrar_documento_financeiro",raise_exception=True)
+def documento_integrar_financeiro(request,pk):
+    if request.method!="POST": return HttpResponseBadRequest()
+    documento=get_object_or_404(DocumentoCompra,pk=pk)
+    try:
+        integracao=integrar_documento_financeiro(documento,request.user)
+        messages.success(request,f"Documento integrado à Conta a Pagar #{integracao.lancamento_id}.")
+    except (ValidationError,PermissionDenied) as erro:
+        messages.error(request," ".join(getattr(erro,"messages",[str(erro)])))
+    return redirect("compras:documento_detalhe",pk=pk)
+
+
+@login_required
+@permission_required("compras.estornar_documento_financeiro",raise_exception=True)
+def documento_estornar_financeiro(request,pk):
+    if request.method!="POST": return HttpResponseBadRequest()
+    documento=get_object_or_404(DocumentoCompra,pk=pk)
+    try:
+        estornar_documento_financeiro(documento,request.user,request.POST.get("motivo",""))
+        messages.success(request,"Integração financeira estornada sem excluir o histórico.")
+    except (ValidationError,PermissionDenied) as erro:
+        messages.error(request," ".join(getattr(erro,"messages",[str(erro)])))
+    return redirect("compras:documento_detalhe",pk=pk)

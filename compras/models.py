@@ -587,6 +587,7 @@ class DocumentoCompra(models.Model):
         CONFERIDO="CONFERIDO","Conferido"
         DIVERGENTE="DIVERGENTE","Divergente"
         CANCELADO="CANCELADO","Cancelado"
+        INTEGRADO_FINANCEIRO="INTEGRADO_FINANCEIRO","Integrado ao Financeiro"
     empresa=models.ForeignKey(Empresa,on_delete=models.PROTECT,related_name="documentos_compra")
     fornecedor=models.ForeignKey(Pessoa,on_delete=models.PROTECT,related_name="documentos_compra")
     tipo=models.CharField(max_length=20,choices=Tipo.choices)
@@ -605,7 +606,7 @@ class DocumentoCompra(models.Model):
     valor_total=models.DecimalField(max_digits=15,decimal_places=2,default=0,editable=False)
     condicao_pagamento=models.TextField(blank=True)
     observacoes=models.TextField(blank=True)
-    status=models.CharField(max_length=20,choices=Status.choices,default=Status.RASCUNHO)
+    status=models.CharField(max_length=25,choices=Status.choices,default=Status.RASCUNHO)
     criado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="documentos_compra_criados")
     enviado_conferencia_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="documentos_compra_enviados_conferencia")
     enviado_conferencia_em=models.DateTimeField(null=True,blank=True)
@@ -622,7 +623,7 @@ class DocumentoCompra(models.Model):
             models.UniqueConstraint(fields=["empresa","fornecedor","tipo","numero_normalizado","serie_normalizada"],name="uq_documento_compra_identificacao"),
             models.UniqueConstraint(fields=["chave_fiscal"],condition=~models.Q(chave_fiscal=""),name="uq_documento_compra_chave_fiscal"),
         ]
-        permissions=[("conferir_documento_compra","Pode conferir documento de compra"),("resolver_divergencia_documento","Pode resolver divergência de documento"),("cancelar_documento_compra","Pode cancelar documento de compra"),("view_valores_documento_compra","Pode visualizar valores de documento de compra")]
+        permissions=[("conferir_documento_compra","Pode conferir documento de compra"),("resolver_divergencia_documento","Pode resolver divergência de documento"),("cancelar_documento_compra","Pode cancelar documento de compra"),("view_valores_documento_compra","Pode visualizar valores de documento de compra"),("integrar_documento_financeiro","Pode integrar documento ao Financeiro"),("estornar_documento_financeiro","Pode estornar integração financeira")]
     @property
     def identificacao(self): return f"{self.get_tipo_display()} {self.numero}{('/'+self.serie) if self.serie else ''}"
     def clean(self):
@@ -765,3 +766,23 @@ class DocumentoCompraParcela(models.Model):
         if self.parcela_financeira_id or self.documento.parcelas.filter(parcela_financeira__isnull=False).exists(): raise ValidationError("As parcelas do documento integrado estão congeladas.")
         return super().delete(*args,**kwargs)
     def __str__(self): return f"{self.documento} — parcela {self.numero}"
+
+
+class IntegracaoDocumentoFinanceiro(models.Model):
+    class Status(models.TextChoices):
+        INTEGRADO="INTEGRADO","Integrado"
+        ESTORNADO="ESTORNADO","Estornado"
+    documento=models.OneToOneField(DocumentoCompra,on_delete=models.PROTECT,related_name="integracao_financeira")
+    lancamento=models.OneToOneField("financeiro.LancamentoFinanceiro",on_delete=models.PROTECT,related_name="integracao_documento_compra")
+    status=models.CharField(max_length=15,choices=Status.choices,default=Status.INTEGRADO)
+    chave_idempotencia=models.CharField(max_length=100,unique=True)
+    integrado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="integracoes_documento_financeiro")
+    integrado_em=models.DateTimeField(auto_now_add=True)
+    estornado_por=models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,null=True,blank=True,related_name="estornos_documento_financeiro")
+    estornado_em=models.DateTimeField(null=True,blank=True)
+    observacao=models.TextField(blank=True)
+    class Meta:
+        ordering=["-integrado_em","-id"]
+        verbose_name="Integração de documento de compra com Financeiro"
+        verbose_name_plural="Integrações de documentos de compra com Financeiro"
+    def __str__(self): return f"{self.documento} → {self.lancamento}"

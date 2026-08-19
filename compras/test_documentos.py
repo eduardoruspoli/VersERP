@@ -4,21 +4,25 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import connection
+from django.db.models import Sum
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from financeiro.models import (CentroCusto, Empresa, LancamentoFinanceiro,
-    ParcelaFinanceira, PlanoConta, RateioCentroCusto)
+from financeiro.models import (BaixaFinanceira, CentroCusto, ContaBancaria, Empresa, ImportacaoOFX, LancamentoFinanceiro,
+    MovimentoOFX, ParcelaFinanceira, PlanoConta, RateioCentroCusto)
 from pessoas.models import Pessoa
 from .models import (DivergenciaDocumentoCompra, DocumentoCompra, DocumentoCompraItem,
-    DocumentoCompraItemRecebimento, DocumentoCompraParcela, DocumentoCompraPedido,
+    DocumentoCompraItemRecebimento, DocumentoCompraParcela, DocumentoCompraPedido, IntegracaoDocumentoFinanceiro,
     PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra, RecebimentoCompra,
     RecebimentoCompraItem)
 from .services import (cancelar_documento_compra, concluir_conferencia_documento,
     iniciar_conferencia_documento, reabrir_conferencia_documento,
     gerar_parcelas_documento, montar_preview_financeiro_documento,
     resolver_divergencia_documento, validar_fechamento_documento,
-    vincular_recebimento_documento)
+    vincular_recebimento_documento, integrar_documento_financeiro,
+    estornar_documento_financeiro)
 
 
 class DocumentoCompraTests(TestCase):
@@ -136,3 +140,53 @@ class DocumentoCompraTests(TestCase):
         d,_=self.preparar_preview(); outra=Empresa.objects.create(razao_social="Outra Preview",cnpj="55.555.555/0001-55"); PedidoItemAlocacaoObra.objects.filter(pedido_item=self.pedido_item).update(obra=CentroCusto.objects.create(empresa=outra,codigo="OUTRA",nome="Outra")); self.assertTrue(any("outra empresa" in m for m in montar_preview_financeiro_documento(d)["motivos"]))
     def test_permissao_preview(self):
         d,_=self.preparar_preview(); self.client.force_login(self.usuario); url=reverse("compras:documento_preview_financeiro",args=[d.pk]); self.assertEqual(self.client.get(url).status_code,403); self.permissao("view_preview_financeiro_documento"); self.assertEqual(self.client.get(url).status_code,200)
+
+    def test_integracao_cria_lancamento_classificacao_parcela_rateio_e_vinculos(self):
+        self.permissao("integrar_documento_financeiro"); d,_=self.preparar_preview(Decimal("100.01"),duas_obras=True)
+        integracao=integrar_documento_financeiro(d,self.usuario); lancamento=integracao.lancamento
+        self.assertEqual((lancamento.tipo,lancamento.origem,lancamento.valor_total),("PAGAR","FISCAL",Decimal("100.01")))
+        self.assertEqual(lancamento.classificacoes_contabeis.aggregate(total=Sum("valor"))["total"],Decimal("100.01"))
+        self.assertEqual(lancamento.rateios_centro_custo.count(),2); self.assertEqual(lancamento.parcelas.count(),1)
+        self.assertEqual(d.parcelas.get().parcela_financeira.lancamento,lancamento)
+
+    def test_integracao_idempotente(self):
+        self.permissao("integrar_documento_financeiro"); d,_=self.preparar_preview(); primeira=integrar_documento_financeiro(d,self.usuario); segunda=integrar_documento_financeiro(d,self.usuario)
+        self.assertEqual(primeira.pk,segunda.pk); self.assertEqual(LancamentoFinanceiro.objects.filter(integracao_documento_compra=primeira).count(),1)
+
+    def test_integracao_exige_permissao_e_documento_pronto(self):
+        d,_=self.preparar_preview()
+        with self.assertRaises(PermissionDenied): integrar_documento_financeiro(d,self.usuario)
+        self.permissao("integrar_documento_financeiro"); DocumentoCompra.objects.filter(pk=d.pk).update(status=DocumentoCompra.Status.CANCELADO); d.status=DocumentoCompra.Status.CANCELADO
+        with self.assertRaises(ValidationError): integrar_documento_financeiro(d,self.usuario)
+
+    def test_integracao_multiplas_contas_e_tres_parcelas(self):
+        self.permissao("integrar_documento_financeiro"); d,i=self.preparar_preview(Decimal("150.00")); DocumentoCompra.objects.filter(pk=d.pk).update(status="RASCUNHO"); d.status="RASCUNHO"
+        i.quantidade_faturada=1;i.valor_unitario_faturado=100;i.save(); self.item(d,pedido_item=self.pedido_item,descricao_snapshot="Frete",quantidade_faturada=1,valor_unitario_faturado=50,plano_conta=self.plano_despesa)
+        d.parcelas.all().delete(); [DocumentoCompraParcela.objects.create(documento=d,numero=n,vencimento=date(2026,9+n,1),valor=50) for n in range(1,4)]
+        DocumentoCompra.objects.filter(pk=d.pk).update(status="CONFERIDO"); d.status="CONFERIDO"; integracao=integrar_documento_financeiro(d,self.usuario)
+        self.assertEqual(integracao.lancamento.classificacoes_contabeis.count(),2); self.assertIsNone(integracao.lancamento.plano_conta); self.assertEqual(integracao.lancamento.parcelas.count(),3)
+
+    def test_estorno_sem_baixa_preserva_historico(self):
+        self.permissao("integrar_documento_financeiro","estornar_documento_financeiro"); d,_=self.preparar_preview(); integracao=integrar_documento_financeiro(d,self.usuario); estornar_documento_financeiro(d,self.usuario,"Documento incorreto")
+        integracao.refresh_from_db(); integracao.lancamento.refresh_from_db(); self.assertEqual(integracao.status,"ESTORNADO"); self.assertEqual(integracao.lancamento.status,"CANCELADO"); self.assertTrue(IntegracaoDocumentoFinanceiro.objects.filter(pk=integracao.pk).exists())
+
+    def test_estorno_com_baixa_e_bloqueado(self):
+        self.permissao("integrar_documento_financeiro","estornar_documento_financeiro"); d,_=self.preparar_preview(); integracao=integrar_documento_financeiro(d,self.usuario)
+        conta=ContaBancaria.objects.create(empresa=self.empresa,banco="TESTE Banco"); BaixaFinanceira.objects.create(parcela=integracao.lancamento.parcelas.get(),conta_bancaria=conta,data=date(2026,9,1),valor=100)
+        with self.assertRaises(ValidationError): estornar_documento_financeiro(d,self.usuario,"Teste")
+
+    def test_estorno_com_baixa_conciliada_informa_ofx(self):
+        self.permissao("integrar_documento_financeiro","estornar_documento_financeiro"); d,_=self.preparar_preview(); integracao=integrar_documento_financeiro(d,self.usuario)
+        conta=ContaBancaria.objects.create(empresa=self.empresa,banco="TESTE OFX"); baixa=BaixaFinanceira.objects.create(parcela=integracao.lancamento.parcelas.get(),conta_bancaria=conta,data=date(2026,9,1),valor=100)
+        importacao=ImportacaoOFX.objects.create(conta_bancaria=conta,nome_arquivo="TESTE.ofx",status="CONCLUIDA"); MovimentoOFX.objects.create(importacao=importacao,conta_bancaria=conta,identificador="TESTE-OFX-ESTORNO",data=date(2026,9,1),tipo="SAIDA",valor=100,status="CONCILIADO",baixa_conciliada=baixa)
+        with self.assertRaisesMessage(ValidationError,"conciliação OFX"): estornar_documento_financeiro(d,self.usuario,"Teste")
+
+    def test_integracao_invalida_faz_rollback_total(self):
+        self.permissao("integrar_documento_financeiro"); d,_=self.preparar_preview(); d.parcelas.update(valor=99); antes=LancamentoFinanceiro.objects.count()
+        with self.assertRaises(ValidationError): integrar_documento_financeiro(d,self.usuario)
+        self.assertEqual(LancamentoFinanceiro.objects.count(),antes); self.assertFalse(IntegracaoDocumentoFinanceiro.objects.filter(documento=d).exists())
+
+    def test_queries_da_integracao_permanecem_controladas(self):
+        self.permissao("integrar_documento_financeiro"); d,_=self.preparar_preview(Decimal("100.01"),duas_obras=True)
+        with CaptureQueriesContext(connection) as consultas: integrar_documento_financeiro(d,self.usuario)
+        self.assertLessEqual(len(consultas),40)
