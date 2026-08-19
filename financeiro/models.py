@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum
 
 
@@ -841,8 +841,91 @@ class LancamentoFinanceiro(models.Model):
 
             self.status = novo_status    
 
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            from .services import salvar_classificacoes_lancamento
+            salvar_classificacoes_lancamento(
+                self,
+                [{"plano_conta": self.plano_conta, "valor": self.valor_total, "ordem": 1}],
+            )
+
     def __str__(self):
         return f"{self.get_tipo_display()} - {self.descricao}"
+
+
+class LancamentoFinanceiroClassificacao(models.Model):
+    lancamento = models.ForeignKey(
+        LancamentoFinanceiro,
+        on_delete=models.CASCADE,
+        related_name="classificacoes_contabeis",
+        verbose_name="Lançamento",
+    )
+    plano_conta = models.ForeignKey(
+        PlanoConta,
+        on_delete=models.PROTECT,
+        related_name="classificacoes_financeiras",
+        verbose_name="Plano de contas",
+    )
+    valor = models.DecimalField("Valor", max_digits=15, decimal_places=2)
+    observacao = models.TextField("Observação", blank=True)
+    ordem = models.PositiveIntegerField("Ordem", default=1)
+    criado_em = models.DateTimeField("Criado em", auto_now_add=True)
+    atualizado_em = models.DateTimeField("Atualizado em", auto_now=True)
+
+    class Meta:
+        verbose_name = "Classificação contábil do lançamento"
+        verbose_name_plural = "Classificações contábeis dos lançamentos"
+        ordering = ["ordem", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(valor__gt=Decimal("0.00")),
+                name="classificacao_financeira_valor_positivo",
+            ),
+            models.UniqueConstraint(
+                fields=["lancamento", "plano_conta"],
+                name="unique_classificacao_conta_lancamento",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["lancamento", "ordem"], name="fin_class_lanc_ord_idx"),
+            models.Index(fields=["plano_conta", "lancamento"], name="fin_class_cont_lanc_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.valor is not None and self.valor <= Decimal("0.00"):
+            errors["valor"] = "O valor da classificação deve ser maior que zero."
+        if self.lancamento_id and self.plano_conta_id:
+            conta_nova = self._state.adding
+            if not self._state.adding:
+                conta_original = type(self).objects.filter(pk=self.pk).values_list("plano_conta_id", flat=True).first()
+                conta_nova = conta_original != self.plano_conta_id
+            if conta_nova and not self.plano_conta.ativo:
+                errors["plano_conta"] = "Não é possível criar classificação com uma conta inativa."
+            elif self.plano_conta.estrutural or not self.plano_conta.aceita_lancamento:
+                errors["plano_conta"] = "Use uma conta analítica que aceite lançamentos."
+            elif self.lancamento.tipo == "PAGAR" and self.plano_conta.tipo not in {"CUSTO", "DESPESA"}:
+                errors["plano_conta"] = "Uma conta a pagar deve usar uma conta de custo ou despesa."
+            elif self.lancamento.tipo == "RECEBER" and self.plano_conta.tipo != "RECEITA":
+                errors["plano_conta"] = "Uma conta a receber deve usar uma conta de receita."
+            if self.plano_conta_id != self.lancamento.plano_conta_id:
+                errors["plano_conta"] = "A classificação deve usar o mesmo Plano de Contas do lançamento nesta etapa."
+            if self.valor != self.lancamento.valor_total:
+                errors["valor"] = "A classificação deve possuir exatamente o valor total do lançamento."
+            if type(self).objects.filter(lancamento_id=self.lancamento_id).exclude(pk=self.pk).exists():
+                errors["lancamento"] = "Nesta etapa o lançamento aceita exatamente uma classificação contábil."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.lancamento} - {self.plano_conta} - R$ {self.valor}"
 
 
 class RateioCentroCusto(models.Model):

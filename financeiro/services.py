@@ -2,6 +2,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import DecimalField, Prefetch, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -12,6 +14,7 @@ from .models import (
     ContaBancaria,
     ImportacaoOFX,
     LancamentoFinanceiro,
+    LancamentoFinanceiroClassificacao,
     MovimentacaoBancaria,
     MovimentoOFX,
     ParcelaFinanceira,
@@ -22,6 +25,54 @@ from .models import (
 
 CENTAVO = Decimal("0.01")
 ZERO = Decimal("0.00")
+
+
+@transaction.atomic
+def salvar_classificacoes_lancamento(lancamento, classificacoes):
+    """Mantém a classificação contábil 1:1 exigida na etapa de compatibilidade."""
+    lancamento = LancamentoFinanceiro.objects.select_for_update().select_related("plano_conta").get(pk=lancamento.pk)
+    classificacoes = list(classificacoes)
+    if len(classificacoes) != 1:
+        raise ValidationError("Nesta etapa o lançamento deve possuir exatamente uma classificação contábil.")
+    dados = classificacoes[0]
+    plano = dados.get("plano_conta")
+    valor = moeda(dados.get("valor"))
+    if not plano or plano.pk != lancamento.plano_conta_id:
+        raise ValidationError("A classificação deve usar o mesmo Plano de Contas do lançamento.")
+    if valor != lancamento.valor_total:
+        raise ValidationError("A classificação deve possuir exatamente o valor total do lançamento.")
+    existentes = LancamentoFinanceiroClassificacao.objects.select_for_update().filter(lancamento=lancamento)
+    if existentes.count() > 1:
+        raise ValidationError("O lançamento possui mais de uma classificação contábil nesta etapa.")
+    classificacao = existentes.first()
+    if classificacao:
+        classificacao.plano_conta = plano
+        classificacao.valor = valor
+        classificacao.observacao = dados.get("observacao", classificacao.observacao)
+        classificacao.ordem = 1
+        classificacao.save()
+    else:
+        classificacao = LancamentoFinanceiroClassificacao.objects.create(
+            lancamento=lancamento,
+            plano_conta=plano,
+            valor=valor,
+            observacao=dados.get("observacao", ""),
+            ordem=1,
+        )
+    return classificacao
+
+
+def verificar_integridade_classificacoes(queryset=None):
+    """Retorna lançamentos que violam a invariante temporária de classificação 1:1."""
+    queryset = queryset if queryset is not None else LancamentoFinanceiro.objects.all()
+    invalidos = []
+    for lancamento in queryset.prefetch_related("classificacoes_contabeis").iterator(chunk_size=1000):
+        classificacoes = list(lancamento.classificacoes_contabeis.all())
+        if (len(classificacoes) != 1 or
+                classificacoes[0].plano_conta_id != lancamento.plano_conta_id or
+                classificacoes[0].valor != lancamento.valor_total):
+            invalidos.append(lancamento.pk)
+    return {"integro": not invalidos, "lancamentos_invalidos": invalidos}
 
 DRE_SECOES = (
     ("receitas_operacionais", "Receitas Operacionais"),

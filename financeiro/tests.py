@@ -508,6 +508,11 @@ class ObrasRateioTests(TestCase):
         self.assertEqual(resposta.status_code, 302)
         lancamento = LancamentoFinanceiro.objects.latest("pk")
         self.assertEqual(lancamento.rateios_centro_custo.count(), 1)
+        self.assertEqual(lancamento.classificacoes_contabeis.count(), 1)
+        self.assertEqual(
+            lancamento.classificacoes_contabeis.get().valor,
+            lancamento.valor_total,
+        )
         self.assertEqual(
             lancamento.rateios_centro_custo.get().valor,
             Decimal("100.00"),
@@ -606,6 +611,11 @@ class ObrasRateioTests(TestCase):
         self.assertEqual(resposta_valida.status_code, 302)
         lancamento = LancamentoFinanceiro.objects.latest("pk")
         self.assertEqual(lancamento.origem, "CONCILIACAO")
+        self.assertEqual(lancamento.classificacoes_contabeis.count(), 1)
+        self.assertEqual(
+            lancamento.classificacoes_contabeis.get().plano_conta,
+            lancamento.plano_conta,
+        )
         self.assertEqual(
             lancamento.rateios_centro_custo.get().centro_custo,
             self.obra,
