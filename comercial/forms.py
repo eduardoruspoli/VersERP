@@ -1,4 +1,5 @@
 from django import forms
+from django.contrib.auth import get_user_model
 from django.db.models import Q
 
 from financeiro.models import Empresa
@@ -86,3 +87,18 @@ class MotivoStatusForm(ClasseCssMixin, forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.aplicar_classes()
+
+
+class RelatorioPropostasFiltroForm(ClasseCssMixin, forms.Form):
+    empresa = forms.ModelChoiceField(Empresa.objects.filter(ativa=True), required=True)
+    data_inicial = forms.DateField(required=False, widget=forms.DateInput(attrs={"type":"date"}))
+    data_final = forms.DateField(required=False, widget=forms.DateInput(attrs={"type":"date"}))
+    numero = forms.CharField(required=False)
+    cliente = forms.ModelChoiceField(Pessoa.objects.filter(ativo=True), required=False)
+    contato = forms.CharField(required=False)
+    responsavel = forms.ModelChoiceField(get_user_model().objects.all(), required=False)
+    status = forms.ChoiceField(choices=[("","Todos")]+list(Proposta.Status.choices), required=False)
+    busca = forms.CharField(required=False)
+
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs); self.aplicar_classes()

@@ -51,6 +51,7 @@ urlpatterns = [
     path("pedidos/<int:pk>/cancelar/",views.pedido_cancelar,name="pedido_cancelar"),
     path("pedidos/<int:pk>/enviar/",views.pedido_enviar,name="pedido_enviar"),
     path("pedidos/<int:pk>/imprimir/",views.pedido_imprimir,name="pedido_imprimir"),
+    path("pedidos/<int:pk>/pdf/",views.pedido_pdf,name="pedido_pdf"),
     path("cotacoes/", views.cotacao_lista, name="cotacao_lista"),
     path("cotacoes/nova/", views.cotacao_criar, name="cotacao_criar"),
     path("cotacoes/<int:pk>/", views.cotacao_detalhe, name="cotacao_detalhe"),

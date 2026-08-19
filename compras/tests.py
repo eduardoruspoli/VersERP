@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -8,6 +9,7 @@ from django.db import IntegrityError, connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from pypdf import PdfReader
 from django.utils import timezone
 
 from comercial.models import Proposta, PropostaItem, PropostaRevisao
@@ -471,6 +473,10 @@ class PedidoCompraTests(ComprasBase):
     def test_documento_imprimivel_nao_expoe_comparativo(self):
         p=self.pedido(observacoes="Observação pública"); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra"); self.client.force_login(self.usuario)
         resposta=self.client.get(reverse("compras:pedido_imprimir",args=[p.pk])); self.assertEqual(resposta.status_code,200); self.assertContains(resposta,"PEDIDO DE COMPRA"); self.assertContains(resposta,"PC TESTE 01"); self.assertNotContains(resposta,"Compra direta TESTE"); self.assertNotContains(resposta,"mapa comparativo")
+
+    def test_pdf_pedido_valido_com_fornecedor_itens_obras_e_sem_dados_de_cotacao(self):
+        p=self.pedido(observacoes="Observação pública",dados_bancarios="Banco TESTE"); item=self.item_pedido(p); obra2=CentroCusto.objects.create(empresa=self.empresa,codigo="OBRA-PDF-2",nome="Obra PDF 2"); self.alocar(item,quantidade=4,valor=40); self.alocar(item,obra2,quantidade=6,valor=60); recalcular_pedido(p); PedidoCompra.objects.filter(pk=p.pk).update(status="APROVADO"); self.permissao("view_pedidocompra","view_custos_compra"); self.client.force_login(self.usuario)
+        resposta=self.client.get(reverse("compras:pedido_pdf",args=[p.pk])); self.assertEqual(resposta.status_code,200); self.assertTrue(resposta.content.startswith(b"%PDF")); texto="\n".join(pg.extract_text() or "" for pg in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("PEDIDO DE COMPRA",texto); self.assertIn("PC TESTE 01",texto); self.assertIn("VERS7001",texto); self.assertIn("OBRA-PDF-2",texto); self.assertNotIn("mapa comparativo",texto.lower()); self.assertNotIn("Compra direta TESTE",texto)
 
     def test_detalhe_oculta_custos_sem_permissao(self):
         p=self.pedido(); item=self.item_pedido(p); self.alocar(item); self.permissao("view_pedidocompra"); self.client.force_login(self.usuario)

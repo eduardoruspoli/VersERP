@@ -2,11 +2,11 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Count, Exists, F, OuterRef, Q, Sum
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import MotivoStatusForm, PropostaCriacaoForm, PropostaItemForm, PropostaLinhaPublicaForm, PropostaRevisaoForm, PropostaTributoForm
+from .forms import MotivoStatusForm, PropostaCriacaoForm, PropostaItemForm, PropostaLinhaPublicaForm, PropostaRevisaoForm, PropostaTributoForm, RelatorioPropostasFiltroForm
 from .models import Proposta, PropostaRevisao
 from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta
 
@@ -148,6 +148,48 @@ def proposta_motivo(request, pk, acao):
 def documento_publico(request, pk):
     revisao = get_object_or_404(PropostaRevisao.objects.prefetch_related("linhas_publicas"), pk=pk)
     return render(request, "comercial/documento_publico.html", {"documento": montar_contexto_publico_proposta(revisao)})
+
+
+@login_required
+@permission_required("comercial.view_proposta", raise_exception=True)
+def proposta_pdf(request, pk):
+    from core.pdf import resposta_pdf
+    revisao=get_object_or_404(PropostaRevisao.objects.select_related("proposta__empresa","proposta__cliente").prefetch_related("linhas_publicas"),pk=pk)
+    contexto={"documento":montar_contexto_publico_proposta(revisao)}
+    return resposta_pdf("comercial/proposta_pdf.html",contexto,f"{revisao.proposta.codigo}-rev-{revisao.numero:02d}.pdf")
+
+
+@login_required
+@permission_required("comercial.view_proposta", raise_exception=True)
+def relatorio_propostas(request):
+    from financeiro.models import BaixaFinanceira, RateioCentroCusto
+    form=RelatorioPropostasFiltroForm(request.GET or None)
+    propostas=Proposta.objects.filter(revisoes__numero=F("revisao_atual")).select_related("empresa","cliente","responsavel_interno","centro_custo")
+    if not form.is_valid():
+        propostas=propostas.none()
+    else:
+        d=form.cleaned_data; propostas=propostas.filter(empresa=d["empresa"])
+        if d.get("data_inicial"): propostas=propostas.filter(revisoes__data_proposta__gte=d["data_inicial"])
+        if d.get("data_final"): propostas=propostas.filter(revisoes__data_proposta__lte=d["data_final"])
+        if d.get("numero"): propostas=propostas.filter(codigo__icontains=d["numero"])
+        if d.get("cliente"): propostas=propostas.filter(cliente=d["cliente"])
+        if d.get("contato"): propostas=propostas.filter(revisoes__aos_cuidados_de__icontains=d["contato"])
+        if d.get("responsavel"): propostas=propostas.filter(responsavel_interno=d["responsavel"])
+        if d.get("status"): propostas=propostas.filter(status=d["status"])
+        if d.get("busca"):
+            texto=d["busca"]; propostas=propostas.filter(Q(codigo__icontains=texto)|Q(cliente__razao_social__icontains=texto)|Q(revisoes__nome_servico__icontains=texto)|Q(revisoes__observacoes_comerciais__icontains=texto))
+    propostas=propostas.annotate(
+        data_emissao_relatorio=F("revisoes__data_proposta"), contato_relatorio=F("revisoes__aos_cuidados_de"),
+        servico_relatorio=F("revisoes__nome_servico"), valor_relatorio=F("revisoes__preco_venda_final"),
+        observacao_relatorio=F("revisoes__observacoes_comerciais"),
+        tem_receita=Exists(RateioCentroCusto.objects.filter(centro_custo_id=OuterRef("centro_custo_id"),lancamento__tipo="RECEBER").exclude(lancamento__status="CANCELADO")),
+        tem_recebimento=Exists(BaixaFinanceira.objects.filter(parcela__lancamento__rateios_centro_custo__centro_custo_id=OuterRef("centro_custo_id"))),
+    ).order_by("-data_emissao_relatorio","-pk")
+    resumo=propostas.aggregate(quantidade=Count("pk"),valor_total=Sum("valor_relatorio"))
+    por_status=list(propostas.values("status").annotate(quantidade=Count("pk"),valor=Sum("valor_relatorio")).order_by("status"))
+    for item in por_status: item["label"]=dict(Proposta.Status.choices).get(item["status"],item["status"])
+    pagina=Paginator(propostas,50).get_page(request.GET.get("page"))
+    return render(request,"comercial/relatorio_propostas.html",{"form":form,"pagina":pagina,"resumo":resumo,"por_status":por_status,"status_labels":dict(Proposta.Status.choices)})
 
 
 @login_required

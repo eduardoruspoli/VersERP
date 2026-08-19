@@ -5,6 +5,7 @@ from . import views
 app_name = "comercial"
 urlpatterns = [
     path("propostas/", views.proposta_lista, name="proposta_lista"),
+    path("propostas/relatorio/", views.relatorio_propostas, name="relatorio_propostas"),
     path("propostas/nova/", views.proposta_criar, name="proposta_criar"),
     path("propostas/<int:pk>/", views.proposta_detalhe, name="proposta_detalhe"),
     path("revisoes/<int:pk>/editar/", views.revisao_editar, name="revisao_editar"),
@@ -17,5 +18,6 @@ urlpatterns = [
     path("propostas/<int:pk>/aprovar/", views.proposta_aprovar, name="proposta_aprovar"),
     path("propostas/<int:pk>/<str:acao>/motivo/", views.proposta_motivo, name="proposta_motivo"),
     path("revisoes/<int:pk>/documento/", views.documento_publico, name="documento_publico"),
+    path("revisoes/<int:pk>/pdf/", views.proposta_pdf, name="proposta_pdf"),
     path("propostas/<int:pk>/previsto-realizado/", views.previsto_realizado, name="previsto_realizado"),
 ]

@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -8,6 +9,7 @@ from django.core.exceptions import PermissionDenied
 from django.test import TestCase
 from django.urls import reverse
 from unittest.mock import patch
+from pypdf import PdfReader
 
 from financeiro.models import CentroCusto, Empresa, LancamentoFinanceiro, PlanoConta, RateioCentroCusto
 from pessoas.models import Pessoa
@@ -201,6 +203,38 @@ class ViewsPropostaTests(ComercialBase):
         self.usuario.user_permissions.clear()
         resposta = self.client.get(reverse("comercial:proposta_lista"))
         self.assertEqual(resposta.status_code, 403)
+
+    def test_pdf_proposta_valido_e_sem_dados_internos(self):
+        self.item(); self.linha("150",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=150; self.revisao.observacoes_internas="SEGREDO INTERNO"; self.revisao.save()
+        resposta=self.client.get(reverse("comercial:proposta_pdf",args=[self.revisao.pk])); self.assertEqual(resposta.status_code,200); self.assertEqual(resposta["Content-Type"],"application/pdf"); self.assertTrue(resposta.content.startswith(b"%PDF"))
+        texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("VERS1917",texto); self.assertIn("Solução fornecida",texto); self.assertNotIn("Fornecedor Secreto",texto); self.assertNotIn("SEGREDO INTERNO",texto); self.assertNotIn("markup",texto.lower())
+
+    def test_pdf_somente_servico_nao_exibe_subtotal_material(self):
+        self.linha("200",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=200; self.revisao.save(); resposta=self.client.get(reverse("comercial:proposta_pdf",args=[self.revisao.pk])); texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("Subtotal serviços",texto); self.assertNotIn("Subtotal materiais",texto)
+
+    def test_pdf_material_servico_flags_e_revisao(self):
+        self.linha("100",PropostaLinhaPublica.Grupo.MATERIAL); self.linha("50",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=150; self.revisao.normas_procedimentos="NORMA SECRETA DESABILITADA"; self.revisao.exibir_normas_procedimentos=False; self.revisao.save(); resposta=self.client.get(reverse("comercial:proposta_pdf",args=[self.revisao.pk])); texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("Subtotal materiais",texto); self.assertIn("Subtotal serviços",texto); self.assertIn("Revisão 0",texto); self.assertNotIn("NORMA SECRETA",texto)
+
+
+class RelatorioPropostasTests(ComercialBase):
+    def setUp(self):
+        super().setUp(); self.usuario.user_permissions.add(Permission.objects.get(content_type__app_label="comercial",codename="view_proposta")); self.client.force_login(self.usuario)
+        self.revisao.data_proposta=date(2026,8,10); self.revisao.preco_venda_final=Decimal("1000"); self.revisao.aos_cuidados_de="Contato Alfa"; self.revisao.observacoes_comerciais="Observação relatório"; self.revisao.save()
+    def url(self,**dados):
+        dados={"empresa":self.empresa.pk,**dados}; from urllib.parse import urlencode; return reverse("comercial:relatorio_propostas")+"?"+urlencode(dados)
+    def test_resumo_colunas_e_sem_duplicidade(self):
+        resposta=self.client.get(self.url()); self.assertContains(resposta,"VERS1917",count=1); self.assertContains(resposta,"R$ 1.000,00"); self.assertContains(resposta,"Contato Alfa"); self.assertContains(resposta,"Serviço TESTE")
+    def test_filtros_numero_cliente_contato_responsavel_status_periodo(self):
+        filtros={"numero":"1917","cliente":self.cliente.pk,"contato":"Alfa","responsavel":self.usuario.pk,"status":"RASCUNHO","data_inicial":"2026-08-01","data_final":"2026-08-31"}; self.assertContains(self.client.get(self.url(**filtros)),"VERS1917")
+        self.assertNotContains(self.client.get(self.url(status="APROVADA")),"VERS1917")
+    def test_status_rejeitada_cancelada_aprovada(self):
+        codigos=[]
+        for indice,status in enumerate(("REJEITADA","CANCELADA","APROVADA"),1):
+            p,r=criar_proposta(empresa=self.empresa,codigo=f"VERS192{indice}",cliente=self.cliente,nome_servico=status,usuario=self.usuario); Proposta.objects.filter(pk=p.pk).update(status=status); PropostaRevisao.objects.filter(pk=r.pk).update(preco_venda_final=100*indice); codigos.append(p.codigo)
+        resposta=self.client.get(self.url()); [self.assertContains(resposta,codigo) for codigo in codigos]
+    def test_isolamento_empresa_busca_e_permissao(self):
+        outra=Empresa.objects.create(razao_social="Outra relatório",cnpj="33.333.333/0001-33"); criar_proposta(empresa=outra,codigo="VERS9999",cliente=self.cliente,nome_servico="Fora",usuario=self.usuario)
+        self.assertNotContains(self.client.get(self.url(busca="VERS")),"VERS9999"); self.usuario.user_permissions.clear(); self.assertEqual(self.client.get(self.url()).status_code,403)
 
 
 class WorkflowPropostaTests(ComercialBase):

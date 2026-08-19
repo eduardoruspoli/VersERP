@@ -327,6 +327,16 @@ def pedido_imprimir(request,pk):
 
 
 @login_required
+@permission_required(("compras.view_pedidocompra","compras.view_custos_compra"),raise_exception=True)
+def pedido_pdf(request,pk):
+    from core.pdf import resposta_pdf
+    permitidos=[PedidoCompra.Status.AGUARDANDO_APROVACAO,PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO,PedidoCompra.Status.RECEBIDO]
+    pedido=get_object_or_404(PedidoCompra.objects.select_related("empresa","fornecedor","transportadora"),pk=pk,status__in=permitidos)
+    itens=pedido.itens.prefetch_related("alocacoes__obra")
+    return resposta_pdf("compras/pedido_pdf.html",{"pedido":pedido,"itens":itens},f"pedido-{pedido.numero_pedido_versatile}.pdf")
+
+
+@login_required
 @permission_required(("compras.add_recebimentocompra","compras.registrar_recebimento"),raise_exception=True)
 def recebimento_criar(request,pedido_pk):
     pedido=get_object_or_404(PedidoCompra,pk=pedido_pk,status__in=[PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO])
