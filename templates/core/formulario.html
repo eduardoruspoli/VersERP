@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block title %}{{ titulo }}{% endblock %}{% block content %}<div class="page-header"><h1>{{ titulo }}</h1></div><form method="post" class="card rh-form">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Salvar</button> <a class="btn btn-light" href="{% url voltar %}">Voltar</a></form>{% endblock %}

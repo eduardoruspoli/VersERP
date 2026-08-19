@@ -15,6 +15,7 @@ from django.utils import timezone
 from comercial.models import Proposta, PropostaItem, PropostaRevisao
 from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
+from core.models import UsuarioEmpresa
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoItem,
                      DivergenciaRecebimento, HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem,
@@ -40,6 +41,7 @@ class ComprasBase(TestCase):
     def setUp(self):
         self.usuario = get_user_model().objects.create_user(username="comprador", password="teste123")
         self.empresa = Empresa.objects.create(razao_social="Empresa Compras", cnpj="51.111.111/0001-51")
+        UsuarioEmpresa.objects.create(usuario=self.usuario, empresa=self.empresa)
         self.outra_empresa = Empresa.objects.create(razao_social="Outra Empresa", cnpj="52.222.222/0001-52")
         self.cliente = Pessoa.objects.create(razao_social="Cliente Obra", classificacao=Pessoa.Classificacao.CLIENTE)
         self.plano = PlanoConta.objects.create(codigo="TESTE-COMPRA-01", nome="Materiais compra", tipo="CUSTO", natureza="DEVEDORA")

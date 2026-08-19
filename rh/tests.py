@@ -9,6 +9,7 @@ from django.urls import reverse
 
 from financeiro.models import Empresa
 from pessoas.models import Pessoa
+from core.models import UsuarioEmpresa
 
 from .models import (ApuracaoDiaria, CompetenciaPonto, ConferenciaFolha,
                      ContratoFuncionario, EventoFolha, Feriado, Funcionario,
@@ -26,6 +27,7 @@ class RHBase(TestCase):
     def setUp(self):
         self.usuario=get_user_model().objects.create_user(username="rh",password="teste123")
         self.empresa=Empresa.objects.create(razao_social="Empresa RH",cnpj="10.000.000/0001-01",principal=True)
+        UsuarioEmpresa.objects.create(usuario=self.usuario,empresa=self.empresa)
         self.outra=Empresa.objects.create(razao_social="Outra",cnpj="20.000.000/0001-02")
         self.pessoa=Pessoa.objects.create(tipo_pessoa=Pessoa.TipoPessoa.FISICA,razao_social="Funcionário Teste",cpf_cnpj="111.111.111-11")
         self.funcionario=Funcionario.objects.create(empresa=self.empresa,pessoa=self.pessoa,cargo_atual="Técnico",data_admissao=date(2026,1,1))

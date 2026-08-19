@@ -3,18 +3,28 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Exists, F, OuterRef, Q, Sum
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest
+import csv
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import MotivoStatusForm, PropostaCriacaoForm, PropostaItemForm, PropostaLinhaPublicaForm, PropostaRevisaoForm, PropostaTributoForm, RelatorioPropostasFiltroForm
+from .forms import AcompanhamentoPropostaForm, MotivoStatusForm, PropostaCriacaoForm, PropostaItemForm, PropostaLinhaPublicaForm, PropostaRevisaoForm, PropostaTributoForm, RelatorioPropostasFiltroForm
 from .models import Proposta, PropostaRevisao
 from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta
+from core.access import filtrar_empresas, objeto_empresa_ou_404
+
+
+def _propostas(request):
+    return filtrar_empresas(Proposta.objects.all(), request.user)
+
+
+def _revisoes(request):
+    return filtrar_empresas(PropostaRevisao.objects.all(), request.user, "proposta__empresa")
 
 
 @login_required
 @permission_required("comercial.view_proposta", raise_exception=True)
 def proposta_lista(request):
-    propostas = Proposta.objects.select_related("empresa", "cliente").all()
+    propostas = filtrar_empresas(Proposta.objects.select_related("empresa", "cliente"), request.user)
     busca = request.GET.get("q", "").strip()
     if busca:
         propostas = propostas.filter(Q(codigo__icontains=busca) | Q(cliente__razao_social__icontains=busca))
@@ -24,7 +34,7 @@ def proposta_lista(request):
 @login_required
 @permission_required("comercial.add_proposta", raise_exception=True)
 def proposta_criar(request):
-    form = PropostaCriacaoForm(request.POST or None)
+    form = PropostaCriacaoForm(request.POST or None, usuario=request.user)
     if request.method == "POST" and form.is_valid():
         proposta, _ = criar_proposta(usuario=request.user, **form.cleaned_data)
         messages.success(request, "Proposta criada.")
@@ -39,19 +49,35 @@ def _revisao_atual(proposta):
 @login_required
 @permission_required("comercial.view_proposta", raise_exception=True)
 def proposta_detalhe(request, pk):
-    proposta = get_object_or_404(Proposta.objects.select_related("empresa", "cliente", "centro_custo", "revisao_aprovada"), pk=pk)
+    proposta = objeto_empresa_ou_404(Proposta.objects.select_related("empresa", "cliente", "centro_custo", "revisao_aprovada"), request.user, pk=pk)
     revisao = _revisao_atual(proposta)
     try:
         calculo = calcular_precificacao(revisao)
     except ValidationError as erro:
         calculo = {"erro": erro.messages[0]}
-    return render(request, "comercial/proposta_detalhe.html", {"proposta": proposta, "revisao": revisao, "calculo": calculo, "historico": proposta.historico_status.select_related("usuario")})
+    return render(request, "comercial/proposta_detalhe.html", {"proposta": proposta, "revisao": revisao, "calculo": calculo, "historico": proposta.historico_status.select_related("usuario"), "contatos": proposta.historico_contatos.select_related("usuario")})
+
+
+@login_required
+@permission_required("comercial.change_proposta", raise_exception=True)
+def proposta_acompanhamento(request, pk):
+    proposta = objeto_empresa_ou_404(Proposta.objects.all(), request.user, pk=pk)
+    form = AcompanhamentoPropostaForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        contato = form.save(commit=False)
+        contato.proposta = proposta
+        contato.usuario = request.user
+        contato.save()
+        Proposta.objects.filter(pk=proposta.pk).update(proxima_acao=contato.proxima_acao, data_retorno=contato.data_retorno, acompanhamento=contato.descricao)
+        messages.success(request, "Acompanhamento registrado.")
+        return redirect("comercial:proposta_detalhe", pk=pk)
+    return render(request, "comercial/formulario.html", {"form": form, "titulo": f"Acompanhar {proposta.codigo}"})
 
 
 @login_required
 @permission_required("comercial.change_propostarevisao", raise_exception=True)
 def revisao_editar(request, pk):
-    revisao = get_object_or_404(PropostaRevisao, pk=pk, congelada=False)
+    revisao = objeto_empresa_ou_404(PropostaRevisao, request.user, lookup="proposta__empresa", pk=pk, congelada=False)
     form = PropostaRevisaoForm(request.POST or None, instance=revisao)
     if request.method == "POST" and form.is_valid():
         form.save()
@@ -61,7 +87,7 @@ def revisao_editar(request, pk):
 
 
 def _adicionar(request, pk, form_class, titulo):
-    revisao = get_object_or_404(PropostaRevisao, pk=pk, congelada=False)
+    revisao = objeto_empresa_ou_404(PropostaRevisao, request.user, lookup="proposta__empresa", pk=pk, congelada=False)
     form = form_class(request.POST or None)
     if request.method == "POST" and form.is_valid():
         objeto = form.save(commit=False)
@@ -91,7 +117,7 @@ def tributo_adicionar(request, pk): return _adicionar(request, pk, PropostaTribu
 @permission_required("comercial.change_proposta", raise_exception=True)
 def proposta_enviar(request, pk):
     if request.method != "POST": return HttpResponseBadRequest()
-    revisao = _revisao_atual(get_object_or_404(Proposta, pk=pk))
+    revisao = _revisao_atual(objeto_empresa_ou_404(Proposta.objects.all(), request.user, pk=pk))
     try:
         enviar_proposta(revisao, request.user)
         messages.success(request, "Revisão enviada e congelada.")
@@ -104,7 +130,7 @@ def proposta_enviar(request, pk):
 @permission_required(("comercial.change_proposta", "comercial.add_propostarevisao"), raise_exception=True)
 def revisao_nova(request, pk):
     if request.method != "POST": return HttpResponseBadRequest()
-    proposta = get_object_or_404(Proposta, pk=pk)
+    proposta = objeto_empresa_ou_404(Proposta.objects.all(), request.user, pk=pk)
     try:
         criar_nova_revisao(_revisao_atual(proposta), request.user)
         messages.success(request, "Nova revisão criada.")
@@ -116,7 +142,7 @@ def revisao_nova(request, pk):
 def _executar_acao(request, pk, acao, sucesso):
     if request.method != "POST":
         return HttpResponseBadRequest()
-    proposta = get_object_or_404(Proposta, pk=pk)
+    proposta = objeto_empresa_ou_404(Proposta.objects.all(), request.user, pk=pk)
     try:
         acao(proposta, request.user)
         messages.success(request, sucesso)
@@ -139,7 +165,7 @@ def proposta_aprovar(request, pk):
 
 @login_required
 def proposta_motivo(request, pk, acao):
-    proposta = get_object_or_404(Proposta, pk=pk)
+    proposta = objeto_empresa_ou_404(Proposta.objects.all(), request.user, pk=pk)
     if acao not in {"rejeitar", "cancelar"}:
         return HttpResponseBadRequest()
     permissao = "comercial.rejeitar_proposta" if acao == "rejeitar" else "comercial.cancelar_proposta"
@@ -160,7 +186,7 @@ def proposta_motivo(request, pk, acao):
 @login_required
 @permission_required("comercial.view_proposta", raise_exception=True)
 def documento_publico(request, pk):
-    revisao = get_object_or_404(PropostaRevisao.objects.prefetch_related("linhas_publicas"), pk=pk)
+    revisao = objeto_empresa_ou_404(PropostaRevisao.objects.prefetch_related("linhas_publicas"), request.user, lookup="proposta__empresa", pk=pk)
     return render(request, "comercial/documento_publico.html", {"documento": montar_contexto_publico_proposta(revisao)})
 
 
@@ -168,7 +194,7 @@ def documento_publico(request, pk):
 @permission_required("comercial.view_proposta", raise_exception=True)
 def proposta_pdf(request, pk):
     from core.pdf import resposta_pdf
-    revisao=get_object_or_404(PropostaRevisao.objects.select_related("proposta__empresa","proposta__cliente").prefetch_related("linhas_publicas"),pk=pk)
+    revisao=objeto_empresa_ou_404(PropostaRevisao.objects.select_related("proposta__empresa","proposta__cliente").prefetch_related("linhas_publicas"),request.user,lookup="proposta__empresa",pk=pk)
     contexto={"documento":montar_contexto_publico_proposta(revisao)}
     return resposta_pdf("comercial/proposta_pdf.html",contexto,f"{revisao.proposta.codigo}-rev-{revisao.numero:02d}.pdf")
 
@@ -177,8 +203,8 @@ def proposta_pdf(request, pk):
 @permission_required("comercial.view_proposta", raise_exception=True)
 def relatorio_propostas(request):
     from financeiro.models import BaixaFinanceira, RateioCentroCusto
-    form=RelatorioPropostasFiltroForm(request.GET or None)
-    propostas=Proposta.objects.filter(revisoes__numero=F("revisao_atual")).select_related("empresa","cliente","responsavel_interno","centro_custo")
+    form=RelatorioPropostasFiltroForm(request.GET or None,usuario=request.user)
+    propostas=filtrar_empresas(Proposta.objects.filter(revisoes__numero=F("revisao_atual")).select_related("empresa","cliente","responsavel_interno","centro_custo"),request.user)
     if not form.is_valid():
         propostas=propostas.none()
     else:
@@ -202,6 +228,15 @@ def relatorio_propostas(request):
     resumo=propostas.aggregate(quantidade=Count("pk"),valor_total=Sum("valor_relatorio"))
     por_status=list(propostas.values("status").annotate(quantidade=Count("pk"),valor=Sum("valor_relatorio")).order_by("status"))
     for item in por_status: item["label"]=dict(Proposta.Status.choices).get(item["status"],item["status"])
+    if request.GET.get("formato") == "csv":
+        resposta = HttpResponse(content_type="text/csv; charset=utf-8")
+        resposta["Content-Disposition"] = 'attachment; filename="relatorio-propostas.csv"'
+        resposta.write("\ufeff")
+        writer = csv.writer(resposta, delimiter=";")
+        writer.writerow(["Número", "Data", "Cliente", "Serviço", "Status", "Valor", "Responsável"])
+        for proposta in propostas:
+            writer.writerow([proposta.codigo, proposta.data_emissao_relatorio.strftime("%d/%m/%Y"), proposta.cliente, proposta.servico_relatorio, proposta.get_status_display(), str(proposta.valor_relatorio).replace(".", ","), proposta.responsavel_interno or ""])
+        return resposta
     pagina=Paginator(propostas,50).get_page(request.GET.get("page"))
     return render(request,"comercial/relatorio_propostas.html",{"form":form,"pagina":pagina,"resumo":resumo,"por_status":por_status,"status_labels":dict(Proposta.Status.choices)})
 
@@ -209,7 +244,7 @@ def relatorio_propostas(request):
 @login_required
 @permission_required("comercial.view_proposta", raise_exception=True)
 def previsto_realizado(request, pk):
-    proposta = get_object_or_404(Proposta, pk=pk)
+    proposta = objeto_empresa_ou_404(Proposta.objects.all(), request.user, pk=pk)
     relatorio = calcular_previsto_realizado(proposta)
     pagina = None
     if relatorio["disponivel"]:

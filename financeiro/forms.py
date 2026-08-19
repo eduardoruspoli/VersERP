@@ -13,6 +13,7 @@ from .models import (
     PlanoConta,
     TransferenciaBancaria,
 )
+from core.access import empresas_usuario
 
 
 class DecimalBRField(forms.DecimalField):
@@ -80,9 +81,11 @@ class CentroCustoForm(forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, usuario=None, **kwargs):
         super().__init__(*args, **kwargs)
 
+        if usuario is not None:
+            self.fields["empresa"].queryset = empresas_usuario(usuario, ativas=True)
         queryset = self.fields["cliente"].queryset.filter(ativo=True)
 
         if self.instance and self.instance.cliente_id:
@@ -330,15 +333,15 @@ class RelatorioObraFiltroForm(forms.Form):
         ),
     )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, usuario=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["empresa"].queryset = Empresa.objects.filter(
-            ativa=True
-        ).order_by("razao_social")
+        self.fields["empresa"].queryset = (empresas_usuario(usuario, ativas=True) if usuario is not None else Empresa.objects.filter(ativa=True)).order_by("razao_social")
 
         obras = CentroCusto.objects.select_related("empresa").order_by(
             "empresa__razao_social", "codigo"
         )
+        if usuario is not None and not usuario.is_superuser:
+            obras = obras.filter(empresa__usuarios_autorizados__usuario=usuario)
         empresa_id = self.data.get("empresa") if self.is_bound else None
         if empresa_id and str(empresa_id).isdigit():
             obras = obras.filter(empresa_id=empresa_id)
@@ -411,14 +414,14 @@ class DREFiltroForm(forms.Form):
         widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
     )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, usuario=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["empresa"].queryset = Empresa.objects.filter(
-            ativa=True
-        ).order_by("razao_social")
+        self.fields["empresa"].queryset = (empresas_usuario(usuario, ativas=True) if usuario is not None else Empresa.objects.filter(ativa=True)).order_by("razao_social")
         obras = CentroCusto.objects.select_related("empresa").order_by(
             "empresa__razao_social", "codigo"
         )
+        if usuario is not None and not usuario.is_superuser:
+            obras = obras.filter(empresa__usuarios_autorizados__usuario=usuario)
         empresa_id = self.data.get("empresa") if self.is_bound else None
         if empresa_id and str(empresa_id).isdigit():
             obras = obras.filter(empresa_id=empresa_id)
@@ -465,14 +468,14 @@ class DashboardFinanceiroFiltroForm(forms.Form):
         widget=forms.Select(attrs={"class": "form-select"}),
     )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, usuario=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["empresa"].queryset = Empresa.objects.filter(
-            ativa=True
-        ).order_by("razao_social")
+        self.fields["empresa"].queryset = (empresas_usuario(usuario, ativas=True) if usuario is not None else Empresa.objects.filter(ativa=True)).order_by("razao_social")
         obras = CentroCusto.objects.select_related("empresa").order_by(
             "empresa__razao_social", "codigo"
         )
+        if usuario is not None and not usuario.is_superuser:
+            obras = obras.filter(empresa__usuarios_autorizados__usuario=usuario)
         empresa_id = self.data.get("empresa") if self.is_bound else None
         if empresa_id and str(empresa_id).isdigit():
             obras = obras.filter(empresa_id=empresa_id)

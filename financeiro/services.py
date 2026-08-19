@@ -1227,3 +1227,60 @@ def calcular_dashboard_financeiro(
         "conciliacao": conciliacao,
         "alertas": alertas,
     }
+
+
+def calcular_aging(empresa, tipo, data_base=None):
+    """Resume principal em aberto sem confundir encargos de baixa com o título."""
+    from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
+    from django.db.models.functions import Coalesce
+
+    data_base = data_base or timezone.localdate()
+    qs = ParcelaFinanceira.objects.filter(
+        lancamento__empresa=empresa,
+        lancamento__tipo=tipo,
+    ).exclude(status="CANCELADA").exclude(lancamento__status="CANCELADO").annotate(
+        baixado=Coalesce(Sum("baixas__valor"), Value(Decimal("0.00")), output_field=DecimalField()),
+    ).annotate(
+        saldo_calculado=ExpressionWrapper(F("valor") - F("baixado"), output_field=DecimalField(max_digits=15, decimal_places=2)),
+    ).filter(saldo_calculado__gt=0).select_related("lancamento__pessoa")
+    faixas = {"a_vencer": Decimal("0.00"), "vencido_1_30": Decimal("0.00"), "vencido_31_60": Decimal("0.00"), "vencido_61_90": Decimal("0.00"), "vencido_mais_90": Decimal("0.00")}
+    linhas = []
+    for parcela in qs.order_by("vencimento", "pk"):
+        atraso = (data_base - parcela.vencimento).days
+        chave = "a_vencer" if atraso <= 0 else "vencido_1_30" if atraso <= 30 else "vencido_31_60" if atraso <= 60 else "vencido_61_90" if atraso <= 90 else "vencido_mais_90"
+        faixas[chave] += parcela.saldo_calculado
+        linhas.append({"parcela": parcela, "dias_atraso": max(atraso, 0), "faixa": chave, "saldo": parcela.saldo_calculado})
+    total = sum(faixas.values(), Decimal("0.00"))
+    return {"tipo": tipo, "data_base": data_base, "faixas": faixas, "total": total, "linhas": linhas}
+
+
+def calcular_fluxo_projetado(empresa, data_inicial, data_final, agrupamento="DIARIO"):
+    from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
+    from django.db.models.functions import Coalesce, TruncMonth, TruncWeek
+
+    contas = ContaBancaria.objects.filter(empresa=empresa, ativa=True)
+    saldo = contas.aggregate(total=Coalesce(Sum("saldo_inicial"), Value(Decimal("0.00")), output_field=DecimalField()))["total"]
+    movs = MovimentacaoBancaria.objects.filter(conta_bancaria__in=contas).values("tipo").annotate(total=Sum("valor"))
+    for mov in movs:
+        saldo += mov["total"] if mov["tipo"] == "ENTRADA" else -mov["total"]
+    parcelas = ParcelaFinanceira.objects.filter(lancamento__empresa=empresa, vencimento__range=(data_inicial, data_final)).exclude(status="CANCELADA").exclude(lancamento__status="CANCELADO").annotate(
+        baixado=Coalesce(Sum("baixas__valor"), Value(Decimal("0.00")), output_field=DecimalField()),
+        saldo_aberto=ExpressionWrapper(F("valor") - F("baixado"), output_field=DecimalField(max_digits=15, decimal_places=2)),
+    ).filter(saldo_aberto__gt=0)
+    saldo_atual = saldo
+    mapa = {}
+    for parcela in parcelas.select_related("lancamento").order_by("vencimento", "pk"):
+        if agrupamento == "MENSAL":
+            periodo = parcela.vencimento.replace(day=1)
+        elif agrupamento == "SEMANAL":
+            periodo = parcela.vencimento - timedelta(days=parcela.vencimento.weekday())
+        else:
+            periodo = parcela.vencimento
+        linha = mapa.setdefault(periodo, {"periodo": periodo, "entradas": Decimal("0.00"), "saidas": Decimal("0.00")})
+        linha["entradas" if parcela.lancamento.tipo == "RECEBER" else "saidas"] += parcela.saldo_aberto
+    linhas = []
+    for linha in mapa.values():
+        saldo += linha["entradas"] - linha["saidas"]
+        linha["saldo"] = saldo
+        linhas.append(linha)
+    return {"saldo_atual": saldo_atual, "linhas": linhas, "saldo_final": saldo, "agrupamento": agrupamento}

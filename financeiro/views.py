@@ -50,13 +50,69 @@ from .ofx import (
     ErroOFX,
     ler_ofx,
 )
+from django.http import HttpResponse
+import csv
 from .services import (
     calcular_dashboard_financeiro,
     calcular_dre,
     calcular_relatorio_obra,
     drilldown_dre,
     salvar_classificacoes_lancamento,
+    calcular_aging,
+    calcular_fluxo_projetado,
 )
+
+
+@login_required
+@permission_required("financeiro.view_lancamentofinanceiro", raise_exception=True)
+def aging_financeiro(request, tipo):
+    tipo = tipo.upper()
+    if tipo not in {"PAGAR", "RECEBER"}:
+        return HttpResponseBadRequest("Tipo inválido.")
+    empresa, empresas = empresa_request(request, ativas=True)
+    relatorio = calcular_aging(empresa, tipo)
+    if request.GET.get("formato") == "csv":
+        resposta = HttpResponse(content_type="text/csv; charset=utf-8")
+        resposta["Content-Disposition"] = f'attachment; filename="aging-{tipo.lower()}.csv"'
+        resposta.write("\ufeff")
+        writer = csv.writer(resposta, delimiter=";")
+        writer.writerow(["Pessoa", "Vencimento", "Dias em atraso", "Saldo"])
+        for linha in relatorio["linhas"]:
+            writer.writerow([linha["parcela"].lancamento.pessoa, linha["parcela"].vencimento.strftime("%d/%m/%Y"), linha["dias_atraso"], str(linha["saldo"]).replace(".", ",")])
+        return resposta
+    return render(request, "financeiro/aging.html", {"empresa": empresa, "empresas": empresas, "relatorio": relatorio})
+
+
+@login_required
+@permission_required("financeiro.view_lancamentofinanceiro", raise_exception=True)
+def fluxo_projetado(request):
+    empresa, empresas = empresa_request(request, ativas=True)
+    hoje = timezone.localdate()
+    inicial = parse_date(request.GET.get("data_inicial", "")) or hoje
+    final = parse_date(request.GET.get("data_final", "")) or hoje + timedelta(days=90)
+    agrupamento = request.GET.get("agrupamento", "SEMANAL")
+    if agrupamento not in {"DIARIO", "SEMANAL", "MENSAL"}:
+        agrupamento = "SEMANAL"
+    relatorio = calcular_fluxo_projetado(empresa, inicial, final, agrupamento)
+    return render(request, "financeiro/fluxo_projetado.html", {"empresa": empresa, "empresas": empresas, "relatorio": relatorio, "data_inicial": inicial, "data_final": final})
+
+
+@login_required
+@permission_required("financeiro.view_centrocusto", raise_exception=True)
+def painel_obra(request, pk):
+    obra = objeto_empresa_ou_404(CentroCusto.objects.select_related("empresa", "cliente"), request.user, pk=pk)
+    proposta = getattr(obra, "proposta_origem", None)
+    hoje = timezone.localdate()
+    financeiro = calcular_relatorio_obra(obra, hoje.replace(month=1, day=1), hoje)
+    previsto_realizado = None
+    previsto_comprado = None
+    if proposta:
+        from comercial.services import calcular_previsto_realizado
+        from compras.services import calcular_previsto_comprado
+        previsto_realizado = calcular_previsto_realizado(proposta)
+        previsto_comprado = calcular_previsto_comprado(obra)
+    return render(request, "financeiro/painel_obra.html", {"obra": obra, "proposta": proposta, "financeiro": financeiro, "previsto_realizado": previsto_realizado, "previsto_comprado": previsto_comprado})
+from core.access import empresa_request, empresas_usuario, filtrar_empresas, objeto_empresa_ou_404
 
 
 # ============================================================
@@ -1163,17 +1219,15 @@ def financeiro_index(request):
     inicio = hoje.replace(day=1)
     proximo_mes = (inicio.replace(day=28) + timedelta(days=4)).replace(day=1)
     fim = proximo_mes - timedelta(days=1)
-    empresa_inicial = (
-        Empresa.objects.filter(ativa=True, principal=True).first()
-        or Empresa.objects.filter(ativa=True).first()
-    )
+    autorizadas = empresas_usuario(request.user, ativas=True)
+    empresa_inicial = autorizadas.filter(principal=True).first() or autorizadas.first()
     dados_filtro = request.GET or {
         "empresa": empresa_inicial.pk if empresa_inicial else "",
         "data_inicial": inicio.isoformat(),
         "data_final": fim.isoformat(),
         "obra": "",
     }
-    form = DashboardFinanceiroFiltroForm(dados_filtro)
+    form = DashboardFinanceiroFiltroForm(dados_filtro, usuario=request.user)
     dashboard = None
     if form.is_valid():
         dados = form.cleaned_data
@@ -1588,10 +1642,10 @@ def alternar_status_plano_conta(
     raise_exception=True,
 )
 def centros_custo(request):
-    centros = CentroCusto.objects.select_related(
+    centros = filtrar_empresas(CentroCusto.objects.select_related(
         "empresa",
         "cliente",
-    )
+    ), request.user)
     busca = request.GET.get("q", "").strip()
     empresa_id = request.GET.get("empresa", "").strip()
     status = request.GET.get("status", "").strip()
@@ -1611,10 +1665,10 @@ def centros_custo(request):
     elif status == "INATIVO":
         centros = centros.filter(ativo=False)
 
-    todos = CentroCusto.objects.all()
+    todos = filtrar_empresas(CentroCusto.objects.all(), request.user)
     contexto = {
         "centros": centros,
-        "empresas": Empresa.objects.filter(ativa=True).order_by("razao_social"),
+        "empresas": empresas_usuario(request.user, ativas=True).order_by("razao_social"),
         "total_centros": todos.count(),
         "total_ativos": todos.filter(ativo=True).count(),
         "total_inativos": todos.filter(ativo=False).count(),
@@ -1631,7 +1685,7 @@ def centros_custo(request):
     raise_exception=True,
 )
 def novo_centro_custo(request):
-    form = CentroCustoForm(request.POST or None)
+    form = CentroCustoForm(request.POST or None, usuario=request.user)
 
     if request.method == "POST" and form.is_valid():
         centro = form.save()
@@ -1654,8 +1708,8 @@ def novo_centro_custo(request):
     raise_exception=True,
 )
 def editar_centro_custo(request, pk):
-    centro = get_object_or_404(CentroCusto, pk=pk)
-    form = CentroCustoForm(request.POST or None, instance=centro)
+    centro = objeto_empresa_ou_404(CentroCusto.objects.all(), request.user, pk=pk)
+    form = CentroCustoForm(request.POST or None, instance=centro, usuario=request.user)
 
     if request.method == "POST" and form.is_valid():
         centro = form.save()
@@ -1678,7 +1732,7 @@ def editar_centro_custo(request, pk):
     raise_exception=True,
 )
 def alternar_status_centro_custo(request, pk):
-    centro = get_object_or_404(CentroCusto, pk=pk)
+    centro = objeto_empresa_ou_404(CentroCusto.objects.all(), request.user, pk=pk)
 
     if request.method != "POST":
         return redirect("financeiro:centros_custo")
@@ -1705,10 +1759,8 @@ def alternar_status_centro_custo(request, pk):
 )
 def relatorio_gerencial_obra(request):
     hoje = timezone.localdate()
-    empresa_inicial = (
-        Empresa.objects.filter(ativa=True, principal=True).first()
-        or Empresa.objects.filter(ativa=True).first()
-    )
+    autorizadas = empresas_usuario(request.user, ativas=True)
+    empresa_inicial = autorizadas.filter(principal=True).first() or autorizadas.first()
     iniciais = {
         "empresa": empresa_inicial,
         "data_inicial": hoje.replace(month=1, day=1),
@@ -1717,6 +1769,7 @@ def relatorio_gerencial_obra(request):
     form = RelatorioObraFiltroForm(
         request.GET if request.GET else None,
         initial=iniciais,
+        usuario=request.user,
     )
     relatorio = None
     pagina = None
@@ -1753,10 +1806,8 @@ def relatorio_gerencial_obra(request):
 )
 def dre_gerencial(request):
     hoje = timezone.localdate()
-    empresa_inicial = (
-        Empresa.objects.filter(ativa=True, principal=True).first()
-        or Empresa.objects.filter(ativa=True).first()
-    )
+    autorizadas = empresas_usuario(request.user, ativas=True)
+    empresa_inicial = autorizadas.filter(principal=True).first() or autorizadas.first()
     form = DREFiltroForm(
         request.GET if request.GET else None,
         initial={
@@ -1766,6 +1817,7 @@ def dre_gerencial(request):
             "comparacao": "NENHUMA",
             "usar_fallback": True,
         },
+        usuario=request.user,
     )
     dre = None
     drilldown = None
@@ -1833,9 +1885,7 @@ def dre_gerencial(request):
 )
 def contas_pagar(request):
     lancamentos = (
-        queryset_lancamentos(
-            "PAGAR"
-        )
+        filtrar_empresas(queryset_lancamentos("PAGAR"), request.user)
         .order_by(
             "-id"
         )
@@ -1987,9 +2037,7 @@ def baixar_parcela(
 )
 def contas_receber(request):
     lancamentos = (
-        queryset_lancamentos(
-            "RECEBER"
-        )
+        filtrar_empresas(queryset_lancamentos("RECEBER"), request.user)
         .order_by(
             "-id"
         )
@@ -2141,7 +2189,7 @@ def receber_parcela(
 )
 def contas_bancarias(request):
     contas = (
-        ContaBancaria.objects
+        filtrar_empresas(ContaBancaria.objects, request.user)
         .filter(
             ativa=True
         )

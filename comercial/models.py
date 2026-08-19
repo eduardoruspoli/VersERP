@@ -36,6 +36,9 @@ class ModeloConteudoProposta(models.Model):
 
 
 class Proposta(models.Model):
+    class Origem(models.TextChoices):
+        SISTEMA = "SISTEMA", "Sistema"
+        IMPORTADO_HISTORICO = "IMPORTADO_HISTORICO", "Importado histórico"
     class Status(models.TextChoices):
         RASCUNHO = "RASCUNHO", "Rascunho"
         EM_REVISAO = "EM_REVISAO", "Em revisão"
@@ -50,12 +53,18 @@ class Proposta(models.Model):
     codigo = models.CharField(max_length=20)
     numero_sequencial = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RASCUNHO)
+    origem = models.CharField(max_length=25, choices=Origem.choices, default=Origem.SISTEMA)
+    status_historico = models.CharField(max_length=100, blank=True)
+    observacao_importacao = models.TextField(blank=True)
     revisao_atual = models.PositiveIntegerField(default=0)
     centro_custo = models.OneToOneField("financeiro.CentroCusto", on_delete=models.PROTECT, null=True, blank=True, related_name="proposta_origem")
     revisao_aprovada = models.ForeignKey("PropostaRevisao", on_delete=models.PROTECT, null=True, blank=True, related_name="propostas_aprovadas")
     aprovada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="propostas_aprovadas")
     aprovada_em = models.DateTimeField(null=True, blank=True)
     responsavel_interno = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="propostas_responsavel")
+    proxima_acao = models.CharField(max_length=250, blank=True)
+    data_retorno = models.DateField(null=True, blank=True)
+    acompanhamento = models.TextField(blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
@@ -255,3 +264,15 @@ class PropostaHistoricoStatus(models.Model):
 
     def get_status_anterior_display(self):
         return dict(Proposta.Status.choices).get(self.status_anterior, self.status_anterior)
+
+
+class HistoricoContatoProposta(models.Model):
+    proposta = models.ForeignKey(Proposta, on_delete=models.CASCADE, related_name="historico_contatos")
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    ocorrido_em = models.DateTimeField(auto_now_add=True)
+    descricao = models.TextField()
+    proxima_acao = models.CharField(max_length=250, blank=True)
+    data_retorno = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-ocorrido_em"]

@@ -68,6 +68,9 @@ urlpatterns = [
         views.editar_centro_custo,
         name="editar_centro_custo",
     ),
+    path("centros-de-custo/<int:pk>/painel/", views.painel_obra, name="painel_obra"),
+    path("relatorios/aging/<str:tipo>/", views.aging_financeiro, name="aging_financeiro"),
+    path("relatorios/fluxo-projetado/", views.fluxo_projetado, name="fluxo_projetado"),
 
     path(
         "centros-de-custo/<int:pk>/alternar-status/",

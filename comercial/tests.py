@@ -13,6 +13,7 @@ from pypdf import PdfReader
 
 from financeiro.models import CentroCusto, Empresa, LancamentoFinanceiro, PlanoConta, RateioCentroCusto
 from pessoas.models import Pessoa
+from core.models import UsuarioEmpresa
 
 from .models import ModeloConteudoProposta, Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
 from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta, validar_fechamento_publico
@@ -22,6 +23,7 @@ class ComercialBase(TestCase):
     def setUp(self):
         self.usuario = get_user_model().objects.create_user(username="comercial", password="teste123")
         self.empresa = Empresa.objects.create(razao_social="Empresa Teste", nome_fantasia="Vers Teste", cnpj="11.111.111/0001-11")
+        UsuarioEmpresa.objects.create(usuario=self.usuario, empresa=self.empresa)
         self.cliente = Pessoa.objects.create(razao_social="Cliente Teste", classificacao=Pessoa.Classificacao.CLIENTE, ativo=True, cpf_cnpj="22.222.222/0001-22")
         self.fornecedor = Pessoa.objects.create(razao_social="Fornecedor Secreto", classificacao=Pessoa.Classificacao.FORNECEDOR, ativo=True)
         self.proposta, self.revisao = criar_proposta(empresa=self.empresa, codigo="VERS1917", cliente=self.cliente, nome_servico="Serviço TESTE", usuario=self.usuario)

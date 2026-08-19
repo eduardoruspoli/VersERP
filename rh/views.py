@@ -5,8 +5,12 @@ from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import ValidationError
 from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.dateparse import parse_date
+from django.http import HttpResponse
+import csv
 
 from financeiro.models import Empresa
+from core.access import empresa_request
 
 from .forms import (CompetenciaForm, ConferenciaForm, ContratoForm,
                     DadosBancariosForm, EventoForm, FuncionarioForm, JornadaDiaForm,
@@ -21,10 +25,7 @@ from .services import (apurar_competencia, atualizar_conferencia,
 
 
 def _empresa(request):
-    empresas = Empresa.objects.filter(ativa=True)
-    empresa_id = request.GET.get("empresa") or request.POST.get("empresa")
-    empresa = empresas.filter(pk=empresa_id).first() if empresa_id else empresas.filter(principal=True).first() or empresas.first()
-    return empresa, empresas
+    return empresa_request(request, ativas=True)
 
 
 def _render_form(request, form, titulo, voltar, template="rh/formulario.html"):
@@ -47,6 +48,32 @@ def dashboard(request):
         "eventos_pendentes":EventoFolha.objects.filter(empresa=empresa,status=EventoFolha.Status.PENDENTE).count() if empresa else 0,
         "divergencias":ConferenciaFolha.objects.filter(retorno__funcionario__empresa=empresa,status=ConferenciaFolha.Status.DIVERGENTE).count() if empresa else 0}
     return render(request,"rh/dashboard.html",contexto)
+
+
+@login_required
+@permission_required("rh.view_rh", raise_exception=True)
+def relatorio_gerencial(request):
+    empresa, empresas = _empresa(request)
+    competencia = parse_date(request.GET.get("competencia", "")) or date.today().replace(day=1)
+    pontos = CompetenciaPonto.objects.filter(funcionario__empresa=empresa, competencia=competencia).select_related("funcionario__pessoa")
+    funcionarios = Funcionario.objects.filter(empresa=empresa).select_related("pessoa").prefetch_related("contratos", "jornadas")
+    alertas = []
+    for funcionario in funcionarios:
+        if not funcionario.contratos.filter(inicio_vigencia__lte=competencia).filter(Q(fim_vigencia__isnull=True) | Q(fim_vigencia__gte=competencia)).exists():
+            alertas.append(f"{funcionario.nome}: sem contrato vigente")
+        if not funcionario.jornadas.filter(inicio_vigencia__lte=competencia).filter(Q(fim_vigencia__isnull=True) | Q(fim_vigencia__gte=competencia)).exists():
+            alertas.append(f"{funcionario.nome}: sem jornada vigente")
+    resumo = pontos.aggregate(saldo=Sum("saldo_final_minutos"), horas_100=Sum("horas_100_minutos"))
+    if request.GET.get("formato") == "csv":
+        resposta = HttpResponse(content_type="text/csv; charset=utf-8")
+        resposta["Content-Disposition"] = 'attachment; filename="rh-banco-horas.csv"'
+        resposta.write("\ufeff")
+        writer = csv.writer(resposta, delimiter=";")
+        writer.writerow(["Funcionário", "Competência", "Saldo BH (min)", "Horas 100% (min)", "Status"])
+        for ponto in pontos:
+            writer.writerow([ponto.funcionario.nome, competencia.strftime("%m/%Y"), ponto.saldo_final_minutos, ponto.horas_100_minutos, ponto.get_status_display()])
+        return resposta
+    return render(request, "rh/relatorio_gerencial.html", {"empresa": empresa, "empresas": empresas, "competencia": competencia, "pontos": pontos, "resumo": resumo, "alertas": alertas, "ferias_afastamentos": funcionarios.filter(situacao__in=[Funcionario.Situacao.FERIAS, Funcionario.Situacao.AFASTADO])})
 
 
 @login_required

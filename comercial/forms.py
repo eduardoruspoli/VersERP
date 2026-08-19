@@ -5,8 +5,9 @@ from django.db.models import Q
 from financeiro.models import Empresa
 from financeiro.models import PlanoConta
 from pessoas.models import Pessoa
+from core.access import empresas_usuario
 
-from .models import Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
+from .models import HistoricoContatoProposta, Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
 
 
 class ClasseCssMixin:
@@ -21,8 +22,10 @@ class PropostaCriacaoForm(ClasseCssMixin, forms.Form):
     cliente = forms.ModelChoiceField(Pessoa.objects.filter(ativo=True).filter(Q(classificacao="CLIENTE") | Q(classificacao="AMBOS")))
     nome_servico = forms.CharField(max_length=250)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, usuario=None, **kwargs):
         super().__init__(*args, **kwargs)
+        if usuario is not None:
+            self.fields["empresa"].queryset = empresas_usuario(usuario, ativas=True)
         self.aplicar_classes()
 
     def clean_codigo(self):
@@ -89,6 +92,17 @@ class MotivoStatusForm(ClasseCssMixin, forms.Form):
         self.aplicar_classes()
 
 
+class AcompanhamentoPropostaForm(ClasseCssMixin, forms.ModelForm):
+    class Meta:
+        model = HistoricoContatoProposta
+        fields = ["descricao", "proxima_acao", "data_retorno"]
+        widgets = {"descricao": forms.Textarea(attrs={"rows": 4}), "data_retorno": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.aplicar_classes()
+
+
 class RelatorioPropostasFiltroForm(ClasseCssMixin, forms.Form):
     empresa = forms.ModelChoiceField(Empresa.objects.filter(ativa=True), required=True)
     data_inicial = forms.DateField(required=False, widget=forms.DateInput(attrs={"type":"date"}))
@@ -100,5 +114,8 @@ class RelatorioPropostasFiltroForm(ClasseCssMixin, forms.Form):
     status = forms.ChoiceField(choices=[("","Todos")]+list(Proposta.Status.choices), required=False)
     busca = forms.CharField(required=False)
 
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs); self.aplicar_classes()
+    def __init__(self,*args,usuario=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        if usuario is not None:
+            self.fields["empresa"].queryset = empresas_usuario(usuario, ativas=True)
+        self.aplicar_classes()

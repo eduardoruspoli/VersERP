@@ -5,6 +5,7 @@ from . import views
 app_name = "compras"
 
 urlpatterns = [
+    path("fornecedores/<int:pk>/historico/", views.fornecedor_historico, name="fornecedor_historico"),
     path("documentos/",views.documento_lista,name="documento_lista"),
     path("documentos/novo/",views.documento_criar,name="documento_criar"),
     path("documentos/<int:pk>/",views.documento_detalhe,name="documento_detalhe"),

@@ -3,6 +3,7 @@ from . import views
 
 app_name="rh"
 urlpatterns=[
+    path("relatorios/gerencial/",views.relatorio_gerencial,name="relatorio_gerencial"),
     path("",views.dashboard,name="dashboard"),
     path("funcionarios/",views.funcionario_lista,name="funcionario_lista"),
     path("funcionarios/novo/",views.funcionario_criar,name="funcionario_criar"),

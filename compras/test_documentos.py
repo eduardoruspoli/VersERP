@@ -13,6 +13,7 @@ from django.urls import reverse
 from financeiro.models import (BaixaFinanceira, CentroCusto, ContaBancaria, Empresa, ImportacaoOFX, LancamentoFinanceiro,
     MovimentoOFX, ParcelaFinanceira, PlanoConta, RateioCentroCusto)
 from pessoas.models import Pessoa
+from core.models import UsuarioEmpresa
 from .models import (DivergenciaDocumentoCompra, DocumentoCompra, DocumentoCompraItem,
     DocumentoCompraItemRecebimento, DocumentoCompraParcela, DocumentoCompraPedido, IntegracaoDocumentoFinanceiro,
     PedidoCompra, PedidoCompraItem, PedidoItemAlocacaoObra, RecebimentoCompra,
@@ -29,6 +30,7 @@ class DocumentoCompraTests(TestCase):
     def setUp(self):
         self.usuario=get_user_model().objects.create_user(username="doc",password="teste123")
         self.empresa=Empresa.objects.create(razao_social="TESTE Empresa Documento",cnpj="53.333.333/0001-53")
+        UsuarioEmpresa.objects.create(usuario=self.usuario,empresa=self.empresa)
         self.fornecedor=Pessoa.objects.create(razao_social="TESTE Fornecedor Documento",classificacao=Pessoa.Classificacao.FORNECEDOR)
         self.plano=PlanoConta.objects.create(codigo="TESTE-DOC-01",nome="Materiais",tipo="CUSTO",natureza="DEVEDORA")
         self.plano_despesa=PlanoConta.objects.create(codigo="TESTE-DOC-02",nome="Fretes",tipo="DESPESA",natureza="DEVEDORA")

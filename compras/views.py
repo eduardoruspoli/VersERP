@@ -2,7 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Min, Q, Sum
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -34,12 +34,27 @@ from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_so
                        validar_fechamento_documento, vincular_recebimento_documento)
 from .services import (gerar_parcelas_documento, montar_preview_financeiro_documento,
                        integrar_documento_financeiro, estornar_documento_financeiro)
+from core.access import ids_empresas_usuario
+from pessoas.models import Pessoa
+
+
+@login_required
+@permission_required("compras.view_pedidocompra", raise_exception=True)
+def fornecedor_historico(request, pk):
+    empresas = ids_empresas_usuario(request.user)
+    fornecedor = get_object_or_404(Pessoa, pk=pk, pedidos_compra_fornecedor__empresa_id__in=empresas)
+    pedidos = PedidoCompra.objects.filter(fornecedor=fornecedor, empresa_id__in=empresas).exclude(status=PedidoCompra.Status.CANCELADO).select_related("empresa").prefetch_related("itens", "recebimentos")
+    resumo = pedidos.aggregate(total=Sum("total"), quantidade=Count("pk"), ultima_compra=Max("data_pedido"))
+    itens = PedidoCompraItem.objects.filter(pedido__in=pedidos).values("descricao_mercadoria", "unidade").annotate(ultima_compra=Max("pedido__data_pedido"), menor_preco=Min("valor_unitario"), maior_preco=Max("valor_unitario"), quantidade=Sum("quantidade")).order_by("descricao_mercadoria")
+    pendentes = pedidos.filter(status__in=[PedidoCompra.Status.APROVADO, PedidoCompra.Status.ENVIADO_FORNECEDOR, PedidoCompra.Status.PARCIALMENTE_RECEBIDO]).count()
+    divergencias = DivergenciaDocumentoCompra.objects.filter(documento__fornecedor=fornecedor, documento__empresa_id__in=empresas, resolvida=False).count()
+    return render(request, "compras/fornecedor_historico.html", {"fornecedor": fornecedor, "pedidos": pedidos[:50], "resumo": resumo, "itens": itens, "pendentes": pendentes, "divergencias": divergencias})
 
 
 @login_required
 @permission_required("compras.view_solicitacaocompra", raise_exception=True)
 def solicitacao_lista(request):
-    solicitacoes = SolicitacaoCompra.objects.select_related("empresa", "obra", "solicitante").annotate(quantidade_itens=Count("itens", filter=Q(itens__cancelado=False)))
+    solicitacoes = SolicitacaoCompra.objects.filter(empresa_id__in=ids_empresas_usuario(request.user)).select_related("empresa", "obra", "solicitante").annotate(quantidade_itens=Count("itens", filter=Q(itens__cancelado=False)))
     empresa = request.GET.get("empresa")
     status = request.GET.get("status")
     if empresa:
@@ -134,7 +149,7 @@ def itens_previstos_obra(request, obra_id):
     from comercial.models import PropostaItem
     from financeiro.models import CentroCusto
 
-    obra = get_object_or_404(CentroCusto.objects.select_related("proposta_origem"), pk=obra_id, ativo=True)
+    obra = get_object_or_404(CentroCusto.objects.select_related("proposta_origem"), pk=obra_id, ativo=True, empresa_id__in=ids_empresas_usuario(request.user))
     proposta = getattr(obra, "proposta_origem", None)
     itens = []
     if proposta and proposta.revisao_aprovada_id:
@@ -145,7 +160,7 @@ def itens_previstos_obra(request, obra_id):
 @login_required
 @permission_required("compras.view_processocotacao", raise_exception=True)
 def cotacao_lista(request):
-    qs = ProcessoCotacao.objects.select_related("empresa", "responsavel").annotate(total_itens=Count("itens", distinct=True), total_fornecedores=Count("cotacoes_fornecedor", distinct=True))
+    qs = ProcessoCotacao.objects.filter(empresa_id__in=ids_empresas_usuario(request.user)).select_related("empresa", "responsavel").annotate(total_itens=Count("itens", distinct=True), total_fornecedores=Count("cotacoes_fornecedor", distinct=True))
     for campo in ("empresa", "status", "responsavel"):
         if request.GET.get(campo): qs = qs.filter(**{f"{campo}_id" if campo != "status" else campo: request.GET[campo]})
     if request.GET.get("obra"): qs = qs.filter(itens__solicitacao_item__solicitacao__obra_id=request.GET["obra"])
@@ -189,7 +204,7 @@ def cotacao_fornecedor(request, pk, cotacao_pk=None):
 @login_required
 @permission_required("compras.realizar_cotacao", raise_exception=True)
 def cotacao_oferta(request, fornecedor_pk, oferta_pk=None):
-    cotacao = get_object_or_404(CotacaoFornecedor.objects.select_related("processo"), pk=fornecedor_pk)
+    cotacao = get_object_or_404(CotacaoFornecedor.objects.select_related("processo"), pk=fornecedor_pk, processo__empresa_id__in=ids_empresas_usuario(request.user))
     instancia = get_object_or_404(CotacaoFornecedorItem, pk=oferta_pk, cotacao=cotacao) if oferta_pk else None
     form = CotacaoFornecedorItemForm(request.POST or None, instance=instancia, cotacao=cotacao)
     if request.method == "POST" and form.is_valid():
@@ -239,7 +254,7 @@ def cotacao_selecionar(request,pk,item_pk):
 @login_required
 @permission_required("compras.view_pedidocompra",raise_exception=True)
 def pedido_lista(request):
-    qs=PedidoCompra.objects.select_related("empresa","fornecedor","criado_por").annotate(total_itens=Count("itens",distinct=True),total_obras=Count("itens__alocacoes__obra",distinct=True))
+    qs=PedidoCompra.objects.filter(empresa_id__in=ids_empresas_usuario(request.user)).select_related("empresa","fornecedor","criado_por").annotate(total_itens=Count("itens",distinct=True),total_obras=Count("itens__alocacoes__obra",distinct=True))
     for campo in ("empresa","fornecedor","status","origem"):
         if request.GET.get(campo): qs=qs.filter(**{f"{campo}_id" if campo in {"empresa","fornecedor"} else campo:request.GET[campo]})
     return render(request,"compras/pedido_lista.html",{"pedidos":qs,"status_choices":PedidoCompra.Status.choices,"origem_choices":PedidoCompra.Origem.choices})
@@ -350,7 +365,7 @@ def pedido_pdf(request,pk):
 @login_required
 @permission_required(("compras.add_recebimentocompra","compras.registrar_recebimento"),raise_exception=True)
 def recebimento_criar(request,pedido_pk):
-    pedido=get_object_or_404(PedidoCompra,pk=pedido_pk,status__in=[PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO])
+    pedido=get_object_or_404(PedidoCompra,pk=pedido_pk,empresa_id__in=ids_empresas_usuario(request.user),status__in=[PedidoCompra.Status.APROVADO,PedidoCompra.Status.ENVIADO_FORNECEDOR,PedidoCompra.Status.PARCIALMENTE_RECEBIDO])
     recebimento=RecebimentoCompra(pedido=pedido,responsavel=request.user,criado_por=request.user)
     form=RecebimentoCompraForm(request.POST or None,instance=recebimento)
     if request.method=="POST" and form.is_valid():
@@ -442,7 +457,7 @@ def previsto_comprado_item(request,obra_pk,item_pk):
 @login_required
 @permission_required("compras.view_documentocompra",raise_exception=True)
 def documento_lista(request):
-    qs=DocumentoCompra.objects.select_related("empresa","fornecedor").annotate(total_itens=Count("itens",distinct=True),total_pedidos=Count("vinculos_pedidos",distinct=True),divergencias_abertas=Count("divergencias",filter=Q(divergencias__resolvida=False),distinct=True))
+    qs=DocumentoCompra.objects.filter(empresa_id__in=ids_empresas_usuario(request.user)).select_related("empresa","fornecedor").annotate(total_itens=Count("itens",distinct=True),total_pedidos=Count("vinculos_pedidos",distinct=True),divergencias_abertas=Count("divergencias",filter=Q(divergencias__resolvida=False),distinct=True))
     for campo in ("empresa","fornecedor","tipo","status"):
         if request.GET.get(campo): qs=qs.filter(**{f"{campo}_id" if campo in {"empresa","fornecedor"} else campo:request.GET[campo]})
     return render(request,"compras/documento_lista.html",{"documentos":qs,"tipo_choices":DocumentoCompra.Tipo.choices,"status_choices":DocumentoCompra.Status.choices})
