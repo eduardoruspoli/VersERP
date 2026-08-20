@@ -1,19 +1,53 @@
-{% load comercial_formatos %}
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><style>
-@page { size:A4; margin:2cm 1.5cm 2cm; @frame footer { -pdf-frame-content:rodape; bottom:0.7cm; height:0.8cm; } }
-body{font-family:Helvetica,sans-serif;font-size:10pt;color:#20252b} h1{font-size:16pt} h2{font-size:12pt;border-bottom:1px solid #1f4e78;padding-bottom:4px} h3{font-size:10pt} table{width:100%;border-collapse:collapse;margin:8px 0} th,td{border:1px solid #9aa5af;padding:5px;vertical-align:top} th{background:#eaf1f7} .cabecalho td{border:0}.direita{text-align:right}.secao{margin:10px 0;page-break-inside:avoid}.total{font-size:13pt;color:#1f4e78}.assinatura{margin-top:25px}.rodape{text-align:center;font-size:8pt;color:#666}
-</style></head><body>
-<table class="cabecalho"><tr><td><h1>{{ documento.cabecalho.empresa }}</h1>{{ documento.cabecalho.documento_empresa }}</td><td class="direita"><strong>PROPOSTA COMERCIAL</strong><br>{{ documento.cabecalho.numero }} · Revisão {{ documento.cabecalho.revisao }}</td></tr></table>
-<table><tr><th>Data</th><td>{{ documento.cabecalho.data|date:"d/m/Y" }}</td><th>Cliente</th><td>{{ documento.cabecalho.cliente }}</td></tr><tr><th>A/C</th><td>{{ documento.cabecalho.aos_cuidados_de|default:"—" }}</td><th>Serviço</th><td>{{ documento.cabecalho.servico }}</td></tr></table>
-{% if documento.blocos.texto_introdutorio %}<div class="secao"><h2>1. Apresentação</h2><p>{{ documento.blocos.texto_introdutorio|linebreaksbr }}</p></div>{% endif %}
-<div class="secao"><h2>2. Escopo de fornecimento</h2><p>{{ documento.blocos.escopo_incluido|linebreaksbr }}</p>{% if documento.materiais %}<h3>Materiais</h3><table><thead><tr><th>Descrição</th><th>Qtd.</th><th>Un.</th><th>Valor</th></tr></thead><tbody>{% for linha in documento.materiais %}<tr><td>{{ linha.descricao }}</td><td>{{ linha.quantidade|default:"—" }}</td><td>{{ linha.unidade }}</td><td>R$ {{ linha.valor_total|moeda_br }}</td></tr>{% endfor %}</tbody></table>{% endif %}{% if documento.servicos %}<h3>Serviços</h3><table><thead><tr><th>Descrição</th><th>Valor</th></tr></thead><tbody>{% for linha in documento.servicos %}<tr><td>{{ linha.descricao }}</td><td>R$ {{ linha.valor_total|moeda_br }}</td></tr>{% endfor %}</tbody></table>{% endif %}</div>
-{% if documento.blocos.nao_incluso %}<div class="secao"><h2>3. Não incluso</h2><p>{{ documento.blocos.nao_incluso|linebreaksbr }}</p></div>{% endif %}
-{% if documento.blocos.normas_procedimentos %}<div class="secao"><h2>4. Normas e procedimentos</h2><p>{{ documento.blocos.normas_procedimentos|linebreaksbr }}</p></div>{% endif %}
-{% if documento.blocos.qualificacao_mao_obra %}<div class="secao"><h2>5. Qualificação da mão de obra</h2><p>{{ documento.blocos.qualificacao_mao_obra|linebreaksbr }}</p></div>{% endif %}
-{% if documento.blocos.obrigacoes_contratada %}<div class="secao"><h2>6. Obrigações da contratada</h2><p>{{ documento.blocos.obrigacoes_contratada|linebreaksbr }}</p></div>{% endif %}
-<div class="secao"><h2>7. Valores</h2>{% if documento.materiais %}<p>Subtotal materiais: <strong>R$ {{ documento.valores.subtotal_materiais|moeda_br }}</strong></p>{% endif %}{% if documento.servicos %}<p>Subtotal serviços: <strong>R$ {{ documento.valores.subtotal_servicos|moeda_br }}</strong></p>{% endif %}<p class="total">TOTAL DA PROPOSTA: <strong>R$ {{ documento.valores.total|moeda_br }}</strong></p></div>
-<div class="secao"><h2>8. Condições comerciais</h2><table><tr><th>Faturamento/NF</th><td>{{ documento.condicoes.faturamento|default:"—" }}</td></tr><tr><th>Impostos</th><td>{{ documento.condicoes.impostos|default:"—" }}</td></tr><tr><th>Prazo</th><td>{{ documento.condicoes.prazo|default:"—" }}</td></tr><tr><th>Frete</th><td>{{ documento.condicoes.frete|default:"—" }}</td></tr><tr><th>Pagamento</th><td>{{ documento.condicoes.pagamento|default:"—" }}</td></tr><tr><th>Dados bancários</th><td>{{ documento.condicoes.dados_bancarios|default:"—" }}</td></tr><tr><th>Multa e juros</th><td>{{ documento.condicoes.multa_juros|default:"—" }}</td></tr><tr><th>Protesto</th><td>{{ documento.condicoes.protesto|default:"—" }}</td></tr><tr><th>Validade</th><td>{{ documento.condicoes.validade|date:"d/m/Y"|default:"—" }}</td></tr></table></div>
-{% if documento.blocos.observacoes_comerciais %}<div class="secao"><h2>9. Observações e adendos</h2><p>{{ documento.blocos.observacoes_comerciais|linebreaksbr }}</p></div>{% endif %}
-<div class="assinatura"><strong>{{ documento.responsavel.nome }}</strong>{% if documento.responsavel.cargo %}<br>{{ documento.responsavel.cargo }}{% endif %}<br>{{ documento.responsavel.assinatura }}</div>
-<div id="rodape" class="rodape">{{ documento.rodape }} · {{ documento.cabecalho.numero }} · Rev. {{ documento.cabecalho.revisao }}</div>
-</body></html>
+{% load static comercial_formatos %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<style>
+@page { size: A4; margin: 0pt; @frame header { -pdf-frame-content: cabecalho-repetido; left: 51pt; top: 28pt; width: 493pt; height: 45pt; } @frame content { left: 51pt; top: 85pt; width: 493pt; height: 680pt; } @frame footer { -pdf-frame-content: rodape; left: 51pt; top: 780pt; width: 493pt; height: 35pt; } }
+body { font-family: Helvetica, sans-serif; font-size: 9.5pt; color: #20252b; line-height: 1.35; }
+p { margin: 5px 0; }
+table { width: 100%; border-collapse: collapse; margin: 7px 0; }
+th, td { border: 1px solid #929292; padding: 4px; vertical-align: top; }
+th { background: #eeeeee; }
+.cabecalho { border: 0; margin: 0; }
+.cabecalho td { border: 0; vertical-align: top; }
+.cabecalho .logo { width: 35%; }
+.cabecalho img { width: 38mm; height: auto; }
+.empresa { font-size: 8pt; text-align: right; }
+.empresa strong { font-size: 9pt; }
+.secao { margin: 9px 0; page-break-inside: avoid; }
+.faixa { background: #d9d9d9; border: 1px solid #777; font-weight: bold; padding: 5px; text-align: center; margin: 9px 0 6px; }
+.destinatario { margin: 9px 0; }
+.institucional { font-size: 8pt; text-align: center; border-bottom: 1px solid #888; padding-bottom: 4px; }
+.local-data { margin: 12px 0; }
+.valores th { width: 65%; text-align: left; }
+.valores td { text-align: right; }
+.total-geral th, .total-geral td { font-weight: bold; border-top: 2px solid #555; }
+.assinatura { margin-top: 20px; }
+.rodape { border-top: 1px solid #555; padding-top: 3px; text-align: center; font-size: 7.5pt; color: #333; }
+.rodape .pagina { text-align: right; float: right; }
+.rodape .endereco { text-align: left; float: left; }
+.historico-aviso { border: 1px solid #a55; background: #fff3f3; padding: 8px; margin: 8px 0; }
+</style>
+</head>
+<body>
+<div id="cabecalho-repetido"><table class="cabecalho"><tr><td class="logo"><img src="{% static 'img/versatile-logo.png' %}" alt="Versátile Engenharia"></td><td class="empresa"><strong>{{ documento.cabecalho.razao_social }}</strong><br>CNPJ: {{ documento.cabecalho.documento_empresa }}</td></tr></table></div>
+<div class="institucional">{% if documento.cabecalho.endereco %}{{ documento.cabecalho.endereco }}{% if documento.cabecalho.cep %} · CEP {{ documento.cabecalho.cep }}{% endif %}{% if documento.cabecalho.cidade_uf %} · {{ documento.cabecalho.cidade_uf }}{% endif %}<br>{% endif %}{% if documento.cabecalho.telefone_empresa %}Contato: {{ documento.cabecalho.telefone_empresa }}{% endif %}{% if documento.cabecalho.email_empresa %} / E-mail: {{ documento.cabecalho.email_empresa }}{% endif %}</div>
+{% if documento.historico %}<div class="historico-aviso"><strong>Registro histórico importado</strong><br>Documento original não disponível no registro histórico importado.</div>{% endif %}
+<p class="local-data">{{ documento.cabecalho.cidade_uf|default:"" }}, {{ documento.cabecalho.data|date:"d \d\e F \d\e Y" }}.</p>
+<div class="destinatario"><p>Ao Cliente <strong>{{ documento.cabecalho.cliente }}</strong></p><p>Att. {{ documento.cabecalho.aos_cuidados_de|default:"—" }}</p><p><strong>PROPOSTA: {{ documento.cabecalho.numero }} - {{ documento.cabecalho.servico|upper }}.</strong></p></div>
+<div class="faixa">PROPOSTA PARA FORNECIMENTO DE PRESTAÇÃO DE SERVIÇOS</div>
+{% if documento.blocos.texto_introdutorio %}<div class="secao"><p>Prezado(s),</p><p>{{ documento.blocos.texto_introdutorio|linebreaksbr }}</p></div>{% endif %}
+{% if documento.secoes.tem_escopo %}<div class="secao"><div class="faixa">{{ documento.secoes.escopo }}. ESCOPO DE FORNECIMENTO</div>{% if documento.blocos.escopo_incluido %}<p>{{ documento.blocos.escopo_incluido|linebreaksbr }}</p>{% endif %}{% if documento.materiais %}<h3>{{ documento.secoes.materiais }} LISTA DE MATERIAIS</h3><table><tr><th>Item</th><th>Descrição</th></tr>{% for linha in documento.materiais %}<tr><td>{{ forloop.counter }}</td><td>{{ linha.descricao }}</td></tr>{% endfor %}</table>{% endif %}</div>{% endif %}
+{% if documento.secoes.tem_nao_incluso %}<div class="secao"><h3>{{ documento.secoes.nao_incluso }} NÃO INCLUSO NA PROPOSTA</h3><p>{{ documento.blocos.nao_incluso|linebreaksbr }}</p></div>{% endif %}
+{% if documento.blocos.normas_procedimentos %}<div class="secao"><div class="faixa">{{ documento.secoes.normas }}. NORMAS, PROCEDIMENTOS, DOCUMENTOS E CERTIFICADOS</div><p>{{ documento.blocos.normas_procedimentos|linebreaksbr }}</p></div>{% endif %}
+{% if documento.blocos.qualificacao_mao_obra %}<div class="secao"><h3>{{ documento.secoes.qualificacao }} QUALIFICAÇÃO DA MÃO-DE-OBRA</h3><p>{{ documento.blocos.qualificacao_mao_obra|linebreaksbr }}</p></div>{% endif %}
+{% if documento.blocos.obrigacoes_contratada %}<div class="secao"><h3>{{ documento.secoes.obrigacoes }} OBRIGAÇÕES DA VERSÁTILE</h3><p>{{ documento.blocos.obrigacoes_contratada|linebreaksbr }}</p></div>{% endif %}
+<div class="secao"><div class="faixa">{{ documento.secoes.valores }}. VALORES E CONDIÇÃO COMERCIAL</div><h3>{{ documento.secoes.valores }}.1 VALOR TOTAL DA OBRA</h3>{% if documento.servicos %}<table><tr><th>Serviço</th><th>Valor</th></tr>{% for linha in documento.servicos %}<tr><td>{{ linha.descricao }}</td><td>R$ {{ linha.valor_total|moeda_br }}</td></tr>{% endfor %}</table>{% endif %}<table class="valores">{% if documento.materiais %}<tr><th>MATERIAIS</th><td>R$ {{ documento.valores.subtotal_materiais|moeda_br }}</td></tr>{% endif %}{% if documento.servicos %}<tr><th>SERVIÇOS</th><td>R$ {{ documento.valores.subtotal_servicos|moeda_br }}</td></tr>{% endif %}<tr class="total-geral"><th>TOTAL</th><td>R$ {{ documento.valores.total|moeda_br }}</td></tr></table>{% if documento.condicoes.faturamento %}<p>{{ documento.condicoes.faturamento|linebreaksbr }}</p>{% endif %}</div>
+{% if documento.secoes.tem_condicoes %}<div class="secao"><h3>{{ documento.secoes.condicoes }} CONDIÇÕES COMERCIAIS</h3><table>{% if documento.condicoes.impostos %}<tr><th>Impostos</th><td>{{ documento.condicoes.impostos }}</td></tr>{% endif %}{% if documento.condicoes.prazo %}<tr><th>Prazo de entrega</th><td>{{ documento.condicoes.prazo }}</td></tr>{% endif %}{% if documento.condicoes.frete %}<tr><th>Frete</th><td>{{ documento.condicoes.frete }}</td></tr>{% endif %}{% if documento.condicoes.pagamento %}<tr><th>Prazo de pagamento</th><td>{{ documento.condicoes.pagamento }}</td></tr>{% endif %}{% if documento.condicoes.dados_bancarios %}<tr><th>Dados para pagamento</th><td>{{ documento.condicoes.dados_bancarios }}</td></tr>{% endif %}{% if documento.condicoes.multa_juros %}<tr><th>Multa e juros</th><td>{{ documento.condicoes.multa_juros }}</td></tr>{% endif %}{% if documento.condicoes.protesto %}<tr><th>Protesto</th><td>{{ documento.condicoes.protesto }}</td></tr>{% endif %}</table></div>{% endif %}
+{% if documento.secoes.tem_validade %}<div class="secao"><div class="faixa">{{ documento.secoes.validade }}. VALIDADE DA PROPOSTA</div><p>Esta proposta tem validade até {{ documento.condicoes.validade|date:"d/m/Y" }}, após a data de seu envio ao cliente.</p>{% if documento.blocos.observacoes_comerciais %}<p>{{ documento.blocos.observacoes_comerciais|linebreaksbr }}</p>{% endif %}</div>{% endif %}
+<div class="assinatura">Atenciosamente,<br>Att.<br><strong>{{ documento.responsavel.nome }}</strong>{% if documento.responsavel.cargo %}<br>{{ documento.responsavel.cargo }}{% endif %}<br>{{ documento.responsavel.assinatura }}</div>
+<div id="rodape" class="rodape"><span class="endereco">{{ documento.cabecalho.endereco }}{% if documento.cabecalho.cidade_uf %} · {{ documento.cabecalho.cidade_uf }}{% endif %}<br>CNPJ: {{ documento.cabecalho.documento_empresa }} · Contato: {{ documento.cabecalho.telefone_empresa }} / {{ documento.cabecalho.email_empresa }}</span><span class="pagina">Página <pdf:pagenumber> de <pdf:pagecount></span></div>
+</body>
+</html>

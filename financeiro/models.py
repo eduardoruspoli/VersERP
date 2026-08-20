@@ -23,6 +23,14 @@ class Empresa(models.Model):
         unique=True,
     )
 
+    endereco = models.CharField("Logradouro", max_length=200, blank=True)
+    numero = models.CharField("Número", max_length=20, blank=True)
+    complemento = models.CharField("Complemento", max_length=100, blank=True)
+    bairro = models.CharField("Bairro", max_length=100, blank=True)
+    cidade = models.CharField("Cidade", max_length=100, blank=True)
+    estado = models.CharField("UF", max_length=2, blank=True)
+    cep = models.CharField("CEP", max_length=9, blank=True)
+
     inscricao_estadual = models.CharField(
         "Inscrição estadual",
         max_length=20,

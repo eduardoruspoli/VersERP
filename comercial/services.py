@@ -310,11 +310,62 @@ def montar_contexto_publico_proposta(revisao):
         (materiais if linha.grupo == PropostaLinhaPublica.Grupo.MATERIAL else servicos).append(dado)
     subtotal_materiais = _dinheiro(sum((x["valor_total"] for x in materiais), Decimal("0")))
     subtotal_servicos = _dinheiro(sum((x["valor_total"] for x in servicos), Decimal("0")))
+    empresa = revisao.proposta.empresa
+    cliente = revisao.proposta.cliente
+    blocos = {
+        "texto_introdutorio": revisao.texto_introdutorio if revisao.exibir_texto_introdutorio else "",
+        "escopo_incluido": revisao.escopo_incluido,
+        "nao_incluso": revisao.nao_incluso,
+        "normas_procedimentos": revisao.normas_procedimentos if revisao.exibir_normas_procedimentos else "",
+        "qualificacao_mao_obra": revisao.qualificacao_mao_obra if revisao.exibir_qualificacao_mao_obra else "",
+        "obrigacoes_contratada": revisao.obrigacoes_contratada if revisao.exibir_obrigacoes_contratada else "",
+        "observacoes_comerciais": revisao.observacoes_comerciais if revisao.exibir_observacoes_comerciais else "",
+    }
+    tem_escopo = bool(blocos["escopo_incluido"] or materiais)
+    tem_institucional = any(blocos[chave] for chave in ("normas_procedimentos", "qualificacao_mao_obra", "obrigacoes_contratada"))
+    tem_condicoes = any((revisao.observacao_faturamento, revisao.texto_impostos, revisao.prazo_entrega, revisao.tipo_frete, revisao.condicao_pagamento, revisao.dados_bancarios, revisao.multa_juros_atraso, revisao.regra_protesto))
+    numero_secao = 0
+    numero_escopo = numero_materiais = numero_nao_incluso = None
+    if tem_escopo:
+        numero_secao += 1
+        numero_escopo = str(numero_secao)
+        if materiais:
+            numero_materiais = f"{numero_secao}.1"
+    if blocos["nao_incluso"]:
+        numero_nao_incluso = f"{numero_secao}.{'2' if materiais else '1'}" if tem_escopo else "1"
+        if not tem_escopo:
+            numero_secao += 1
+    numero_normas = numero_qualificacao = numero_obrigacoes = None
+    if tem_institucional:
+        numero_secao += 1
+        numero_normas = str(numero_secao)
+        subsecao = 1
+        if blocos["qualificacao_mao_obra"]:
+            numero_qualificacao = f"{numero_secao}.{subsecao}"
+            subsecao += 1
+        if blocos["obrigacoes_contratada"]:
+            numero_obrigacoes = f"{numero_secao}.{subsecao}"
+    numero_valores = numero_condicoes = numero_validade = None
+    numero_secao += 1
+    numero_valores = str(numero_secao)
+    if tem_condicoes:
+        numero_condicoes = f"{numero_secao}.2"
+    if revisao.valida_ate:
+        numero_secao += 1
+        numero_validade = str(numero_secao)
+    responsavel = revisao.responsavel_nome
+    if not responsavel and revisao.proposta.responsavel_interno:
+        responsavel = revisao.proposta.responsavel_interno.get_full_name() or revisao.proposta.responsavel_interno.username
+    endereco = ", ".join(filter(None, (empresa.endereco, empresa.numero)))
+    endereco_linha = " - ".join(filter(None, (endereco, empresa.complemento, empresa.bairro)))
+    cidade_uf = " / ".join(filter(None, (empresa.cidade, empresa.estado)))
     return {
-        "cabecalho": {"empresa": revisao.empresa_nome_snapshot or revisao.proposta.empresa.nome_fantasia or revisao.proposta.empresa.razao_social, "documento_empresa": revisao.empresa_documento_snapshot or revisao.proposta.empresa.cnpj, "data": revisao.data_proposta, "cliente": revisao.cliente_nome_snapshot or revisao.proposta.cliente.razao_social, "documento_cliente": revisao.cliente_documento_snapshot or revisao.proposta.cliente.cpf_cnpj, "aos_cuidados_de": revisao.aos_cuidados_de, "numero": revisao.proposta.codigo, "revisao": revisao.numero, "servico": revisao.nome_servico},
-        "blocos": {"texto_introdutorio": revisao.texto_introdutorio if revisao.exibir_texto_introdutorio else "", "escopo_incluido": revisao.escopo_incluido, "nao_incluso": revisao.nao_incluso, "normas_procedimentos": revisao.normas_procedimentos if revisao.exibir_normas_procedimentos else "", "qualificacao_mao_obra": revisao.qualificacao_mao_obra if revisao.exibir_qualificacao_mao_obra else "", "obrigacoes_contratada": revisao.obrigacoes_contratada if revisao.exibir_obrigacoes_contratada else "", "observacoes_comerciais": revisao.observacoes_comerciais if revisao.exibir_observacoes_comerciais else ""},
+        "cabecalho": {"empresa": revisao.empresa_nome_snapshot or empresa.nome_fantasia or empresa.razao_social, "razao_social": empresa.razao_social, "documento_empresa": revisao.empresa_documento_snapshot or empresa.cnpj, "telefone_empresa": empresa.telefone, "email_empresa": empresa.email, "endereco": endereco_linha, "cidade_uf": cidade_uf, "cep": empresa.cep, "data": revisao.data_proposta, "cliente": revisao.cliente_nome_snapshot or cliente.nome_fantasia or cliente.razao_social, "documento_cliente": revisao.cliente_documento_snapshot or cliente.cpf_cnpj, "aos_cuidados_de": revisao.aos_cuidados_de, "numero": revisao.proposta.codigo, "revisao": revisao.numero, "servico": revisao.nome_servico},
+        "blocos": blocos,
+        "secoes": {"tem_escopo": tem_escopo, "tem_materiais": bool(materiais), "tem_nao_incluso": bool(blocos["nao_incluso"]), "tem_institucional": tem_institucional, "tem_condicoes": tem_condicoes, "tem_validade": bool(revisao.valida_ate), "escopo": numero_escopo, "materiais": numero_materiais, "nao_incluso": numero_nao_incluso, "normas": numero_normas, "qualificacao": numero_qualificacao, "obrigacoes": numero_obrigacoes, "valores": numero_valores, "condicoes": numero_condicoes, "validade": numero_validade},
         "materiais": materiais, "servicos": servicos,
         "valores": {"subtotal_materiais": subtotal_materiais, "subtotal_servicos": subtotal_servicos, "total": _dinheiro(revisao.preco_venda_final)},
         "condicoes": {"faturamento": revisao.observacao_faturamento, "impostos": revisao.texto_impostos, "prazo": revisao.prazo_entrega, "frete": revisao.tipo_frete, "pagamento": revisao.condicao_pagamento, "dados_bancarios": revisao.dados_bancarios, "multa_juros": revisao.multa_juros_atraso, "protesto": revisao.regra_protesto, "validade": revisao.valida_ate},
-        "responsavel": {"nome": revisao.responsavel_nome, "cargo": revisao.responsavel_cargo, "assinatura": revisao.assinatura_textual}, "rodape": revisao.rodape,
+        "responsavel": {"nome": responsavel, "cargo": revisao.responsavel_cargo, "assinatura": revisao.assinatura_textual}, "rodape": revisao.rodape,
+        "historico": revisao.proposta.origem == Proposta.Origem.IMPORTADO_HISTORICO,
     }

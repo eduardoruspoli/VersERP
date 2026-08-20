@@ -14,6 +14,28 @@ from core.access import filtrar_empresas, objeto_empresa_ou_404
 from core.csv import linha_csv_segura
 
 
+def _querystring_sem_pagina(request):
+    parametros = request.GET.copy()
+    parametros.pop("page", None)
+    return parametros.urlencode()
+
+
+def _informacoes_historicas(proposta, revisao):
+    if proposta.origem != Proposta.Origem.IMPORTADO_HISTORICO:
+        return None
+    emitente = ""
+    for linha in revisao.observacoes_internas.splitlines():
+        if linha.startswith("Emitente:"):
+            emitente = linha.partition(":")[2].strip()
+            break
+    return {
+        "status": proposta.status_historico,
+        "data": revisao.data_proposta,
+        "emitente": emitente,
+        "observacao": proposta.observacao_importacao,
+    }
+
+
 def _propostas(request):
     return filtrar_empresas(Proposta.objects.all(), request.user)
 
@@ -56,7 +78,7 @@ def proposta_detalhe(request, pk):
         calculo = calcular_precificacao(revisao)
     except ValidationError as erro:
         calculo = {"erro": erro.messages[0]}
-    return render(request, "comercial/proposta_detalhe.html", {"proposta": proposta, "revisao": revisao, "calculo": calculo, "historico": proposta.historico_status.select_related("usuario"), "contatos": proposta.historico_contatos.select_related("usuario")})
+    return render(request, "comercial/proposta_detalhe.html", {"proposta": proposta, "revisao": revisao, "calculo": calculo, "historico": proposta.historico_status.select_related("usuario"), "contatos": proposta.historico_contatos.select_related("usuario"), "historico_importacao": _informacoes_historicas(proposta, revisao)})
 
 
 @login_required
@@ -196,6 +218,8 @@ def documento_publico(request, pk):
 def proposta_pdf(request, pk):
     from core.pdf import resposta_pdf
     revisao=objeto_empresa_ou_404(PropostaRevisao.objects.select_related("proposta__empresa","proposta__cliente").prefetch_related("linhas_publicas"),request.user,lookup="proposta__empresa",pk=pk)
+    if revisao.proposta.origem == Proposta.Origem.IMPORTADO_HISTORICO:
+        return HttpResponseBadRequest("Documento original não disponível no registro histórico importado.")
     contexto={"documento":montar_contexto_publico_proposta(revisao)}
     return resposta_pdf("comercial/proposta_pdf.html",contexto,f"{revisao.proposta.codigo}-rev-{revisao.numero:02d}.pdf")
 
@@ -239,7 +263,7 @@ def relatorio_propostas(request):
             writer.writerow(linha_csv_segura([proposta.codigo, proposta.data_emissao_relatorio.strftime("%d/%m/%Y"), proposta.cliente, proposta.servico_relatorio, proposta.get_status_display(), str(proposta.valor_relatorio).replace(".", ","), proposta.responsavel_interno or ""]))
         return resposta
     pagina=Paginator(propostas,50).get_page(request.GET.get("page"))
-    return render(request,"comercial/relatorio_propostas.html",{"form":form,"pagina":pagina,"resumo":resumo,"por_status":por_status,"status_labels":dict(Proposta.Status.choices)})
+    return render(request,"comercial/relatorio_propostas.html",{"form":form,"pagina":pagina,"resumo":resumo,"por_status":por_status,"status_labels":dict(Proposta.Status.choices),"pagination_query":_querystring_sem_pagina(request)})
 
 
 @login_required

@@ -18,13 +18,19 @@
 
 .documento-proposta { margin: 0; background: #e5e7eb; color: #1f2937; font: 14px/1.5 Arial, sans-serif; }
 .folha-a4 { box-sizing: border-box; width: 210mm; min-height: 297mm; margin: 12mm auto; padding: 16mm; background: #fff; }
-.proposta-cabecalho { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid #17365d; padding-bottom: 10px; }
-.proposta-cabecalho div:last-child { text-align: right; }
+.proposta-cabecalho { display: flex; align-items: flex-start; gap: 24px; border-bottom: 1px solid #777; padding-bottom: 8px; }
+.proposta-cabecalho .marca { width: 42%; }
+.proposta-cabecalho img { width: 155px; height: auto; }
+.proposta-cabecalho .empresa { flex: 1; text-align: right; font-size: .78rem; }
+.proposta-cabecalho .empresa strong { display: block; font-size: .85rem; }
+.institucional { text-align: center; border-bottom: 1px solid #94a3b8; padding: 4px 0; font-size: .75rem; }
+.local-data { margin: 18px 0; }
+.destinatario { margin: 14px 0; }
+.faixa { background: #d9d9d9; border: 1px solid #777; padding: 6px; text-align: center; font-weight: 700; }
+.historico-aviso { border: 1px solid #a55; background: #fff3f3; padding: 10px; }
 .proposta-cabecalho small { display: block; color: #64748b; }
-.secoes-proposta { counter-reset: secao-proposta; }
-.documento-proposta section { counter-increment: secao-proposta; break-inside: auto; margin-top: 16px; }
+.documento-proposta section { break-inside: auto; margin-top: 16px; }
 .documento-proposta h2 { break-after: avoid; color: #17365d; font-size: 16px; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
-.documento-proposta h2::before { content: counter(secao-proposta) ". "; }
 .documento-proposta h3 { break-after: avoid; font-size: 14px; }
 .documento-proposta table { width: 100%; border-collapse: collapse; }
 .documento-proposta th, .documento-proposta td { border: 1px solid #cbd5e1; padding: 6px; text-align: left; }

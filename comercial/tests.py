@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -169,6 +170,38 @@ class ViewsPropostaTests(ComercialBase):
     def test_lista_e_detalhe(self):
         self.assertContains(self.client.get(reverse("comercial:proposta_lista")), "VERS1917")
         self.assertContains(self.client.get(reverse("comercial:proposta_detalhe", args=[self.proposta.pk])), "Composição interna")
+        self.assertContains(self.client.get(reverse("comercial:proposta_lista")), "Rascunho")
+
+    def criar_historica(self):
+        proposta, revisao = criar_proposta(empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Histórica", usuario=self.usuario)
+        Proposta.objects.filter(pk=proposta.pk).update(
+            origem=Proposta.Origem.IMPORTADO_HISTORICO,
+            status_historico="Faturada",
+            observacao_importacao="NF histórica",
+        )
+        PropostaRevisao.objects.filter(pk=revisao.pk).update(
+            data_proposta=date(2026, 8, 12),
+            aos_cuidados_de="Emitente Teste",
+            observacoes_internas="Status histórico: Faturada\nEmitente: Emitente Teste",
+        )
+        return proposta
+
+    def test_historica_exibe_status_historico_e_status_operacional_separados(self):
+        proposta = self.criar_historica()
+        lista = self.client.get(reverse("comercial:proposta_lista"))
+        detalhe = self.client.get(reverse("comercial:proposta_detalhe", args=[proposta.pk]))
+        self.assertContains(lista, "Faturada (histórico)")
+        self.assertContains(detalhe, "Registro histórico importado")
+        self.assertContains(detalhe, "Status operacional: Rascunho")
+        self.assertContains(detalhe, "Status histórico: Faturada")
+        self.assertContains(detalhe, "Emitente histórico: Emitente Teste")
+        self.assertContains(detalhe, "Observação histórica: NF histórica")
+        self.assertContains(detalhe, "Custo interno")
+        self.assertContains(detalhe, "Não disponível")
+        self.assertContains(detalhe, "Não calculado")
+        self.assertNotContains(detalhe, "Gerar PDF")
+        proposta.refresh_from_db()
+        self.assertEqual(proposta.status, Proposta.Status.RASCUNHO)
 
     def test_documento_publico_nao_expoe_dados_internos(self):
         self.item(); self.linha()
@@ -178,6 +211,75 @@ class ViewsPropostaTests(ComercialBase):
         self.assertNotContains(resposta, "Fornecedor Secreto")
         self.assertNotContains(resposta, "Custo interno")
         self.assertNotContains(resposta, "Margem")
+
+    def test_documento_somente_servico_omite_materiais_e_formata_valor(self):
+        self.revisao.escopo_incluido = "Instalação de equipamento"
+        self.revisao.responsavel_nome = "Responsável Fictício"
+        self.revisao.preco_venda_final = Decimal("1234.56")
+        self.revisao.save()
+        self.linha("1234.56", PropostaLinhaPublica.Grupo.SERVICO)
+        resposta = self.client.get(reverse("comercial:documento_publico", args=[self.revisao.pk]))
+        self.assertContains(resposta, "Instalação de equipamento")
+        self.assertContains(resposta, "R$ 1.234,56")
+        self.assertNotContains(resposta, "Lista de materiais")
+        self.assertNotContains(resposta, "Subtotal materiais")
+        self.assertContains(resposta, "Responsável Fictício")
+
+    def test_documento_com_materiais_e_servicos_exibe_subtotais(self):
+        self.revisao.preco_venda_final = Decimal("1500.00")
+        self.revisao.save()
+        self.linha("500.00", PropostaLinhaPublica.Grupo.MATERIAL)
+        self.linha("1000.00", PropostaLinhaPublica.Grupo.SERVICO)
+        resposta = self.client.get(reverse("comercial:documento_publico", args=[self.revisao.pk]))
+        self.assertContains(resposta, "LISTA DE MATERIAIS")
+        self.assertContains(resposta, "MATERIAIS")
+        self.assertContains(resposta, "SERVIÇOS")
+        self.assertContains(resposta, "R$ 1.500,00")
+
+    def test_documento_historico_incompleto_e_pdf_renderizam_sem_workflow(self):
+        Proposta.objects.filter(pk=self.proposta.pk).update(origem=Proposta.Origem.IMPORTADO_HISTORICO, status_historico="Fechada")
+        documento = self.client.get(reverse("comercial:documento_publico", args=[self.revisao.pk]))
+        pdf = self.client.get(reverse("comercial:proposta_pdf", args=[self.revisao.pk]))
+        self.assertEqual(documento.status_code, 200)
+        self.assertEqual(pdf.status_code, 400)
+        self.assertIn("Documento original não disponível", pdf.content.decode())
+        self.assertNotContains(documento, "LISTA DE MATERIAIS")
+        self.assertNotContains(documento, "Nenhum item")
+        self.proposta.refresh_from_db()
+        self.assertEqual(self.proposta.status, Proposta.Status.RASCUNHO)
+
+    def test_logo_institucional_existe(self):
+        self.assertTrue(Path("static/img/versatile-logo.png").is_file())
+
+    def test_pdf_multipagina_tem_paginacao_e_rodape_institucional(self):
+        self.revisao.escopo_incluido = "\n".join(["Descrição detalhada do serviço com informações comerciais." for _ in range(100)])
+        self.revisao.preco_venda_final = Decimal("1000.00")
+        self.revisao.save()
+        self.linha("1000.00", PropostaLinhaPublica.Grupo.SERVICO)
+        resposta = self.client.get(reverse("comercial:proposta_pdf", args=[self.revisao.pk]))
+        paginas = PdfReader(BytesIO(resposta.content)).pages
+        texto = "\n".join(pagina.extract_text() or "" for pagina in paginas)
+        self.assertGreaterEqual(len(paginas), 2)
+        self.assertIn("CNPJ:", texto)
+        self.assertIn("Página", texto)
+
+    def test_documento_usa_dados_institucionais_e_responsavel_da_proposta(self):
+        self.empresa.email = "comercial@empresa-ficticia.test"
+        self.empresa.telefone = "(81) 3000-0000"
+        self.empresa.save()
+        self.usuario.first_name = "Ana"
+        self.usuario.last_name = "Responsável"
+        self.usuario.save()
+        resposta = self.client.get(reverse("comercial:documento_publico", args=[self.revisao.pk]))
+        self.assertContains(resposta, "comercial@empresa-ficticia.test")
+        self.assertContains(resposta, "(81) 3000-0000")
+        self.assertContains(resposta, "Ana Responsável")
+
+    def test_documento_de_empresa_nao_autorizada_e_bloqueado(self):
+        outra = Empresa.objects.create(razao_social="Outra Empresa", cnpj="55.555.555/0001-55")
+        outra_proposta, outra_revisao = criar_proposta(empresa=outra, codigo="VERS2918", cliente=self.cliente, nome_servico="Fora", usuario=self.usuario)
+        self.assertEqual(self.client.get(reverse("comercial:documento_publico", args=[outra_revisao.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("comercial:proposta_pdf", args=[outra_revisao.pk])).status_code, 403)
 
     def test_envio_invalido_exibe_erro_e_nao_congela(self):
         self.item(); self.revisao.percentual_formacao = 50; self.revisao.save(); self.linha("149")
@@ -222,10 +324,10 @@ class ViewsPropostaTests(ComercialBase):
         texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("VERS1917",texto); self.assertIn("Solução fornecida",texto); self.assertNotIn("Fornecedor Secreto",texto); self.assertNotIn("SEGREDO INTERNO",texto); self.assertNotIn("markup",texto.lower())
 
     def test_pdf_somente_servico_nao_exibe_subtotal_material(self):
-        self.linha("200",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=200; self.revisao.save(); resposta=self.client.get(reverse("comercial:proposta_pdf",args=[self.revisao.pk])); texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("Subtotal serviços",texto); self.assertNotIn("Subtotal materiais",texto)
+        self.linha("200",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=200; self.revisao.save(); resposta=self.client.get(reverse("comercial:proposta_pdf",args=[self.revisao.pk])); texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("SERVIÇOS",texto); self.assertNotIn("MATERIAIS",texto)
 
     def test_pdf_material_servico_flags_e_revisao(self):
-        self.linha("100",PropostaLinhaPublica.Grupo.MATERIAL); self.linha("50",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=150; self.revisao.normas_procedimentos="NORMA SECRETA DESABILITADA"; self.revisao.exibir_normas_procedimentos=False; self.revisao.save(); resposta=self.client.get(reverse("comercial:proposta_pdf",args=[self.revisao.pk])); texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("Subtotal materiais",texto); self.assertIn("Subtotal serviços",texto); self.assertIn("Revisão 0",texto); self.assertNotIn("NORMA SECRETA",texto)
+        self.linha("100",PropostaLinhaPublica.Grupo.MATERIAL); self.linha("50",PropostaLinhaPublica.Grupo.SERVICO); self.revisao.preco_venda_final=150; self.revisao.normas_procedimentos="NORMA SECRETA DESABILITADA"; self.revisao.exibir_normas_procedimentos=False; self.revisao.save(); resposta=self.client.get(reverse("comercial:proposta_pdf",args=[self.revisao.pk])); texto="\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(resposta.content)).pages); self.assertIn("MATERIAIS",texto); self.assertIn("SERVIÇOS",texto); self.assertIn("VERS1917",texto); self.assertNotIn("NORMA SECRETA",texto)
 
 
 class RelatorioPropostasTests(ComercialBase):
@@ -236,6 +338,22 @@ class RelatorioPropostasTests(ComercialBase):
         dados={"empresa":self.empresa.pk,**dados}; from urllib.parse import urlencode; return reverse("comercial:relatorio_propostas")+"?"+urlencode(dados)
     def test_resumo_colunas_e_sem_duplicidade(self):
         resposta=self.client.get(self.url()); self.assertContains(resposta,"VERS1917",count=1); self.assertContains(resposta,"R$ 1.000,00"); self.assertContains(resposta,"Contato Alfa"); self.assertContains(resposta,"Serviço TESTE")
+
+    def test_paginacao_preserva_filtros_get(self):
+        for indice in range(51):
+            criar_proposta(empresa=self.empresa, codigo=f"VERS20{indice:02d}", cliente=self.cliente, nome_servico="Servico paginação", usuario=self.usuario)
+        resposta = self.client.get(self.url(status="RASCUNHO", busca="Servico", page=1))
+        self.assertEqual(resposta.context["pagination_query"], "empresa=%s&status=RASCUNHO&busca=Servico" % self.empresa.pk)
+        self.assertContains(resposta, "page=2")
+        self.assertNotContains(resposta, "?page=2")
+
+    def test_relatorio_exibe_status_historico_mas_filtra_status_operacional(self):
+        proposta, revisao = criar_proposta(empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Histórica", usuario=self.usuario)
+        Proposta.objects.filter(pk=proposta.pk).update(origem=Proposta.Origem.IMPORTADO_HISTORICO, status_historico="Faturada")
+        resposta = self.client.get(self.url(status="RASCUNHO"))
+        self.assertContains(resposta, "Faturada (histórico)")
+        self.assertContains(resposta, "R$ 1.000,00")
+        self.assertEqual(Proposta.objects.get(pk=proposta.pk).status, Proposta.Status.RASCUNHO)
     def test_filtros_numero_cliente_contato_responsavel_status_periodo(self):
         filtros={"numero":"1917","cliente":self.cliente.pk,"contato":"Alfa","responsavel":self.usuario.pk,"status":"RASCUNHO","data_inicial":"2026-08-01","data_final":"2026-08-31"}; self.assertContains(self.client.get(self.url(**filtros)),"VERS1917")
         self.assertNotContains(self.client.get(self.url(status="APROVADA")),"VERS1917")
