@@ -30,7 +30,7 @@ def _empresa(request):
 
 
 def _render_form(request, form, titulo, voltar, template="rh/formulario.html"):
-    return render(request, template, {"form":form,"titulo":titulo,"voltar":voltar})
+    return render(request, template, {"form":form,"titulo":titulo,"voltar":voltar,"funcionario_form":isinstance(form, FuncionarioForm)})
 
 
 @login_required

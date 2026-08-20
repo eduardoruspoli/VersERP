@@ -19,6 +19,7 @@ class FuncionarioForm(EstiloFormMixin, forms.ModelForm):
     class Meta:
         model = Funcionario
         fields = ["empresa", "pessoa", "matricula", "nome_apresentacao", "cargo_atual", "data_admissao", "data_desligamento", "situacao", "observacoes"]
+        labels = {"matricula":"Matrícula", "nome_apresentacao":"Nome de apresentação", "cargo_atual":"Cargo atual", "data_admissao":"Data de admissão", "data_desligamento":"Data de desligamento", "situacao":"Situação", "observacoes":"Observações"}
         widgets = {"data_admissao": forms.DateInput(attrs={"type":"date"}), "data_desligamento": forms.DateInput(attrs={"type":"date"}), "observacoes": forms.Textarea(attrs={"rows":3})}
     def __init__(self, *args, empresa=None, **kwargs):
         super().__init__(*args, **kwargs)

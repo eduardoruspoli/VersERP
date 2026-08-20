@@ -72,3 +72,15 @@
 .logout-button i {
     font-size: 16px;
 }
+
+.app-breadcrumb { display:flex; align-items:center; gap:8px; min-width:0; color:var(--text-light); font-size:13px; }
+.app-breadcrumb a { color:var(--text-light); text-decoration:none; }
+.app-breadcrumb a:hover { color:var(--primary); }
+.app-breadcrumb .breadcrumb-separator { color:var(--border); }
+.app-breadcrumb [aria-current="page"] { color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.logout-button:focus-visible, .app-breadcrumb a:focus-visible { outline:3px solid rgba(31,78,121,.22); outline-offset:2px; }
+
+@media (max-width:700px) {
+    .header { height:auto; min-height:60px; padding:10px 16px; gap:12px; }
+    .user > span { display:none; }
+}

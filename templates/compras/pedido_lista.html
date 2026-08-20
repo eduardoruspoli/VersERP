@@ -6,7 +6,7 @@
   <div><h1>Pedidos de Compra</h1><p>Pedidos diretos, emergenciais e originados de cotações.</p></div>
   {% if perms.compras.criar_pedido %}<a class="btn btn-primary" href="{% url 'compras:pedido_criar' %}">Novo pedido</a>{% endif %}
 </div>
-<nav class="compras-subnav"><a href="{% url 'compras:solicitacao_lista' %}">Solicitações</a><a href="{% url 'compras:cotacao_lista' %}">Cotações</a><a class="active" href="{% url 'compras:pedido_lista' %}">Pedidos</a></nav>
+{% include "compras/_navegacao.html" %}
 <form method="get" class="verserp-form compras-filtros">
   <input class="form-control" name="empresa" placeholder="Empresa (ID)" value="{{ request.GET.empresa }}">
   <input class="form-control" name="fornecedor" placeholder="Fornecedor (ID)" value="{{ request.GET.fornecedor }}">

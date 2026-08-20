@@ -315,3 +315,5 @@ textarea.form-control {
         width: 100%;
     }
 }
+
+.form-narrow { max-width:980px; }

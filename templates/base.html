@@ -45,7 +45,18 @@
 
         <div class="main">
 
-            {% include "includes/header.html" %}
+            <header class="header">
+                <nav class="app-breadcrumb" aria-label="Navegação contextual">
+                    {% block breadcrumbs %}<span aria-current="page">{% if request.resolver_match.app_name == 'comercial' %}Comercial{% elif request.resolver_match.app_name == 'compras' %}Compras{% elif request.resolver_match.app_name == 'financeiro' %}Financeiro{% elif request.resolver_match.app_name == 'rh' %}RH{% elif request.resolver_match.app_name == 'pessoas' %}Pessoas{% elif request.resolver_match.url_name == 'relatorios' %}Relatórios{% elif request.resolver_match.url_name == 'configuracoes' or request.resolver_match.url_name == 'usuarios_lista' or request.resolver_match.url_name == 'usuario_editar' or request.resolver_match.url_name == 'grupos_lista' or request.resolver_match.url_name == 'grupo_editar' %}Configurações{% else %}Dashboard{% endif %}</span>{% endblock %}
+                </nav>
+                <div class="user">
+                    <i class="bi bi-person-circle" aria-hidden="true"></i>
+                    <span>{% if request.user.first_name %}{{ request.user.first_name }}{% else %}{{ request.user.username }}{% endif %}</span>
+                    <form method="post" action="{% url 'core:logout' %}" class="logout-form">{% csrf_token %}
+                        <button type="submit" class="logout-button" title="Sair do VersERP"><i class="bi bi-box-arrow-right" aria-hidden="true"></i><span>Sair</span></button>
+                    </form>
+                </div>
+            </header>
 
             <main class="content">
 

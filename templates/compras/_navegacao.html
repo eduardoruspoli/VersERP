@@ -1,0 +1,7 @@
+<nav class="compras-subnav" aria-label="Áreas de Compras">
+  {% if perms.compras.view_solicitacaocompra %}<a {% if request.resolver_match.url_name == 'solicitacao_lista' %}class="active" aria-current="page"{% endif %} href="{% url 'compras:solicitacao_lista' %}">Solicitações</a>{% endif %}
+  {% if perms.compras.view_processocotacao %}<a {% if request.resolver_match.url_name == 'cotacao_lista' %}class="active" aria-current="page"{% endif %} href="{% url 'compras:cotacao_lista' %}">Cotações</a>{% endif %}
+  {% if perms.compras.view_pedidocompra %}<a {% if request.resolver_match.url_name == 'pedido_lista' %}class="active" aria-current="page"{% endif %} href="{% url 'compras:pedido_lista' %}">Pedidos</a>{% endif %}
+  {% if perms.compras.view_documentocompra %}<a {% if request.resolver_match.url_name == 'documento_lista' %}class="active" aria-current="page"{% endif %} href="{% url 'compras:documento_lista' %}">Documentos de compra</a>{% endif %}
+  {% if perms.compras.view_pedidocompra %}<a {% if request.resolver_match.url_name == 'previsto_comprado' %}class="active" aria-current="page"{% endif %} href="{% url 'compras:previsto_comprado' %}">Previsto × Comprado</a>{% endif %}
+</nav>

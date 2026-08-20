@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ titulo }} | VersERP{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'comercial:proposta_lista' %}">Comercial</a><span class="breadcrumb-separator">›</span><a href="{% url 'comercial:proposta_lista' %}">Propostas</a><span class="breadcrumb-separator">›</span><span aria-current="page">{{ titulo }}</span>{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1>{{ titulo }}</h1></div><a class="btn btn-light" href="javascript:history.back()">Voltar</a></div>
-<form method="post" class="verserp-form"><section class="form-section"><div class="form-grid">{% csrf_token %}{{ form.non_field_errors }}{% for field in form %}<div class="form-group {% if field.field.widget.input_type == 'checkbox' %}form-group-wide{% endif %}"><label for="{{ field.id_for_label }}">{% if field.field.widget.input_type == 'checkbox' %}{{ field }} {% endif %}{{ field.label }}</label>{% if field.field.widget.input_type != 'checkbox' %}{{ field }}{% endif %}{{ field.errors }}</div>{% endfor %}</div></section><div class="form-actions"><button class="btn btn-primary" type="submit">Salvar</button></div></form>
+<div class="page-header"><div><h1>{{ titulo }}</h1><p>Preencha os dados necessários e confirme para continuar.</p></div></div>
+<form method="post" class="verserp-form form-narrow">{% csrf_token %}{{ form.non_field_errors }}
+  <section class="form-section"><div class="form-section-header"><h2>Dados da proposta</h2><p>Informações comerciais e de identificação.</p></div><div class="form-grid">{% for field in form %}<div class="form-group {% if field.name == 'nome_servico' or field.field.widget.input_type == 'checkbox' %}form-group-wide{% endif %}"><label for="{{ field.id_for_label }}">{% if field.field.widget.input_type == 'checkbox' %}{{ field }} {% endif %}{{ field.label }}{% if field.field.required %} <span class="required" aria-hidden="true">*</span>{% endif %}</label>{% if field.field.widget.input_type != 'checkbox' %}{{ field }}{% endif %}{{ field.errors }}{% if field.help_text %}<small class="form-text">{{ field.help_text }}</small>{% endif %}</div>{% endfor %}</div></section>
+  <div class="form-actions"><a class="btn btn-light" href="{% url 'comercial:proposta_lista' %}">Cancelar</a><button class="btn btn-primary" type="submit">Salvar</button></div>
+</form>
 {% endblock %}

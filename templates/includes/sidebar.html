@@ -7,13 +7,13 @@
 
     <nav>
 
-        <a href="{% url 'core:dashboard' %}">
+        <a href="{% url 'core:dashboard' %}" {% if request.resolver_match.url_name == 'dashboard' %}class="active" aria-current="page"{% endif %}>
             <i class="bi bi-speedometer2"></i>
             <span>Dashboard</span>
         </a>
 
         {% if perms.pessoas.view_pessoa %}
-            <a href="{% url 'pessoas:lista' %}">
+            <a href="{% url 'pessoas:lista' %}" {% if request.resolver_match.app_name == 'pessoas' %}class="active" aria-current="page"{% endif %}>
                 <i class="bi bi-people"></i>
                 <span>Pessoas</span>
             </a>
@@ -34,7 +34,7 @@
 
         {% if perms.financeiro.view_lancamentofinanceiro %}
 
-            <a href="{% url 'financeiro:index' %}">
+            <a href="{% url 'financeiro:index' %}" {% if request.resolver_match.app_name == 'financeiro' %}class="active" aria-current="page"{% endif %}>
                 <i class="bi bi-cash-stack"></i>
                 <span>Financeiro</span>
             </a>
@@ -50,8 +50,8 @@
 
         {% if perms.rh.view_rh %}<a href="{% url 'rh:dashboard' %}" {% if request.resolver_match.app_name == "rh" %}class="active" aria-current="page"{% endif %}><i class="bi bi-person-badge"></i><span>RH</span></a>{% endif %}
 
-        <a href="{% url 'core:relatorios' %}" {% if request.resolver_match.url_name == 'relatorios' %}class="active"{% endif %}><i class="bi bi-bar-chart"></i><span>Relatórios</span></a>
-        {% if perms.core.view_configuracoes %}<a href="{% url 'core:configuracoes' %}" {% if request.resolver_match.url_name == 'configuracoes' or request.resolver_match.url_name == 'usuarios_lista' or request.resolver_match.url_name == 'grupos_lista' %}class="active"{% endif %}><i class="bi bi-gear"></i><span>Configurações</span></a>{% endif %}
+        <a href="{% url 'core:relatorios' %}" {% if request.resolver_match.url_name == 'relatorios' %}class="active" aria-current="page"{% endif %}><i class="bi bi-bar-chart"></i><span>Relatórios</span></a>
+        {% if perms.core.view_configuracoes %}<a href="{% url 'core:configuracoes' %}" {% if request.resolver_match.url_name == 'configuracoes' or request.resolver_match.url_name == 'usuarios_lista' or request.resolver_match.url_name == 'usuario_editar' or request.resolver_match.url_name == 'grupos_lista' or request.resolver_match.url_name == 'grupo_editar' %}class="active" aria-current="page"{% endif %}><i class="bi bi-gear"></i><span>Configurações</span></a>{% endif %}
 
     </nav>
 

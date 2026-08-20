@@ -56,6 +56,12 @@ class AcessoEmpresaTests(TestCase):
         self.client.force_login(self.usuario)
         self.assertEqual(self.client.get(reverse("core:configuracoes")).status_code, 403)
 
+    def test_header_exibe_contexto_da_rota(self):
+        self.client.force_login(self.usuario)
+        resposta = self.client.get(reverse("core:dashboard"))
+        self.assertContains(resposta, 'aria-label="Navegação contextual"')
+        self.assertContains(resposta, '<span aria-current="page">Dashboard</span>', html=True)
+
     def test_login_rejeita_redirecionamento_externo(self):
         resposta = self.client.post(reverse("core:login") + "?next=https://exemplo-malicioso.test/", {"username": "limitado", "password": "teste123"})
         self.assertRedirects(resposta, reverse("core:dashboard"))

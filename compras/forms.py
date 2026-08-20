@@ -102,7 +102,7 @@ SolicitacaoCompraItemFormSet = inlineformset_factory(
     SolicitacaoCompraItem,
     form=SolicitacaoCompraItemForm,
     formset=BaseSolicitacaoItemFormSet,
-    extra=3,
+    extra=1,
     can_delete=True,
 )
 

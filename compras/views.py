@@ -35,6 +35,7 @@ from .services import (abrir_solicitacao, cancelar_processo_cotacao, cancelar_so
 from .services import (gerar_parcelas_documento, montar_preview_financeiro_documento,
                        integrar_documento_financeiro, estornar_documento_financeiro)
 from core.access import ids_empresas_usuario
+from financeiro.models import Empresa
 from pessoas.models import Pessoa
 
 
@@ -54,14 +55,17 @@ def fornecedor_historico(request, pk):
 @login_required
 @permission_required("compras.view_solicitacaocompra", raise_exception=True)
 def solicitacao_lista(request):
-    solicitacoes = SolicitacaoCompra.objects.filter(empresa_id__in=ids_empresas_usuario(request.user)).select_related("empresa", "obra", "solicitante").annotate(quantidade_itens=Count("itens", filter=Q(itens__cancelado=False)))
+    empresas = Empresa.objects.filter(pk__in=ids_empresas_usuario(request.user)).order_by("razao_social")
+    solicitacoes = SolicitacaoCompra.objects.filter(empresa__in=empresas).select_related("empresa", "obra", "solicitante").annotate(quantidade_itens=Count("itens", filter=Q(itens__cancelado=False)))
     empresa = request.GET.get("empresa")
     status = request.GET.get("status")
     if empresa:
+        if not empresas.filter(pk=empresa).exists():
+            raise PermissionDenied("Empresa não autorizada para este usuário.")
         solicitacoes = solicitacoes.filter(empresa_id=empresa)
     if status:
         solicitacoes = solicitacoes.filter(status=status)
-    return render(request, "compras/solicitacao_lista.html", {"solicitacoes": solicitacoes, "status_choices": SolicitacaoCompra.Status.choices})
+    return render(request, "compras/solicitacao_lista.html", {"solicitacoes": solicitacoes, "empresas": empresas, "status_choices": SolicitacaoCompra.Status.choices})
 
 
 def _obra_do_form(request, instance=None):

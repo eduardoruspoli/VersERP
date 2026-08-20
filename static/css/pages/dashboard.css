@@ -373,3 +373,11 @@
     }
 
 }
+
+.report-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.report-links { display:grid; gap:0; }
+.report-links > a,.report-note { display:flex; flex-direction:column; gap:3px; padding:14px 20px; border-bottom:1px solid var(--border); text-decoration:none; color:var(--text); }
+.report-links > a:last-child,.report-note:last-child { border-bottom:0; }
+.report-links > a:hover { background:#f8fafc; }
+.report-links small { color:var(--text-light); font-size:12px; }
+@media(max-width:900px){.report-grid{grid-template-columns:1fr}}

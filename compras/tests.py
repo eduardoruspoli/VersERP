@@ -238,6 +238,20 @@ class SolicitacaoViewsTests(ComprasBase):
     def test_criacao_exige_add(self):
         self.assertEqual(self.client.get(reverse("compras:solicitacao_criar")).status_code, 403)
 
+    def test_filtro_lista_oferece_apenas_empresas_autorizadas(self):
+        self.permissao("view_solicitacaocompra")
+        resposta = self.client.get(reverse("compras:solicitacao_lista"))
+        self.assertContains(resposta, self.empresa.razao_social)
+        self.assertNotContains(resposta, self.outra_empresa.razao_social)
+        self.assertEqual(self.client.get(reverse("compras:solicitacao_lista"), {"empresa": self.outra_empresa.pk}).status_code, 403)
+
+    def test_nova_solicitacao_inicia_com_um_item_e_template_progressivo(self):
+        self.permissao("add_solicitacaocompra")
+        resposta = self.client.get(reverse("compras:solicitacao_criar"))
+        self.assertContains(resposta, 'name="itens-TOTAL_FORMS" value="1"', html=False)
+        self.assertContains(resposta, 'id="item-form-template"')
+        self.assertContains(resposta, "Item previsto da proposta")
+
     def test_criacao_com_item_nao_previsto(self):
         self.permissao("add_solicitacaocompra", "view_solicitacaocompra")
         dados = {"empresa": self.empresa.pk, "obra": self.obra.pk, "data_solicitacao": "2026-08-19", "prioridade": "NORMAL", "observacao": "Teste", "itens-TOTAL_FORMS": "3", "itens-INITIAL_FORMS": "0", "itens-MIN_NUM_FORMS": "0", "itens-MAX_NUM_FORMS": "1000", "itens-0-proposta_item": "", "itens-0-tipo_origem": "NAO_PREVISTO", "itens-0-descricao": "Material extra", "itens-0-quantidade": "2", "itens-0-unidade": "UN", "itens-0-data_necessaria": "2026-08-25", "itens-0-descricao_item_substituido": "", "itens-0-observacao": "", "itens-1-proposta_item": "", "itens-1-tipo_origem": "NAO_PREVISTO", "itens-1-descricao": "", "itens-1-quantidade": "", "itens-1-unidade": "", "itens-1-data_necessaria": "", "itens-1-descricao_item_substituido": "", "itens-1-observacao": "", "itens-2-proposta_item": "", "itens-2-tipo_origem": "NAO_PREVISTO", "itens-2-descricao": "", "itens-2-quantidade": "", "itens-2-unidade": "", "itens-2-data_necessaria": "", "itens-2-descricao_item_substituido": "", "itens-2-observacao": ""}
