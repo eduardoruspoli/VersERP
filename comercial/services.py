@@ -191,7 +191,9 @@ def criar_proposta(*, empresa, codigo, cliente, nome_servico, usuario=None, **da
     if modelo:
         for campo in ("texto_introdutorio", "normas_procedimentos", "qualificacao_mao_obra", "obrigacoes_contratada", "observacoes_comerciais", "observacao_faturamento", "texto_impostos", "multa_juros_atraso", "regra_protesto", "rodape"):
             snapshot[campo] = getattr(modelo, campo)
-    snapshot.update(dados_revisao)
+    # Campos efetivamente informados na criação prevalecem sobre o modelo;
+    # valores em branco mantêm o conteúdo padrão aplicável.
+    snapshot.update({campo: valor for campo, valor in dados_revisao.items() if valor not in (None, "")})
     revisao = PropostaRevisao.objects.create(proposta=proposta, numero=0, modelo_conteudo=modelo, data_proposta=timezone.localdate(), nome_servico=nome_servico, criado_por=usuario, **snapshot)
     PropostaHistoricoStatus.objects.create(proposta=proposta, status_novo=proposta.status, usuario=usuario)
     return proposta, revisao

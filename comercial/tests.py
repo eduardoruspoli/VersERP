@@ -78,6 +78,65 @@ class DominioPropostaTests(ComercialBase):
         self.assertEqual(revisao.texto_introdutorio, "Texto original")
         self.assertEqual(revisao.modelo_conteudo_id, modelo.pk)
 
+    def test_nova_proposta_cria_somente_revisao_zero_preparada(self):
+        modelo = ModeloConteudoProposta.objects.create(
+            empresa=self.empresa, nome="Modelo criação", ativo=True, padrao=True,
+            texto_introdutorio="Apresentação padrão", normas_procedimentos="Normas padrão",
+        )
+        proposta, revisao = criar_proposta(
+            empresa=self.empresa, codigo="VERS1918", cliente=self.cliente,
+            nome_servico="Instalação elétrica", usuario=self.usuario,
+            aos_cuidados_de="Maria", escopo_incluido="Escopo desta proposta",
+            prazo_entrega="20 dias", condicao_pagamento="30 dias", validade_dias=20,
+        )
+        self.assertEqual(proposta.revisoes.count(), 1)
+        self.assertEqual(revisao.numero, 0)
+        self.assertEqual(revisao.modelo_conteudo, modelo)
+        self.assertEqual(revisao.texto_introdutorio, "Apresentação padrão")
+        self.assertEqual(revisao.normas_procedimentos, "Normas padrão")
+        self.assertEqual(revisao.nome_servico, "Instalação elétrica")
+        self.assertEqual(revisao.aos_cuidados_de, "Maria")
+        self.assertEqual(revisao.escopo_incluido, "Escopo desta proposta")
+        self.assertEqual(revisao.condicao_pagamento, "30 dias")
+        self.assertEqual(revisao.validade_dias, 20)
+
+    def test_dado_digitado_prevalece_sobre_modelo_e_branco_mantem_padrao(self):
+        ModeloConteudoProposta.objects.create(
+            empresa=self.empresa, nome="Modelo padrão", ativo=True, padrao=True,
+            observacoes_comerciais="Observação padrão", texto_introdutorio="Texto padrão",
+        )
+        _, revisao = criar_proposta(
+            empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Nova",
+            observacoes_comerciais="Observação específica", texto_introdutorio="",
+        )
+        self.assertEqual(revisao.observacoes_comerciais, "Observação específica")
+        self.assertEqual(revisao.texto_introdutorio, "Texto padrão")
+
+    def test_modelo_de_outra_empresa_nao_e_aplicado(self):
+        outra = Empresa.objects.create(razao_social="Outra empresa", cnpj="44.444.444/0001-44")
+        ModeloConteudoProposta.objects.create(empresa=outra, nome="Padrão outra", ativo=True, padrao=True, texto_introdutorio="Não aplicar")
+        _, revisao = criar_proposta(empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Nova")
+        self.assertIsNone(revisao.modelo_conteudo)
+        self.assertEqual(revisao.texto_introdutorio, "")
+
+    def test_nova_logica_nao_modifica_proposta_historica_existente(self):
+        historica = Proposta.objects.create(
+            empresa=self.empresa, cliente=self.cliente, codigo="VERS1800", numero_sequencial=1800,
+            origem=Proposta.Origem.IMPORTADO_HISTORICO, status_historico="faturada",
+        )
+        revisao_historica = PropostaRevisao.objects.create(
+            proposta=historica, numero=0, data_proposta=date(2026, 1, 1),
+            nome_servico="Histórico preservado", preco_venda_final=Decimal("123.45"), congelada=True,
+        )
+        ModeloConteudoProposta.objects.create(empresa=self.empresa, nome="Novo padrão", ativo=True, padrao=True, texto_introdutorio="Novo texto")
+        criar_proposta(empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Nova")
+        historica.refresh_from_db()
+        revisao_historica.refresh_from_db()
+        self.assertEqual(historica.status_historico, "faturada")
+        self.assertEqual(revisao_historica.nome_servico, "Histórico preservado")
+        self.assertEqual(revisao_historica.preco_venda_final, Decimal("123.45"))
+        self.assertEqual(revisao_historica.texto_introdutorio, "")
+
     def test_custo_total_item_e_derivado(self):
         item = self.item("12.3456", "2")
         self.assertEqual(item.custo_total, Decimal("24.69"))
@@ -519,9 +578,27 @@ class ViewsPropostaTests(ComercialBase):
         self.assertFalse(self.revisao.congelada)
 
     def test_criacao_pela_tela(self):
-        resposta = self.client.post(reverse("comercial:proposta_criar"), {"empresa": self.empresa.pk, "codigo": "VERS1918", "cliente": self.cliente.pk, "nome_servico": "Nova tela"})
+        modelo = ModeloConteudoProposta.objects.create(
+            empresa=self.empresa, nome="Padrão da tela", ativo=True, padrao=True,
+            texto_introdutorio="Texto institucional",
+        )
+        resposta = self.client.post(reverse("comercial:proposta_criar"), {
+            "empresa": self.empresa.pk, "codigo": "VERS1918", "cliente": self.cliente.pk,
+            "nome_servico": "Nova tela", "aos_cuidados_de": "Contato da obra",
+            "escopo_incluido": "Escopo digitado", "condicao_pagamento": "30 dias",
+            "validade_dias": "20",
+        })
         self.assertEqual(resposta.status_code, 302)
-        self.assertTrue(Proposta.objects.filter(revisoes__nome_servico="Nova tela").exists())
+        proposta = Proposta.objects.get(codigo="VERS1918")
+        revisao = proposta.revisoes.get()
+        self.assertEqual(proposta.revisoes.count(), 1)
+        self.assertEqual(revisao.numero, 0)
+        self.assertEqual(revisao.modelo_conteudo, modelo)
+        self.assertEqual(revisao.texto_introdutorio, "Texto institucional")
+        self.assertEqual(revisao.aos_cuidados_de, "Contato da obra")
+        self.assertEqual(revisao.escopo_incluido, "Escopo digitado")
+        self.assertEqual(revisao.condicao_pagamento, "30 dias")
+        self.assertEqual(revisao.validade_dias, 20)
 
     def test_tela_inicial_exibe_numero_e_nao_exibe_modelo(self):
         resposta = self.client.get(reverse("comercial:proposta_criar"))

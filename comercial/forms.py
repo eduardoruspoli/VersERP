@@ -22,7 +22,15 @@ class PropostaCriacaoForm(ClasseCssMixin, forms.Form):
     empresa = forms.ModelChoiceField(Empresa.objects.filter(ativa=True))
     codigo = forms.CharField(label="Número da proposta", max_length=20, help_text="Ex.: VERS1917")
     cliente = forms.ModelChoiceField(Pessoa.objects.filter(ativo=True).filter(Q(classificacao="CLIENTE") | Q(classificacao="AMBOS")))
-    nome_servico = forms.CharField(max_length=250)
+    nome_servico = forms.CharField(label="Nome do serviço", max_length=250)
+    aos_cuidados_de = forms.CharField(label="Aos cuidados de", max_length=150, required=False)
+    escopo_incluido = forms.CharField(label="Escopo incluído", required=False, widget=forms.Textarea(attrs={"rows": 4}))
+    nao_incluso = forms.CharField(label="Não incluso", required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    prazo_entrega = forms.CharField(label="Prazo de entrega", max_length=200, required=False)
+    tipo_frete = forms.CharField(label="Tipo de frete", max_length=100, required=False)
+    condicao_pagamento = forms.CharField(label="Condição de pagamento", required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    validade_dias = forms.IntegerField(label="Validade (dias)", min_value=1, initial=15, required=False)
+    observacoes_comerciais = forms.CharField(label="Observações comerciais", required=False, widget=forms.Textarea(attrs={"rows": 3}))
 
     def __init__(self, *args, usuario=None, **kwargs):
         super().__init__(*args, **kwargs)
