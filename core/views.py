@@ -11,9 +11,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from financeiro.models import Empresa
+from rh.models import Feriado
+from comercial.models import ModeloConteudoProposta
 
 from .access import empresas_usuario
-from .forms import GrupoForm, UsuarioAdministracaoForm
+from .forms import (EmpresaConfiguracaoForm, FeriadoConfiguracaoForm, GrupoForm,
+                    ModeloPropostaConfiguracaoForm, UsuarioAdministracaoForm)
 from .models import AuditoriaAcesso, UsuarioEmpresa
 from .permissions import sincronizar_perfis_padrao
 from .services import indicadores_dashboard, pendencias_usuario
@@ -91,6 +94,75 @@ def grupo_editar(request,pk):
     form=GrupoForm(request.POST or None,instance=grupo,ator=request.user)
     if form.is_valid(): form.save(); messages.success(request,"Perfil atualizado."); return redirect("core:grupos_lista")
     return render(request,"core/formulario.html",{"form":form,"titulo":f"Perfil {grupo.name}","voltar":"core:grupos_lista"})
+
+
+def _config_form(request, form_class, titulo, voltar, instance=None, **kwargs):
+    form = form_class(request.POST or None, instance=instance, **kwargs)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Cadastro salvo.")
+        return redirect(voltar)
+    return render(request, "core/configuracao_formulario.html", {"form": form, "titulo": titulo, "voltar": voltar})
+
+
+@login_required
+@permission_required("financeiro.view_empresa", raise_exception=True)
+def empresas_lista(request):
+    empresas = empresas_usuario(request.user).order_by("razao_social")
+    return render(request, "core/configuracao_lista.html", {"titulo": "Empresas", "objetos": empresas, "novo_url": "core:empresa_nova", "editar_url": "core:empresa_editar", "colunas": [("Razão social", "razao_social"), ("CNPJ", "cnpj"), ("Ativa", "ativa")]})
+
+
+@login_required
+@permission_required("financeiro.add_empresa", raise_exception=True)
+def empresa_nova(request):
+    return _config_form(request, EmpresaConfiguracaoForm, "Nova empresa", "core:empresas_lista")
+
+
+@login_required
+@permission_required("financeiro.change_empresa", raise_exception=True)
+def empresa_editar(request, pk):
+    empresa = get_object_or_404(empresas_usuario(request.user), pk=pk)
+    return _config_form(request, EmpresaConfiguracaoForm, "Editar empresa", "core:empresas_lista", instance=empresa)
+
+
+@login_required
+@permission_required("rh.view_feriado", raise_exception=True)
+def feriados_lista(request):
+    objetos = Feriado.objects.filter(empresa__in=empresas_usuario(request.user)).select_related("empresa")
+    return render(request, "core/feriados_lista.html", {"objetos": objetos})
+
+
+@login_required
+@permission_required("rh.add_feriado", raise_exception=True)
+def feriado_novo(request):
+    return _config_form(request, FeriadoConfiguracaoForm, "Novo feriado", "core:feriados_lista", usuario=request.user)
+
+
+@login_required
+@permission_required("rh.change_feriado", raise_exception=True)
+def feriado_editar(request, pk):
+    objeto = get_object_or_404(Feriado, pk=pk, empresa__in=empresas_usuario(request.user))
+    return _config_form(request, FeriadoConfiguracaoForm, "Editar feriado", "core:feriados_lista", instance=objeto, usuario=request.user)
+
+
+@login_required
+@permission_required("comercial.view_modeloconteudoproposta", raise_exception=True)
+def modelos_proposta_lista(request):
+    objetos = ModeloConteudoProposta.objects.filter(empresa__in=empresas_usuario(request.user)).select_related("empresa")
+    return render(request, "core/modelos_proposta_lista.html", {"objetos": objetos})
+
+
+@login_required
+@permission_required("comercial.add_modeloconteudoproposta", raise_exception=True)
+def modelo_proposta_novo(request):
+    return _config_form(request, ModeloPropostaConfiguracaoForm, "Novo modelo de proposta", "core:modelos_proposta_lista", usuario=request.user)
+
+
+@login_required
+@permission_required("comercial.change_modeloconteudoproposta", raise_exception=True)
+def modelo_proposta_editar(request, pk):
+    objeto = get_object_or_404(ModeloConteudoProposta, pk=pk, empresa__in=empresas_usuario(request.user))
+    return _config_form(request, ModeloPropostaConfiguracaoForm, "Editar modelo de proposta", "core:modelos_proposta_lista", instance=objeto, usuario=request.user)
 
 def login_view(request):
     if request.user.is_authenticated:

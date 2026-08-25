@@ -8,7 +8,7 @@ import csv
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import AcompanhamentoPropostaForm, MotivoStatusForm, PropostaCriacaoForm, PropostaItemForm, PropostaLinhaPublicaForm, PropostaRevisaoForm, PropostaTributoForm, RelatorioPropostasFiltroForm
-from .models import Proposta, PropostaRevisao
+from .models import Proposta, PropostaItem, PropostaRevisao
 from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta
 from core.access import filtrar_empresas, objeto_empresa_ou_404
 from core.csv import linha_csv_segura
@@ -124,6 +124,39 @@ def _adicionar(request, pk, form_class, titulo):
 @login_required
 @permission_required("comercial.add_propostaitem", raise_exception=True)
 def item_adicionar(request, pk): return _adicionar(request, pk, PropostaItemForm, "Adicionar item interno")
+
+
+@login_required
+@permission_required("comercial.change_propostaitem", raise_exception=True)
+def item_editar(request, pk):
+    item = objeto_empresa_ou_404(
+        PropostaItem.objects.select_related("revisao__proposta"),
+        request.user, lookup="revisao__proposta__empresa", pk=pk, revisao__congelada=False,
+    )
+    form = PropostaItemForm(request.POST or None, instance=item)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Item atualizado.")
+        return redirect("comercial:proposta_detalhe", pk=item.revisao.proposta_id)
+    return render(request, "comercial/formulario.html", {
+        "form": form, "titulo": "Editar item interno",
+        "voltar_proposta_id": item.revisao.proposta_id,
+    })
+
+
+@login_required
+@permission_required("comercial.delete_propostaitem", raise_exception=True)
+def item_excluir(request, pk):
+    if request.method != "POST":
+        return HttpResponseBadRequest()
+    item = objeto_empresa_ou_404(
+        PropostaItem.objects.select_related("revisao__proposta"),
+        request.user, lookup="revisao__proposta__empresa", pk=pk, revisao__congelada=False,
+    )
+    proposta_id = item.revisao.proposta_id
+    item.delete()
+    messages.success(request, "Item excluído.")
+    return redirect("comercial:proposta_detalhe", pk=proposta_id)
 
 
 @login_required

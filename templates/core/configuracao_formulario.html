@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ titulo }} | VersERP{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>{{ titulo }}</h1><p>Cadastro administrativo do VersERP.</p></div></div>
+<form method="post" class="verserp-form">{% csrf_token %}{{ form.non_field_errors }}
+<section class="form-section"><div class="form-grid">{% for field in form %}<div class="form-group {% if field.field.widget.input_type == 'textarea' %}form-group-wide{% endif %}"><label for="{{ field.id_for_label }}">{% if field.field.widget.input_type == 'checkbox' %}{{ field }} {% endif %}{{ field.label }}{% if field.field.required %} <span class="required">*</span>{% endif %}</label>{% if field.field.widget.input_type != 'checkbox' %}{{ field }}{% endif %}{{ field.errors }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}</div>{% endfor %}</div></section>
+<div class="form-actions"><a class="btn btn-light" href="{% url voltar %}">Voltar</a><button class="btn btn-primary" type="submit">Salvar</button></div></form>
+{% endblock %}
