@@ -17,6 +17,8 @@ from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
 from core.models import UsuarioEmpresa
 
+from .forms import PrevistoCompradoFiltroForm
+
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, EscolhaCotacaoItem,
                      DivergenciaRecebimento, HistoricoPedidoCompra, PedidoCompra, PedidoCompraItem,
                      PedidoItemAlocacaoObra, ProcessoCotacao, ProcessoCotacaoItem,
@@ -613,5 +615,59 @@ class PrevistoCompradoTests(ComprasBase):
     def test_isolamento_empresa(self):
         outra=CentroCusto.objects.create(empresa=self.outra_empresa,codigo="AN-OUT",nome="Outra"); self.comprar(None,obra=outra)
         self.assertEqual(self.linha()["quantidade_comprada"],0)
+    def test_previsto_comprado_rejeita_obra_de_empresa_nao_autorizada(self):
+        obra_alheia = CentroCusto.objects.create(
+            empresa=self.outra_empresa,
+            codigo="AN-IDOR",
+            nome="Obra sem acesso",
+        )
+        self.permissao("view_pedidocompra")
+        self.client.force_login(self.usuario)
+
+        resposta_obra = self.client.get(
+            reverse("compras:previsto_comprado_obra", args=[obra_alheia.pk])
+        )
+        resposta_item = self.client.get(
+            reverse(
+                "compras:previsto_comprado_item",
+                args=[obra_alheia.pk, self.proposta_item.pk],
+            )
+        )
+
+        self.assertEqual(resposta_obra.status_code, 403)
+        self.assertEqual(resposta_item.status_code, 403)
+
+    def test_filtro_previsto_comprado_expoe_apenas_empresas_autorizadas(self):
+        obra_alheia = CentroCusto.objects.create(
+            empresa=self.outra_empresa,
+            codigo="AN-FILTRO",
+            nome="Obra alheia",
+        )
+
+        form = PrevistoCompradoFiltroForm(usuario=self.usuario)
+        self.assertQuerySetEqual(form.fields["empresa"].queryset, [self.empresa])
+
+        form_empresa = PrevistoCompradoFiltroForm(
+            data={"empresa": self.empresa.pk},
+            usuario=self.usuario,
+        )
+        self.assertIn(self.obra, form_empresa.fields["obra"].queryset)
+        self.assertNotIn(obra_alheia, form_empresa.fields["obra"].queryset)
+
+    def test_middleware_protege_rota_com_parametro_obra_id(self):
+        obra_alheia = CentroCusto.objects.create(
+            empresa=self.outra_empresa,
+            codigo="AN-ROTA",
+            nome="Obra rota",
+        )
+        self.permissao("add_solicitacaocompra")
+        self.client.force_login(self.usuario)
+
+        resposta = self.client.get(
+            reverse("compras:itens_previstos_obra", args=[obra_alheia.pk])
+        )
+
+        self.assertEqual(resposta.status_code, 403)
+
     def test_view_filtros_drilldown_e_permissao(self):
         self.comprar(self.proposta_item); self.client.force_login(self.usuario); url=reverse("compras:previsto_comprado_obra",args=[self.obra.pk]); self.assertEqual(self.client.get(url).status_code,403); self.permissao("view_pedidocompra"); resposta=self.client.get(url); self.assertContains(resposta,"Previsto × Comprado"); self.assertContains(self.client.get(reverse("compras:previsto_comprado_item",args=[self.obra.pk,self.proposta_item.pk])),"Drill-down")

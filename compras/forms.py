@@ -5,6 +5,7 @@ from django.forms import BaseInlineFormSet, inlineformset_factory
 from comercial.models import Proposta, PropostaItem
 from financeiro.models import CentroCusto, Empresa, PlanoConta
 from pessoas.models import Pessoa
+from core.access import empresas_usuario
 
 from .models import (CotacaoFornecedor, CotacaoFornecedorItem, ProcessoCotacao,
                      DivergenciaDocumentoCompra, DivergenciaRecebimento, DocumentoCompra,
@@ -237,12 +238,19 @@ class PrevistoCompradoFiltroForm(forms.Form):
     status=forms.ChoiceField(choices=[("","Todos os pedidos")]+list(PedidoCompra.Status.choices),required=False,widget=forms.Select(attrs={"class":"form-select"}))
     plano_conta=forms.ModelChoiceField(queryset=PlanoConta.objects.all(),required=False,widget=forms.Select(attrs={"class":"form-select"}))
     somente_divergencias=forms.BooleanField(required=False,widget=forms.CheckboxInput(attrs={"class":"form-check-input"}))
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs); empresa_id=self.data.get("empresa") or self.initial.get("empresa")
+    def __init__(self,*args,usuario=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        empresas = empresas_usuario(usuario) if usuario is not None else Empresa.objects.none()
+        self.fields["empresa"].queryset = empresas
+        empresa_id=self.data.get("empresa") or self.initial.get("empresa")
         if empresa_id:
-            self.fields["obra"].queryset=CentroCusto.objects.filter(empresa_id=empresa_id).order_by("codigo")
-            self.fields["proposta"].queryset=Proposta.objects.filter(empresa_id=empresa_id,revisao_aprovada__isnull=False)
+            empresas = empresas.filter(pk=empresa_id)
+            self.fields["obra"].queryset=CentroCusto.objects.filter(empresa__in=empresas).order_by("codigo")
+            self.fields["proposta"].queryset=Proposta.objects.filter(empresa__in=empresas,revisao_aprovada__isnull=False)
             self.fields["plano_conta"].queryset=PlanoConta.objects.filter(empresa_id=empresa_id) if hasattr(PlanoConta,"empresa_id") else PlanoConta.objects.all()
+        else:
+            self.fields["obra"].queryset = CentroCusto.objects.none()
+            self.fields["proposta"].queryset = Proposta.objects.none()
 
 
 class DocumentoCompraForm(forms.ModelForm):

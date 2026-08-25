@@ -1,18 +1,23 @@
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 
+from core.models import UsuarioEmpresa
 from pessoas.models import Pessoa
 
 from .forms import (
     CriarLancamentoOFXForm,
     DashboardFinanceiroFiltroForm,
     DREFiltroForm,
+    ImportacaoOFXForm,
     LancamentoFinanceiroForm,
     RateioCentroCustoFormSet,
     RelatorioObraFiltroForm,
@@ -38,6 +43,85 @@ from .services import (
     distribuir_valor_rateios,
     drilldown_dre,
 )
+
+
+class ImportacaoOFXIsolamentoEmpresaTests(TestCase):
+    def setUp(self):
+        self.usuario = get_user_model().objects.create_user(
+            username="ofx-empresa",
+            password="teste123",
+        )
+        self.empresa = Empresa.objects.create(
+            razao_social="Empresa OFX autorizada",
+            cnpj="71.111.111/0001-71",
+        )
+        self.outra_empresa = Empresa.objects.create(
+            razao_social="Empresa OFX alheia",
+            cnpj="72.222.222/0001-72",
+        )
+        UsuarioEmpresa.objects.create(usuario=self.usuario, empresa=self.empresa)
+        self.conta = ContaBancaria.objects.create(
+            empresa=self.empresa,
+            banco="Banco autorizado",
+        )
+        self.conta_alheia = ContaBancaria.objects.create(
+            empresa=self.outra_empresa,
+            banco="Banco alheio",
+        )
+        permissao = Permission.objects.get(codename="add_importacaoofx")
+        self.usuario.user_permissions.add(permissao)
+        self.client.force_login(self.usuario)
+
+    @staticmethod
+    def arquivo_ofx():
+        return SimpleUploadedFile(
+            "extrato.ofx",
+            b"OFX de teste",
+            content_type="application/x-ofx",
+        )
+
+    def test_formulario_lista_apenas_contas_de_empresas_autorizadas(self):
+        form = ImportacaoOFXForm(usuario=self.usuario)
+
+        self.assertIn(self.conta, form.fields["conta_bancaria"].queryset)
+        self.assertNotIn(self.conta_alheia, form.fields["conta_bancaria"].queryset)
+
+    def test_post_manual_rejeita_conta_de_outra_empresa(self):
+        resposta = self.client.post(
+            reverse("financeiro:importar_ofx"),
+            {
+                "conta_bancaria": self.conta_alheia.pk,
+                "arquivo": self.arquivo_ofx(),
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertIn("conta_bancaria", resposta.context["form"].errors)
+        self.assertFalse(ImportacaoOFX.objects.exists())
+
+    @patch("financeiro.views.ler_ofx")
+    def test_importacao_legitima_da_empresa_autorizada_continua_funcionando(
+        self,
+        ler_ofx_mock,
+    ):
+        ler_ofx_mock.return_value = {
+            "data_inicio": date(2026, 8, 1),
+            "data_fim": date(2026, 8, 25),
+            "movimentos": [],
+        }
+
+        resposta = self.client.post(
+            reverse("financeiro:importar_ofx"),
+            {
+                "conta_bancaria": self.conta.pk,
+                "arquivo": self.arquivo_ofx(),
+            },
+        )
+
+        self.assertEqual(resposta.status_code, 302)
+        importacao = ImportacaoOFX.objects.get()
+        self.assertEqual(importacao.conta_bancaria, self.conta)
+        self.assertEqual(importacao.status, "CONCLUIDA")
 
 
 class PlanoContaModelTests(TestCase):

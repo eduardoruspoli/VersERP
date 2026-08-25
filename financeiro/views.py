@@ -113,7 +113,13 @@ def painel_obra(request, pk):
         previsto_realizado = calcular_previsto_realizado(proposta)
         previsto_comprado = calcular_previsto_comprado(obra)
     return render(request, "financeiro/painel_obra.html", {"obra": obra, "proposta": proposta, "financeiro": financeiro, "previsto_realizado": previsto_realizado, "previsto_comprado": previsto_comprado})
-from core.access import empresa_request, empresas_usuario, filtrar_empresas, objeto_empresa_ou_404
+from core.access import (
+    empresa_request,
+    empresas_usuario,
+    exigir_empresa,
+    filtrar_empresas,
+    objeto_empresa_ou_404,
+)
 
 
 # ============================================================
@@ -2909,6 +2915,7 @@ def importar_ofx(request):
         form = ImportacaoOFXForm(
             request.POST,
             request.FILES,
+            usuario=request.user,
         )
 
         if form.is_valid():
@@ -2916,6 +2923,10 @@ def importar_ofx(request):
                 form.cleaned_data[
                     "conta_bancaria"
                 ]
+            )
+            exigir_empresa(
+                request.user,
+                conta_bancaria.empresa_id,
             )
 
             arquivo = (
@@ -3106,7 +3117,9 @@ def importar_ofx(request):
 
     else:
         form = (
-            ImportacaoOFXForm()
+            ImportacaoOFXForm(
+                usuario=request.user,
+            )
         )
 
     contexto = {

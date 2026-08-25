@@ -1134,6 +1134,7 @@ class ImportacaoOFXForm(forms.Form):
     def __init__(
         self,
         *args,
+        usuario=None,
         **kwargs,
     ):
         super().__init__(
@@ -1146,7 +1147,8 @@ class ImportacaoOFXForm(forms.Form):
         ].queryset = (
             ContaBancaria.objects
             .filter(
-                ativa=True
+                ativa=True,
+                empresa__in=empresas_usuario(usuario) if usuario is not None else Empresa.objects.none(),
             )
             .select_related(
                 "empresa"

@@ -56,12 +56,20 @@ class EmpresaAccessMiddleware:
         },
     }
     ROTAS_EXATAS = {
-        ("compras", "documento_divergencia_resolver"): ("compras.DivergenciaDocumentoCompra", "documento__empresa_id"),
-        ("compras", "divergencia_resolver"): ("compras.DivergenciaRecebimento", "recebimento_item__recebimento__pedido__empresa_id"),
-        ("compras", "recebimento_detalhe"): ("compras.RecebimentoCompra", "pedido__empresa_id"),
-        ("compras", "recebimento_editar"): ("compras.RecebimentoCompra", "pedido__empresa_id"),
-        ("compras", "recebimento_confirmar"): ("compras.RecebimentoCompra", "pedido__empresa_id"),
-        ("compras", "recebimento_cancelar"): ("compras.RecebimentoCompra", "pedido__empresa_id"),
+        ("compras", "documento_divergencia_resolver"): ("compras.DivergenciaDocumentoCompra", "pk", "documento__empresa_id"),
+        ("compras", "divergencia_resolver"): ("compras.DivergenciaRecebimento", "pk", "recebimento_item__recebimento__pedido__empresa_id"),
+        ("compras", "divergencia_criar"): ("compras.RecebimentoCompra", "pk", "pedido__empresa_id"),
+        ("compras", "recebimento_detalhe"): ("compras.RecebimentoCompra", "pk", "pedido__empresa_id"),
+        ("compras", "recebimento_editar"): ("compras.RecebimentoCompra", "pk", "pedido__empresa_id"),
+        ("compras", "recebimento_confirmar"): ("compras.RecebimentoCompra", "pk", "pedido__empresa_id"),
+        ("compras", "recebimento_cancelar"): ("compras.RecebimentoCompra", "pk", "pedido__empresa_id"),
+        ("compras", "recebimento_criar"): ("compras.PedidoCompra", "pedido_pk", "empresa_id"),
+        ("compras", "pedido_gerar_cotacao"): ("compras.ProcessoCotacao", "pk", "empresa_id"),
+        ("compras", "previsto_comprado_obra"): ("financeiro.CentroCusto", "obra_pk", "empresa_id"),
+        ("compras", "previsto_comprado_item"): ("financeiro.CentroCusto", "obra_pk", "empresa_id"),
+        ("compras", "itens_previstos_obra"): ("financeiro.CentroCusto", "obra_id", "empresa_id"),
+        ("compras", "cotacao_oferta"): ("compras.CotacaoFornecedor", "fornecedor_pk", "processo__empresa_id"),
+        ("compras", "cotacao_oferta_editar"): ("compras.CotacaoFornecedor", "fornecedor_pk", "processo__empresa_id"),
     }
 
     def process_view(self, request, view_func, view_args, view_kwargs):
@@ -70,16 +78,19 @@ class EmpresaAccessMiddleware:
         match = request.resolver_match
         namespace = match.app_name if match else ""
         nome = match.url_name if match else ""
-        pk = view_kwargs.get("pk")
-        if not pk:
-            return None
         exata = self.ROTAS_EXATAS.get((namespace, nome))
         if exata:
-            modelo_nome, empresa_lookup = exata
+            modelo_nome, parametro, empresa_lookup = exata
+            pk = view_kwargs.get(parametro)
+            if not pk:
+                return None
             modelo = apps.get_model(modelo_nome)
             empresa_id = modelo.objects.filter(pk=pk).values_list(empresa_lookup, flat=True).first()
             if empresa_id is not None and not pode_acessar_empresa(request.user, empresa_id):
                 raise PermissionDenied("Registro de empresa não autorizada.")
+            return None
+        pk = view_kwargs.get("pk")
+        if not pk:
             return None
         for chave, (modelo_nome, empresa_lookup) in self.ROTAS.get(namespace, {}).items():
             if chave not in nome:

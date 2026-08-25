@@ -286,7 +286,7 @@ def pedido_editar(request,pk):
 @login_required
 @permission_required("compras.criar_pedido",raise_exception=True)
 def pedido_gerar_cotacao(request,pk):
-    processo=get_object_or_404(ProcessoCotacao,pk=pk,status=ProcessoCotacao.Status.CONCLUIDA)
+    processo=get_object_or_404(ProcessoCotacao,pk=pk,empresa_id__in=ids_empresas_usuario(request.user),status=ProcessoCotacao.Status.CONCLUIDA)
     form=GerarPedidosCotacaoForm(request.POST or None,processo=processo)
     if request.method=="POST" and form.is_valid():
         numeros={int(k.split("_")[1]):v for k,v in form.cleaned_data.items()}
@@ -414,7 +414,7 @@ def recebimento_cancelar(request,pk): return _acao_recebimento(request,pk,cancel
 @login_required
 @permission_required("compras.registrar_recebimento",raise_exception=True)
 def divergencia_criar(request,pk,item_pk):
-    recebimento=get_object_or_404(RecebimentoCompra,pk=pk); item=get_object_or_404(RecebimentoCompraItem,pk=item_pk,recebimento=recebimento)
+    recebimento=get_object_or_404(RecebimentoCompra,pk=pk,pedido__empresa_id__in=ids_empresas_usuario(request.user)); item=get_object_or_404(RecebimentoCompraItem,pk=item_pk,recebimento=recebimento)
     form=DivergenciaRecebimentoForm(request.POST or None)
     if request.method=="POST" and form.is_valid():
         obj=form.save(commit=False); obj.recebimento_item=item; obj.save(); RecebimentoCompraItem.objects.filter(pk=item.pk).update(possui_divergencia=True); return redirect("compras:recebimento_detalhe",pk=pk)
@@ -435,12 +435,13 @@ def divergencia_resolver(request,pk):
 def previsto_comprado(request,obra_pk=None):
     from financeiro.models import CentroCusto, Empresa
     dados=request.GET.copy()
+    empresas = Empresa.objects.filter(pk__in=ids_empresas_usuario(request.user))
     if obra_pk:
-        obra_url=get_object_or_404(CentroCusto,pk=obra_pk); dados.setdefault("empresa",str(obra_url.empresa_id)); dados.setdefault("obra",str(obra_url.pk))
+        obra_url=get_object_or_404(CentroCusto,pk=obra_pk,empresa__in=empresas); dados.setdefault("empresa",str(obra_url.empresa_id)); dados.setdefault("obra",str(obra_url.pk))
     elif not dados.get("empresa"):
-        principal=Empresa.objects.filter(principal=True,ativa=True).first() or Empresa.objects.filter(ativa=True).first()
+        principal=empresas.filter(principal=True,ativa=True).first() or empresas.filter(ativa=True).first()
         if principal: dados["empresa"]=str(principal.pk)
-    form=PrevistoCompradoFiltroForm(dados or None)
+    form=PrevistoCompradoFiltroForm(dados or None,usuario=request.user)
     relatorio=None
     if form.is_valid():
         obra=form.cleaned_data["obra"]; proposta=form.cleaned_data.get("proposta")
@@ -453,7 +454,7 @@ def previsto_comprado(request,obra_pk=None):
 @permission_required("compras.view_pedidocompra",raise_exception=True)
 def previsto_comprado_item(request,obra_pk,item_pk):
     from financeiro.models import CentroCusto
-    obra=get_object_or_404(CentroCusto,pk=obra_pk); relatorio=calcular_previsto_comprado(obra); linha=next((x for x in relatorio.get("itens_previstos",[]) if x["previsto"].pk==item_pk),None)
+    obra=get_object_or_404(CentroCusto,pk=obra_pk,empresa_id__in=ids_empresas_usuario(request.user)); relatorio=calcular_previsto_comprado(obra); linha=next((x for x in relatorio.get("itens_previstos",[]) if x["previsto"].pk==item_pk),None)
     if not linha: return HttpResponseBadRequest("Item não pertence à revisão aprovada desta obra.")
     return render(request,"compras/previsto_comprado_item.html",{"relatorio":relatorio,"linha":linha})
 
