@@ -17,7 +17,7 @@ from pessoas.models import Pessoa
 from core.models import UsuarioEmpresa
 
 from .models import ModeloConteudoProposta, Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao, PropostaTributo
-from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta, validar_fechamento_publico
+from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta, sincronizar_linhas_publicas_automaticas, validar_fechamento_publico
 
 
 class ComercialBase(TestCase):
@@ -81,6 +81,120 @@ class DominioPropostaTests(ComercialBase):
     def test_custo_total_item_e_derivado(self):
         item = self.item("12.3456", "2")
         self.assertEqual(item.custo_total, Decimal("24.69"))
+
+    def test_margem_item_soma_ao_valor_fornecedor_como_planilha(self):
+        item = PropostaItem.objects.create(
+            revisao=self.revisao,
+            tipo=PropostaItem.Tipo.MATERIAL,
+            descricao="Tinta",
+            quantidade=Decimal("4"),
+            custo_unitario=Decimal("125.00"),
+            margem_formacao=Decimal("86"),
+        )
+        self.assertEqual(item.valor_unitario_venda, Decimal("232.50"))
+        self.assertEqual(item.valor_total_venda, Decimal("930.00"))
+
+        self.revisao.formacao_preco = PropostaRevisao.FormacaoPreco.MARKUP
+        self.revisao.percentual_formacao = Decimal("0")
+        self.revisao.save()
+        calculo = calcular_precificacao(self.revisao)
+        self.assertEqual(calculo["custo_total"], Decimal("500.00"))
+        self.assertEqual(calculo["preco_final"], Decimal("930.00"))
+        self.assertEqual(calculo["resultado"], Decimal("430.00"))
+
+    def test_juros_antecipacao_usa_total_material_taxa_e_prazo(self):
+        PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.MATERIAL, descricao="Materiais",
+            quantidade=Decimal("1"), custo_unitario=Decimal("13047.90"), margem_formacao=Decimal("0"),
+        )
+        juros = PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.JUROS_ANTECIPACAO,
+            descricao="Juros de Antecipação", quantidade=Decimal("1"), unidade="VB",
+            custo_unitario=Decimal("0"), margem_formacao=Decimal("0"),
+            taxa_juros_mensal=Decimal("2.4"), prazo_antecipacao_dias=90,
+        )
+        self.assertEqual(juros.base_juros_antecipacao, Decimal("13047.90"))
+        self.assertEqual(juros.meses_antecipacao, Decimal("3.0000"))
+        self.assertEqual(juros.valor_unitario_venda, Decimal("313.15"))
+        self.assertEqual(juros.valor_total_venda, Decimal("939.45"))
+        self.assertEqual(juros.custo_total, Decimal("0.00"))
+
+    def test_juros_antecipacao_180_dias_equivale_a_seis_meses(self):
+        PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.MATERIAL, descricao="Materiais",
+            quantidade=Decimal("1"), custo_unitario=Decimal("13047.90"), margem_formacao=Decimal("0"),
+        )
+        juros = PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.JUROS_ANTECIPACAO,
+            descricao="Juros de Antecipação", quantidade=Decimal("1"), unidade="VB",
+            custo_unitario=Decimal("0"), margem_formacao=Decimal("0"),
+            taxa_juros_mensal=Decimal("2.4"), prazo_antecipacao_dias=180,
+        )
+        self.assertEqual(juros.meses_antecipacao, Decimal("6.0000"))
+        self.assertEqual(juros.valor_total_venda, Decimal("1878.90"))
+
+    def test_juros_antecipacao_entra_no_total_de_servicos_sem_aumentar_custo(self):
+        material = PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.MATERIAL, descricao="Materiais",
+            quantidade=Decimal("1"), custo_unitario=Decimal("1000"), margem_formacao=Decimal("0"),
+        )
+        PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.JUROS_ANTECIPACAO,
+            descricao="Juros de Antecipação", quantidade=Decimal("1"), unidade="VB",
+            custo_unitario=Decimal("0"), margem_formacao=Decimal("0"),
+            taxa_juros_mensal=Decimal("2.4"), prazo_antecipacao_dias=90,
+        )
+        self.revisao.formacao_preco = PropostaRevisao.FormacaoPreco.MARKUP
+        self.revisao.save()
+        sincronizar_linhas_publicas_automaticas(self.revisao)
+        servico = self.revisao.linhas_publicas.get(origem_automatica=True, grupo=PropostaLinhaPublica.Grupo.SERVICO)
+        calculo = calcular_precificacao(self.revisao)
+        self.assertEqual(material.valor_total_venda, Decimal("1000.00"))
+        self.assertEqual(servico.valor_total, Decimal("72.00"))
+        self.assertEqual(calculo["custo_total"], Decimal("1000.00"))
+        self.assertEqual(calculo["preco_final"], Decimal("1072.00"))
+
+    def test_resumo_publico_material_e_servicos_e_gerado_automaticamente(self):
+        PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.MATERIAL, descricao="Tinta",
+            quantidade=Decimal("4"), custo_unitario=Decimal("125"), margem_formacao=Decimal("86"),
+        )
+        PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.MAO_OBRA, descricao="Serviço",
+            quantidade=Decimal("2"), custo_unitario=Decimal("100"), margem_formacao=Decimal("50"),
+        )
+        sincronizar_linhas_publicas_automaticas(self.revisao)
+        material = self.revisao.linhas_publicas.get(origem_automatica=True, grupo=PropostaLinhaPublica.Grupo.MATERIAL)
+        servico = self.revisao.linhas_publicas.get(origem_automatica=True, grupo=PropostaLinhaPublica.Grupo.SERVICO)
+        self.assertEqual(material.descricao, "MATERIAL")
+        self.assertEqual(material.valor_total, Decimal("930.00"))
+        self.assertEqual(servico.descricao, "SERVIÇOS")
+        self.assertEqual(servico.valor_total, Decimal("300.00"))
+
+    def test_valor_publico_editado_manualmente_nao_e_sobrescrito(self):
+        item = PropostaItem.objects.create(
+            revisao=self.revisao, tipo=PropostaItem.Tipo.MATERIAL, descricao="Tinta",
+            quantidade=Decimal("1"), custo_unitario=Decimal("100"), margem_formacao=Decimal("50"),
+        )
+        sincronizar_linhas_publicas_automaticas(self.revisao)
+        linha = self.revisao.linhas_publicas.get(origem_automatica=True, grupo=PropostaLinhaPublica.Grupo.MATERIAL)
+        linha.valor_total = Decimal("175")
+        linha.valor_automatico = False
+        linha.save(update_fields=["valor_total", "valor_automatico"])
+        item.quantidade = Decimal("2")
+        item.save()
+        sincronizar_linhas_publicas_automaticas(self.revisao)
+        linha.refresh_from_db()
+        self.assertEqual(linha.valor_total, Decimal("175.00"))
+
+    def test_item_sem_margem_propria_usa_margem_padrao_revisao(self):
+        self.revisao.formacao_preco = PropostaRevisao.FormacaoPreco.MARKUP
+        self.revisao.percentual_formacao = Decimal("50")
+        self.revisao.save()
+        item = self.item("100", "2")
+        self.assertEqual(item.margem_formacao_efetiva, Decimal("50"))
+        self.assertEqual(item.valor_unitario_venda, Decimal("150.00"))
+        self.assertEqual(calcular_precificacao(self.revisao)["preco_final"], Decimal("300.00"))
 
     def test_markup_com_tributos(self):
         self.item()
@@ -169,8 +283,125 @@ class ViewsPropostaTests(ComercialBase):
 
     def test_lista_e_detalhe(self):
         self.assertContains(self.client.get(reverse("comercial:proposta_lista")), "VERS1917")
-        self.assertContains(self.client.get(reverse("comercial:proposta_detalhe", args=[self.proposta.pk])), "Composição interna")
+        self.assertContains(self.client.get(reverse("comercial:proposta_detalhe", args=[self.proposta.pk])), "MATERIAL ELÉTRICO")
         self.assertContains(self.client.get(reverse("comercial:proposta_lista")), "Rascunho")
+
+    def test_linha_publica_pode_ser_editada_sem_criar_revisao(self):
+        self.usuario.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="comercial",
+            codename__in=["change_propostalinhapublica"],
+        ))
+        linha = self.linha("150")
+        resposta = self.client.post(reverse("comercial:linha_editar", args=[linha.pk]), {
+            "ordem": 0,
+            "grupo": PropostaLinhaPublica.Grupo.MATERIAL,
+            "descricao": "Fornecimento de materiais elétricos",
+            "quantidade": "1",
+            "unidade": "VB",
+            "valor_unitario": "930.00",
+            "valor_total": "930.00",
+            "observacao": "",
+        })
+        self.assertEqual(resposta.status_code, 302)
+        linha.refresh_from_db()
+        self.assertEqual(linha.descricao, "Fornecimento de materiais elétricos")
+        self.assertEqual(linha.valor_total, Decimal("930.00"))
+        self.assertEqual(self.proposta.revisoes.count(), 1)
+
+    def test_editar_proposta_altera_cliente_e_nome_sem_criar_revisao(self):
+        self.usuario.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="comercial",
+            codename__in=["change_proposta", "change_propostarevisao"],
+        ))
+        novo_cliente = Pessoa.objects.create(
+            razao_social="Cliente Novo",
+            classificacao=Pessoa.Classificacao.CLIENTE,
+            ativo=True,
+            cpf_cnpj="33.333.333/0001-33",
+        )
+        dados = {
+            "codigo": self.proposta.codigo,
+            "cliente": novo_cliente.pk,
+            "data_proposta": self.revisao.data_proposta.isoformat(),
+            "nome_servico": "Nome corrigido",
+            "validade_dias": self.revisao.validade_dias,
+            "formacao_preco": self.revisao.formacao_preco,
+            "percentual_formacao": self.revisao.percentual_formacao,
+            "preco_venda_final": self.revisao.preco_venda_final,
+        }
+        resposta = self.client.post(reverse("comercial:revisao_editar", args=[self.revisao.pk]), dados)
+        self.assertEqual(resposta.status_code, 302)
+        self.proposta.refresh_from_db()
+        self.revisao.refresh_from_db()
+        self.assertEqual(self.proposta.cliente, novo_cliente)
+        self.assertEqual(self.revisao.nome_servico, "Nome corrigido")
+        self.assertEqual(self.proposta.revisoes.count(), 1)
+        self.assertEqual(self.proposta.revisao_atual, 0)
+
+    def test_lista_exibe_editar_e_edicao_altera_codigo_sem_nova_revisao(self):
+        self.usuario.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="comercial",
+            codename__in=["change_proposta", "change_propostarevisao"],
+        ))
+        lista = self.client.get(reverse("comercial:proposta_lista"))
+        self.assertContains(lista, reverse("comercial:proposta_editar", args=[self.proposta.pk]))
+
+        dados = {
+            "codigo": "VERS1999",
+            "cliente": self.cliente.pk,
+            "data_proposta": self.revisao.data_proposta.isoformat(),
+            "nome_servico": "Descrição corrigida da proposta",
+            "validade_dias": self.revisao.validade_dias,
+            "formacao_preco": self.revisao.formacao_preco,
+            "percentual_formacao": self.revisao.percentual_formacao,
+            "preco_venda_final": self.revisao.preco_venda_final,
+        }
+        resposta = self.client.post(reverse("comercial:proposta_editar", args=[self.proposta.pk]), dados)
+        self.assertEqual(resposta.status_code, 302)
+        self.proposta.refresh_from_db()
+        self.revisao.refresh_from_db()
+        self.assertEqual(self.proposta.codigo, "VERS1999")
+        self.assertEqual(self.proposta.numero_sequencial, 1999)
+        self.assertEqual(self.revisao.nome_servico, "Descrição corrigida da proposta")
+        self.assertEqual(self.proposta.revisoes.count(), 1)
+        self.assertEqual(self.proposta.revisao_atual, 0)
+
+    def test_edicao_rejeita_codigo_duplicado_na_mesma_empresa(self):
+        self.usuario.user_permissions.add(*Permission.objects.filter(
+            content_type__app_label="comercial",
+            codename__in=["change_proposta", "change_propostarevisao"],
+        ))
+        outra, _ = criar_proposta(
+            empresa=self.empresa, codigo="VERS1998", cliente=self.cliente,
+            nome_servico="Outra proposta", usuario=self.usuario,
+        )
+        dados = {
+            "codigo": outra.codigo,
+            "cliente": self.cliente.pk,
+            "data_proposta": self.revisao.data_proposta.isoformat(),
+            "nome_servico": self.revisao.nome_servico,
+            "validade_dias": self.revisao.validade_dias,
+            "formacao_preco": self.revisao.formacao_preco,
+            "percentual_formacao": self.revisao.percentual_formacao,
+            "preco_venda_final": self.revisao.preco_venda_final,
+        }
+        resposta = self.client.post(reverse("comercial:proposta_editar", args=[self.proposta.pk]), dados)
+        self.assertEqual(resposta.status_code, 200)
+        self.assertContains(resposta, "Já existe uma proposta com este número nesta empresa.")
+        self.proposta.refresh_from_db()
+        self.assertEqual(self.proposta.codigo, "VERS1917")
+
+    def test_excluir_proposta_exige_superusuario(self):
+        resposta = self.client.post(reverse("comercial:proposta_excluir", args=[self.proposta.pk]))
+        self.assertEqual(resposta.status_code, 403)
+        self.assertTrue(Proposta.objects.filter(pk=self.proposta.pk).exists())
+
+    def test_superusuario_pode_excluir_proposta_sem_dependencias(self):
+        admin = get_user_model().objects.create_superuser(username="admin", password="teste123", email="admin@example.com")
+        self.client.force_login(admin)
+        resposta = self.client.post(reverse("comercial:proposta_excluir", args=[self.proposta.pk]))
+        self.assertRedirects(resposta, reverse("comercial:proposta_lista"))
+        self.assertFalse(Proposta.objects.filter(pk=self.proposta.pk).exists())
 
     def criar_historica(self):
         proposta, revisao = criar_proposta(empresa=self.empresa, codigo="VERS1918", cliente=self.cliente, nome_servico="Histórica", usuario=self.usuario)

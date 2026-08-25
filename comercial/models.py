@@ -1,5 +1,5 @@
 import re
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -186,6 +186,7 @@ class PropostaItem(ProtegidoPorCongelamento):
         MATERIAL = "MATERIAL", "Material"
         MAO_OBRA = "MAO_OBRA", "Mão de obra"
         SERVICO_TERCEIRO = "SERVICO_TERCEIRO", "Serviço de terceiro"
+        JUROS_ANTECIPACAO = "JUROS_ANTECIPACAO", "Juros de antecipação"
         FRETE = "FRETE", "Frete"
         LOCACAO_EQUIPAMENTO = "LOCACAO_EQUIPAMENTO", "Locação/equipamento"
         OUTROS = "OUTROS", "Outros"
@@ -197,7 +198,22 @@ class PropostaItem(ProtegidoPorCongelamento):
     quantidade = models.DecimalField(max_digits=15, decimal_places=4, default=Decimal("1"))
     unidade = models.CharField(max_length=20, default="UN")
     fornecedor = models.ForeignKey(Pessoa, on_delete=models.PROTECT, null=True, blank=True, related_name="itens_proposta_fornecidos")
-    custo_unitario = models.DecimalField(max_digits=15, decimal_places=4)
+    custo_unitario = models.DecimalField(max_digits=15, decimal_places=4, verbose_name="Valor unitário fornecedor")
+    margem_formacao = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="Margem de formação (%)",
+        help_text="Percentual somado ao valor unitário do fornecedor. Ex.: R$ 125,00 + 86% = R$ 232,50.",
+    )
+    taxa_juros_mensal = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="Taxa mensal de antecipação (%)",
+        help_text="Usada somente em Juros de antecipação. Padrão comercial: 2,40% ao mês.",
+    )
+    prazo_antecipacao_dias = models.PositiveIntegerField(
+        null=True, blank=True,
+        verbose_name="Prazo de antecipação (dias)",
+        help_text="Ex.: 90 dias = 3 meses comerciais; 180 dias = 6 meses.",
+    )
     custo_total = models.DecimalField(max_digits=15, decimal_places=2, editable=False, default=Decimal("0"))
     plano_conta = models.ForeignKey(PlanoConta, on_delete=models.PROTECT, null=True, blank=True, related_name="itens_proposta")
     observacoes_internas = models.TextField(blank=True)
@@ -207,13 +223,67 @@ class PropostaItem(ProtegidoPorCongelamento):
 
     def clean(self):
         super().clean()
+        if self.tipo == self.Tipo.JUROS_ANTECIPACAO:
+            if not self.taxa_juros_mensal or self.taxa_juros_mensal <= 0:
+                raise ValidationError({"taxa_juros_mensal": "Informe uma taxa mensal positiva."})
+            if not self.prazo_antecipacao_dias or self.prazo_antecipacao_dias <= 0:
+                raise ValidationError({"prazo_antecipacao_dias": "Informe o prazo de antecipação em dias."})
+            # Juros de antecipação são um componente comercial calculado, não custo de fornecedor.
+            self.quantidade = Decimal("1")
+            self.unidade = "VB"
+            self.fornecedor = None
+            self.custo_unitario = Decimal("0")
+            self.margem_formacao = Decimal("0")
+            self.custo_total = Decimal("0.00")
+            return
         if self.quantidade <= 0 or self.custo_unitario < 0:
             raise ValidationError("Quantidade deve ser positiva e custo não pode ser negativo.")
+        if self.margem_formacao is not None and self.margem_formacao < 0:
+            raise ValidationError({"margem_formacao": "A margem de formação não pode ser negativa."})
         if self.fornecedor_id and self.fornecedor.classificacao not in {Pessoa.Classificacao.FORNECEDOR, Pessoa.Classificacao.AMBOS}:
             raise ValidationError({"fornecedor": "Selecione um fornecedor válido."})
         if self.plano_conta_id and (self.plano_conta.estrutural or not self.plano_conta.aceita_lancamento or self.plano_conta.tipo not in {"CUSTO", "DESPESA"}):
             raise ValidationError({"plano_conta": "Use uma conta analítica de custo ou despesa."})
         self.custo_total = (self.quantidade * self.custo_unitario).quantize(Decimal("0.01"))
+
+    @property
+    def margem_formacao_efetiva(self):
+        """Margem aplicada sobre o custo unitário, compatível com a planilha comercial."""
+        if self.margem_formacao is not None:
+            return self.margem_formacao
+        return self.revisao.percentual_formacao or Decimal("0")
+
+    @property
+    def base_juros_antecipacao(self):
+        if self.tipo != self.Tipo.JUROS_ANTECIPACAO or not self.revisao_id:
+            return Decimal("0.00")
+        tipos_servico = {self.Tipo.MAO_OBRA, self.Tipo.SERVICO_TERCEIRO, self.Tipo.JUROS_ANTECIPACAO}
+        total = sum(
+            (item.valor_total_venda for item in self.revisao.itens.exclude(pk=self.pk) if item.tipo not in tipos_servico),
+            Decimal("0.00"),
+        )
+        return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    @property
+    def meses_antecipacao(self):
+        if self.tipo != self.Tipo.JUROS_ANTECIPACAO or not self.prazo_antecipacao_dias:
+            return Decimal("0")
+        return (Decimal(self.prazo_antecipacao_dias) / Decimal("30")).quantize(Decimal("0.0001"))
+
+    @property
+    def valor_unitario_venda(self):
+        if self.tipo == self.Tipo.JUROS_ANTECIPACAO:
+            taxa = Decimal(self.taxa_juros_mensal or 0) / Decimal("100")
+            return (self.base_juros_antecipacao * taxa).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        fator = Decimal("1") + (self.margem_formacao_efetiva / Decimal("100"))
+        return (self.custo_unitario * fator).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    @property
+    def valor_total_venda(self):
+        if self.tipo == self.Tipo.JUROS_ANTECIPACAO:
+            taxa = Decimal(self.taxa_juros_mensal or 0) / Decimal("100")
+            return (self.base_juros_antecipacao * taxa * self.meses_antecipacao).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return (self.quantidade * self.valor_unitario_venda).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class PropostaTributo(ProtegidoPorCongelamento):
@@ -241,6 +311,9 @@ class PropostaLinhaPublica(ProtegidoPorCongelamento):
     valor_unitario = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     valor_total = models.DecimalField(max_digits=15, decimal_places=2)
     observacao = models.CharField(max_length=250, blank=True)
+    origem_automatica = models.BooleanField(default=False, editable=False)
+    valor_automatico = models.BooleanField(default=False, editable=False)
+    oculta_manual = models.BooleanField(default=False, editable=False)
 
     class Meta:
         ordering = ["grupo", "ordem", "id"]

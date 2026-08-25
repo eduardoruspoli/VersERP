@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Max, Min, Sum
+from django.db.models import Max, Min, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -67,7 +67,11 @@ def calcular_precificacao(revisao):
         raise ValidationError("A soma dos tributos deve ser inferior a 100%.")
 
     if revisao.formacao_preco == PropostaRevisao.FormacaoPreco.MARKUP:
-        preco = custo * (Decimal("1") + fator) / (Decimal("1") - aliquota)
+        # A formação segue a planilha comercial: custo unitário + percentual do item.
+        # Quando o item não possui percentual próprio, usa o percentual padrão da revisão.
+        itens = list(revisao.itens.select_related("revisao"))
+        preco_formado = sum((item.valor_total_venda for item in itens), ZERO)
+        preco = preco_formado / (Decimal("1") - aliquota)
     elif revisao.formacao_preco == PropostaRevisao.FormacaoPreco.MARGEM:
         if aliquota + fator >= 1:
             raise ValidationError("Margem e tributos juntos devem ser inferiores a 100%.")
@@ -85,8 +89,89 @@ def calcular_precificacao(revisao):
     return {"custo_total": custo, "preco_final": preco, "tributos": tributos, "resultado": resultado, "margem": margem, "markup": markup}
 
 
+TIPOS_SERVICO_PLANILHA = {
+    PropostaItem.Tipo.MAO_OBRA,
+    PropostaItem.Tipo.SERVICO_TERCEIRO,
+    PropostaItem.Tipo.JUROS_ANTECIPACAO,
+}
+
+
+def _linhas_publicas_visiveis(revisao):
+    return revisao.linhas_publicas.filter(oculta_manual=False).filter(
+        Q(origem_automatica=False) | Q(valor_total__gt=0)
+    )
+
+
+def sincronizar_linhas_publicas_automaticas(revisao):
+    """Mantém o resumo MATERIAL/SERVIÇOS alinhado à composição, como na planilha.
+
+    Linhas automáticas usam quantidade 1 e recebem a soma dos valores finais dos itens.
+    Se o usuário alterar manualmente o valor de uma linha automática, esse valor deixa de
+    ser sobrescrito nos próximos recálculos. A descrição pode ser personalizada sem
+    desligar a atualização automática do valor.
+    """
+    itens = list(revisao.itens.select_related("revisao"))
+    total_material = _dinheiro(sum(
+        (item.valor_total_venda for item in itens if item.tipo not in TIPOS_SERVICO_PLANILHA),
+        ZERO,
+    ))
+    total_servico = _dinheiro(sum(
+        (item.valor_total_venda for item in itens if item.tipo in TIPOS_SERVICO_PLANILHA),
+        ZERO,
+    ))
+
+    configuracoes = (
+        (PropostaLinhaPublica.Grupo.MATERIAL, "MATERIAL", total_material, 9000),
+        (PropostaLinhaPublica.Grupo.SERVICO, "SERVIÇOS", total_servico, 9001),
+    )
+    for grupo, descricao, total, ordem in configuracoes:
+        linha = revisao.linhas_publicas.filter(origem_automatica=True, grupo=grupo).first()
+        if linha is None:
+            # Preserva propostas antigas que já possuem apresentação pública manual.
+            if revisao.linhas_publicas.filter(grupo=grupo, origem_automatica=False).exists():
+                continue
+            if total <= 0:
+                continue
+            PropostaLinhaPublica.objects.create(
+                revisao=revisao,
+                ordem=ordem,
+                grupo=grupo,
+                descricao=descricao,
+                quantidade=Decimal("1"),
+                unidade="",
+                valor_unitario=total,
+                valor_total=total,
+                origem_automatica=True,
+                valor_automatico=True,
+            )
+            continue
+
+        campos = []
+        if linha.quantidade != Decimal("1"):
+            linha.quantidade = Decimal("1")
+            campos.append("quantidade")
+        if linha.unidade:
+            linha.unidade = ""
+            campos.append("unidade")
+        if linha.valor_automatico:
+            if linha.valor_unitario != total:
+                linha.valor_unitario = total
+                campos.append("valor_unitario")
+            if linha.valor_total != total:
+                linha.valor_total = total
+                campos.append("valor_total")
+        if campos:
+            linha.save(update_fields=campos)
+
+    if revisao.formacao_preco == PropostaRevisao.FormacaoPreco.MARKUP:
+        calculo = calcular_precificacao(revisao)
+        if revisao.preco_venda_final != calculo["preco_final"]:
+            PropostaRevisao.objects.filter(pk=revisao.pk).update(preco_venda_final=calculo["preco_final"])
+            revisao.preco_venda_final = calculo["preco_final"]
+
+
 def validar_fechamento_publico(revisao):
-    total = _dinheiro(revisao.linhas_publicas.aggregate(total=Sum("valor_total"))["total"])
+    total = _dinheiro(_linhas_publicas_visiveis(revisao).aggregate(total=Sum("valor_total"))["total"])
     preco = _dinheiro(revisao.preco_venda_final)
     if total != preco:
         raise ValidationError(f"As linhas públicas totalizam R$ {total} e devem fechar em R$ {preco}.")
@@ -305,7 +390,7 @@ def calcular_previsto_realizado(proposta):
 def montar_contexto_publico_proposta(revisao):
     """Allowlist pública: nunca retorna models nem campos internos."""
     materiais, servicos = [], []
-    for linha in revisao.linhas_publicas.all():
+    for linha in _linhas_publicas_visiveis(revisao):
         dado = {"descricao": linha.descricao, "quantidade": linha.quantidade, "unidade": linha.unidade, "valor_unitario": linha.valor_unitario, "valor_total": linha.valor_total, "observacao": linha.observacao}
         (materiais if linha.grupo == PropostaLinhaPublica.Grupo.MATERIAL else servicos).append(dado)
     subtotal_materiais = _dinheiro(sum((x["valor_total"] for x in materiais), Decimal("0")))

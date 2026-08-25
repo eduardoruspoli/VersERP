@@ -2,14 +2,16 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
+from django.db.models.deletion import ProtectedError
 import csv
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import AcompanhamentoPropostaForm, MotivoStatusForm, PropostaCriacaoForm, PropostaItemForm, PropostaLinhaPublicaForm, PropostaRevisaoForm, PropostaTributoForm, RelatorioPropostasFiltroForm
-from .models import Proposta, PropostaItem, PropostaRevisao
-from .services import aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta
+from .models import Proposta, PropostaItem, PropostaLinhaPublica, PropostaRevisao
+from .services import TIPOS_SERVICO_PLANILHA, aprovar_proposta, calcular_precificacao, calcular_previsto_realizado, cancelar_proposta, colocar_em_negociacao, criar_nova_revisao, criar_proposta, enviar_proposta, montar_contexto_publico_proposta, rejeitar_proposta, sincronizar_linhas_publicas_automaticas
 from core.access import filtrar_empresas, objeto_empresa_ou_404
 from core.csv import linha_csv_segura
 
@@ -47,7 +49,17 @@ def _revisoes(request):
 @login_required
 @permission_required("comercial.view_proposta", raise_exception=True)
 def proposta_lista(request):
-    propostas = filtrar_empresas(Proposta.objects.select_related("empresa", "cliente"), request.user)
+    revisao_editavel = PropostaRevisao.objects.filter(
+        proposta=OuterRef("pk"),
+        numero=OuterRef("revisao_atual"),
+        congelada=False,
+    )
+    propostas = filtrar_empresas(
+        Proposta.objects.select_related("empresa", "cliente").annotate(
+            revisao_editavel=Exists(revisao_editavel),
+        ),
+        request.user,
+    )
     busca = request.GET.get("q", "").strip()
     if busca:
         propostas = propostas.filter(Q(codigo__icontains=busca) | Q(cliente__razao_social__icontains=busca))
@@ -70,15 +82,85 @@ def _revisao_atual(proposta):
 
 
 @login_required
+@permission_required(("comercial.change_proposta", "comercial.change_propostarevisao"), raise_exception=True)
+def proposta_editar(request, pk):
+    proposta = objeto_empresa_ou_404(Proposta.objects.all(), request.user, pk=pk)
+    revisao = objeto_empresa_ou_404(
+        PropostaRevisao.objects.all(),
+        request.user,
+        lookup="proposta__empresa",
+        proposta=proposta,
+        numero=proposta.revisao_atual,
+        congelada=False,
+    )
+    form = PropostaRevisaoForm(request.POST or None, instance=revisao)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Proposta atualizada sem criar nova revisão.")
+        return redirect("comercial:proposta_detalhe", pk=proposta.pk)
+    return render(
+        request,
+        "comercial/formulario.html",
+        {"form": form, "titulo": f"Editar proposta {proposta.codigo}", "voltar_proposta_id": proposta.pk},
+    )
+
+
+@login_required
 @permission_required("comercial.view_proposta", raise_exception=True)
 def proposta_detalhe(request, pk):
     proposta = objeto_empresa_ou_404(Proposta.objects.select_related("empresa", "cliente", "centro_custo", "revisao_aprovada"), request.user, pk=pk)
     revisao = _revisao_atual(proposta)
+    if not revisao.congelada and proposta.origem == Proposta.Origem.SISTEMA:
+        sincronizar_linhas_publicas_automaticas(revisao)
     try:
         calculo = calcular_precificacao(revisao)
     except ValidationError as erro:
         calculo = {"erro": erro.messages[0]}
-    return render(request, "comercial/proposta_detalhe.html", {"proposta": proposta, "revisao": revisao, "calculo": calculo, "historico": proposta.historico_status.select_related("usuario"), "contatos": proposta.historico_contatos.select_related("usuario"), "historico_importacao": _informacoes_historicas(proposta, revisao)})
+    itens = list(revisao.itens.select_related("fornecedor", "revisao"))
+    itens_servicos = [item for item in itens if item.tipo in TIPOS_SERVICO_PLANILHA]
+    itens_materiais = [item for item in itens if item.tipo not in TIPOS_SERVICO_PLANILHA]
+    linhas_publicas = revisao.linhas_publicas.filter(oculta_manual=False).filter(
+        Q(origem_automatica=False) | Q(valor_total__gt=0)
+    )
+    return render(request, "comercial/proposta_detalhe.html", {
+        "proposta": proposta, "revisao": revisao, "calculo": calculo,
+        "itens_materiais": itens_materiais, "itens_servicos": itens_servicos,
+        "linhas_publicas": linhas_publicas,
+        "historico": proposta.historico_status.select_related("usuario"),
+        "contatos": proposta.historico_contatos.select_related("usuario"),
+        "historico_importacao": _informacoes_historicas(proposta, revisao),
+    })
+
+
+@login_required
+def proposta_excluir(request, pk):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    proposta = objeto_empresa_ou_404(
+        Proposta.objects.select_related("centro_custo", "revisao_aprovada"),
+        request.user,
+        pk=pk,
+    )
+    if request.method != "POST":
+        return HttpResponseBadRequest("A exclusão deve ser confirmada por POST.")
+    if proposta.centro_custo_id or proposta.revisao_aprovada_id:
+        messages.error(
+            request,
+            "A proposta não pode ser excluída porque já possui vínculo operacional ou revisão aprovada.",
+        )
+        return redirect("comercial:proposta_detalhe", pk=proposta.pk)
+    codigo = proposta.codigo
+    try:
+        with transaction.atomic():
+            proposta.delete()
+    except ProtectedError:
+        messages.error(
+            request,
+            "A proposta não pode ser excluída porque existem registros operacionais vinculados a ela.",
+        )
+        return redirect("comercial:proposta_detalhe", pk=proposta.pk)
+    messages.success(request, f"Proposta {codigo} excluída.")
+    return redirect("comercial:proposta_lista")
 
 
 @login_required
@@ -98,9 +180,9 @@ def proposta_acompanhamento(request, pk):
 
 
 @login_required
-@permission_required("comercial.change_propostarevisao", raise_exception=True)
+@permission_required(("comercial.change_proposta", "comercial.change_propostarevisao"), raise_exception=True)
 def revisao_editar(request, pk):
-    revisao = objeto_empresa_ou_404(PropostaRevisao, request.user, lookup="proposta__empresa", pk=pk, congelada=False)
+    revisao = objeto_empresa_ou_404(PropostaRevisao.objects.all(), request.user, lookup="proposta__empresa", pk=pk, congelada=False)
     form = PropostaRevisaoForm(request.POST or None, instance=revisao)
     if request.method == "POST" and form.is_valid():
         form.save()
@@ -110,7 +192,7 @@ def revisao_editar(request, pk):
 
 
 def _adicionar(request, pk, form_class, titulo):
-    revisao = objeto_empresa_ou_404(PropostaRevisao, request.user, lookup="proposta__empresa", pk=pk, congelada=False)
+    revisao = objeto_empresa_ou_404(PropostaRevisao.objects.all(), request.user, lookup="proposta__empresa", pk=pk, congelada=False)
     form = form_class(request.POST or None)
     if request.method == "POST" and form.is_valid():
         objeto = form.save(commit=False)
@@ -123,7 +205,28 @@ def _adicionar(request, pk, form_class, titulo):
 
 @login_required
 @permission_required("comercial.add_propostaitem", raise_exception=True)
-def item_adicionar(request, pk): return _adicionar(request, pk, PropostaItemForm, "Adicionar item interno")
+def item_adicionar(request, pk):
+    revisao = objeto_empresa_ou_404(
+        PropostaRevisao.objects.select_related("proposta"),
+        request.user, lookup="proposta__empresa", pk=pk, congelada=False,
+    )
+    grupo = request.GET.get("grupo") or request.POST.get("grupo_contexto") or "material"
+    if grupo not in {"material", "servico"}:
+        grupo = "material"
+    form = PropostaItemForm(request.POST or None, grupo=grupo, revisao=revisao)
+    if request.method == "POST" and form.is_valid():
+        item = form.save(commit=False)
+        item.revisao = revisao
+        item.save()
+        sincronizar_linhas_publicas_automaticas(revisao)
+        messages.success(request, "Item adicionado.")
+        return redirect("comercial:proposta_detalhe", pk=revisao.proposta_id)
+    return render(request, "comercial/formulario.html", {
+        "form": form,
+        "titulo": "Adicionar serviço" if grupo == "servico" else "Adicionar item/material",
+        "voltar_proposta_id": revisao.proposta_id,
+        "grupo_contexto": grupo,
+    })
 
 
 @login_required
@@ -133,14 +236,17 @@ def item_editar(request, pk):
         PropostaItem.objects.select_related("revisao__proposta"),
         request.user, lookup="revisao__proposta__empresa", pk=pk, revisao__congelada=False,
     )
-    form = PropostaItemForm(request.POST or None, instance=item)
+    grupo = "servico" if item.tipo in TIPOS_SERVICO_PLANILHA else "material"
+    form = PropostaItemForm(request.POST or None, instance=item, grupo=grupo, revisao=item.revisao)
     if request.method == "POST" and form.is_valid():
         form.save()
+        sincronizar_linhas_publicas_automaticas(item.revisao)
         messages.success(request, "Item atualizado.")
         return redirect("comercial:proposta_detalhe", pk=item.revisao.proposta_id)
     return render(request, "comercial/formulario.html", {
-        "form": form, "titulo": "Editar item interno",
+        "form": form, "titulo": "Editar serviço" if grupo == "servico" else "Editar item/material",
         "voltar_proposta_id": item.revisao.proposta_id,
+        "grupo_contexto": grupo,
     })
 
 
@@ -154,7 +260,9 @@ def item_excluir(request, pk):
         request.user, lookup="revisao__proposta__empresa", pk=pk, revisao__congelada=False,
     )
     proposta_id = item.revisao.proposta_id
+    revisao = item.revisao
     item.delete()
+    sincronizar_linhas_publicas_automaticas(revisao)
     messages.success(request, "Item excluído.")
     return redirect("comercial:proposta_detalhe", pk=proposta_id)
 
@@ -162,6 +270,48 @@ def item_excluir(request, pk):
 @login_required
 @permission_required("comercial.add_propostalinhapublica", raise_exception=True)
 def linha_adicionar(request, pk): return _adicionar(request, pk, PropostaLinhaPublicaForm, "Adicionar linha pública")
+
+
+@login_required
+@permission_required("comercial.change_propostalinhapublica", raise_exception=True)
+def linha_editar(request, pk):
+    linha = objeto_empresa_ou_404(
+        PropostaLinhaPublica.objects.select_related("revisao__proposta"),
+        request.user, lookup="revisao__proposta__empresa", pk=pk, revisao__congelada=False,
+    )
+    form = PropostaLinhaPublicaForm(request.POST or None, instance=linha)
+    if request.method == "POST" and form.is_valid():
+        linha_editada = form.save(commit=False)
+        if linha.origem_automatica:
+            if "valor_total" in form.changed_data or "valor_unitario" in form.changed_data:
+                linha_editada.valor_automatico = False
+            linha_editada.oculta_manual = False
+        linha_editada.save()
+        messages.success(request, "Linha da proposta atualizada.")
+        return redirect("comercial:proposta_detalhe", pk=linha.revisao.proposta_id)
+    return render(request, "comercial/formulario.html", {
+        "form": form, "titulo": "Editar item da proposta para o cliente",
+        "voltar_proposta_id": linha.revisao.proposta_id,
+    })
+
+
+@login_required
+@permission_required("comercial.delete_propostalinhapublica", raise_exception=True)
+def linha_excluir(request, pk):
+    if request.method != "POST":
+        return HttpResponseBadRequest()
+    linha = objeto_empresa_ou_404(
+        PropostaLinhaPublica.objects.select_related("revisao__proposta"),
+        request.user, lookup="revisao__proposta__empresa", pk=pk, revisao__congelada=False,
+    )
+    proposta_id = linha.revisao.proposta_id
+    if linha.origem_automatica:
+        linha.oculta_manual = True
+        linha.save(update_fields=["oculta_manual"])
+    else:
+        linha.delete()
+    messages.success(request, "Linha da proposta excluída.")
+    return redirect("comercial:proposta_detalhe", pk=proposta_id)
 
 
 @login_required
