@@ -1,181 +1,46 @@
 # Roadmap
 
-O desenvolvimento do VersERP é realizado de forma incremental.
+Este documento separa o que já está entregue das decisões ainda abertas. Não constitui promessa de prazo.
 
-As etapas abaixo representam a evolução funcional do sistema e podem ser reorganizadas conforme novas dependências forem identificadas.
+## Implementado
 
----
+- fundação Django, interface responsiva e design system;
+- autenticação, perfis, permissões e matriz usuário × empresa;
+- cadastro de clientes e fornecedores;
+- Comercial com propostas, revisões, formação de preço, workflow, PDF, acompanhamento e previsto × realizado;
+- Obras/Centros de Custo vinculados a propostas aprovadas;
+- Compras com solicitações, cotações, pedidos, recebimentos, documentos, divergências, previsto × comprado e integração financeira;
+- Financeiro com pagar/receber, bancos, transferências, OFX, Plano de Contas, rateios, classificações múltiplas, dashboard, DRE e relatórios;
+- RH com cadastro funcional, contratos, jornadas, ponto, banco de horas, eventos e conferência;
+- Central de Configurações, Central de Relatórios, exportações e dashboard;
+- importação histórica de propostas;
+- configurações seguras e separadas para desenvolvimento/produção.
 
-## Sprint 1 — Fundação
+## Estabilização concluída
 
-- [x] Criar projeto Django
-- [x] Configurar ambiente virtual
-- [x] Configurar SQLite
-- [x] Criar app Core
-- [x] Configurar Templates
-- [x] Configurar Static
-- [x] Configurar Git
-- [x] Criar documentação inicial
+- suíte completa com 397 testes;
+- checks do Django e migrations sem pendências;
+- atualização para Django 6.0.8;
+- correções de isolamento multiempresa em Compras e OFX;
+- remoção de `.pyc`/`__pycache__` do versionamento;
+- proteção de `.env`, SQLite e dados reais pelo `.gitignore`;
+- configuração segura e separada para desenvolvimento e produção;
+- documentação técnica revisada para refletir o estado atual.
 
-**Status:** Concluído
+## Pendências reais
 
----
+- homologação operacional com usuários e dados representativos;
+- revisão periódica de permissões e cenários multiempresa;
+- definição de estratégia operacional para arquivos persistentes, logs e monitoramento;
+- validação final dos procedimentos de backup e restauração na infraestrutura escolhida.
 
-## Sprint 2 — Interface Base
+## Decisões de infraestrutura abertas
 
-- [x] Design System inicial
-- [x] Layout principal
-- [x] Sidebar
-- [x] Header
-- [x] Footer
-- [x] Área de conteúdo
-- [x] Dashboard inicial
-- [x] Organização do CSS por responsabilidade
-- [x] Bootstrap Icons
-- [x] Interface responsiva inicial
+- provedor e topologia de hospedagem;
+- domínio e certificados;
+- servidor WSGI/ASGI e proxy reverso;
+- banco definitivo de produção;
+- armazenamento de uploads;
+- política de backup, retenção, RPO/RTO e observabilidade.
 
-**Status:** Concluído
-
----
-
-## Sprint 3 — Estrutura de Cadastros
-
-- [x] Definir estrutura modular de cadastros
-- [x] Criar app Pessoas
-- [x] Configurar URLs do app
-- [x] Configurar templates do app
-- [x] Registrar Pessoa no Django Admin
-- [x] Criar migrations
-
-**Status:** Concluído
-
----
-
-## Sprint 4 — Módulo Pessoas
-
-### Cadastro
-
-- [x] Model Pessoa
-- [x] Pessoa Física
-- [x] Pessoa Jurídica
-- [x] Cliente
-- [x] Fornecedor
-- [x] Cliente e Fornecedor
-- [x] Dados principais
-- [x] Contato
-- [x] Endereço
-- [x] Observações
-- [x] Status do cadastro
-
-### Documentos
-
-- [x] CPF
-- [x] CNPJ
-- [x] Máscara de CPF
-- [x] Máscara de CNPJ
-- [x] Validação de CPF
-- [x] Validação de CNPJ
-- [x] Formatação na apresentação
-
-### Consulta empresarial
-
-- [x] Integração com CNPJ.ws
-- [x] Consulta de CNPJ
-- [x] Preenchimento automático do formulário
-
-### Gerenciamento
-
-- [x] Listagem
-- [x] Pesquisa
-- [x] Filtro por classificação
-- [x] Filtro por status
-- [x] Paginação
-- [x] Edição
-- [x] Ativação
-- [x] Inativação
-- [x] Tela de detalhes
-
-**Status:** Concluído 
-
-### Autenticação e Controle de Acesso
-
-- [x] Login próprio do VersERP
-- [x] Logout
-- [x] Proteção de páginas para usuários autenticados
-- [x] Redirecionamento para página originalmente solicitada
-- [x] Usuário técnico Admin
-- [x] Grupos de usuários
-- [x] Permissões por grupo
-- [x] Proteção de views no backend
-- [x] Controle de ações na interface
-- [x] Controle de módulos na sidebar
-- [x] Usuários de teste por perfil
-- [x] Validação de acesso negado (403)
-
-#### Grupos atuais
-
-- Gerência Administrativa
-- Financeiro e Compras
-- RH
-
-**Status:** Concluído
-
-### Comercial
-
-- [ ] Estrutura do módulo Comercial
-- [ ] Propostas
-- [ ] Itens de proposta
-- [ ] Status de proposta
-- [ ] Conversão futura em venda/pedido
-
-### Financeiro
-
-- [ ] Contas a receber
-- [ ] Contas a pagar
-- [ ] Categorias financeiras
-- [ ] Formas de pagamento
-- [ ] Fluxo de caixa
-
-### Compras
-
-- [ ] Solicitações
-- [ ] Pedidos de compra
-- [ ] Fornecedores
-- [ ] Integração com Pessoas
-
-### Relatórios
-
-- [ ] Relatórios gerenciais
-- [ ] Filtros
-- [ ] Indicadores
-- [ ] Exportações
-
-### Configurações
-
-- [ ] Dados da empresa
-- [ ] Parâmetros do sistema
-- [ ] Preferências
-- [ ] Numerações e sequências
-
----
-
-## Futuro
-
-Funcionalidades que deverão ser avaliadas conforme o ERP evoluir:
-
-- produtos e serviços;
-- estoque;
-- vendas/pedidos;
-- faturamento;
-- emissão fiscal;
-- centros de custo;
-- contas bancárias;
-- conciliação;
-- anexos;
-- histórico de alterações;
-- notificações;
-- dashboard configurável;
-- importação/exportação;
-- API interna;
-- integrações externas;
-- multiempresa.
+Funcionalidades futuras somente devem entrar no roadmap após definição de escopo; este documento não presume estoque, emissão fiscal, assinatura digital ou outras integrações como já aprovadas.

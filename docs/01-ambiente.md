@@ -1,212 +1,51 @@
-# Ambiente de Desenvolvimento
+# Ambiente de desenvolvimento
 
-## Sistema Operacional
+O ambiente validado utiliza Windows, Python 3.14.6, Django 6.0.8 e SQLite. A venv local fica em `.venv/` e não é versionada.
 
-- Windows 11
+## Preparação
 
-## IDE
-
-- Visual Studio Code
-
-## Linguagens
-
-- Python 3.14
-- HTML5
-- CSS3
-- JavaScript
-
-## Framework
-
-- Django 6
-
-Versão utilizada atualmente durante o desenvolvimento:
-
-```text
-Django 6.0.7
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-## Banco de Dados
-
-Atualmente o projeto utiliza:
-
-- SQLite
-
-O SQLite é utilizado durante a fase inicial de desenvolvimento.
-
-A arquitetura deverá permitir futura migração para um banco de dados mais adequado ao ambiente de produção.
-
----
-
-## Ambiente Virtual
-
-O projeto utiliza ambiente virtual Python localizado em:
-
-```text
-.venv/
-```
-
-### Criar o ambiente
-
-No Windows:
+Se o Python 3.14 não instalar o pip durante a criação:
 
 ```powershell
 python -m venv .venv --without-pip
+.\.venv\Scripts\python.exe -m ensurepip
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-### Ativar
+Não instale Django isoladamente: `requirements.txt` é a referência das dependências do projeto. Importações XLSX exigem também `requirements-importacao.txt`.
 
-```powershell
-.venv\Scripts\activate
-```
+## Banco e inicialização
 
-### Instalar o pip
-
-```powershell
-python -m ensurepip
-```
-
-### Instalar dependências
-
-```powershell
-pip install -r requirements.txt
-```
-
-Caso o arquivo de dependências ainda não esteja atualizado:
-
-```powershell
-pip install django
-```
-
----
-
-## Executar o projeto
-
-Com o ambiente virtual ativado:
-
-```powershell
-python manage.py runserver
-```
-
-O servidor de desenvolvimento ficará disponível normalmente em:
-
-```text
-http://127.0.0.1:8000/
-```
-
----
-
-## Comandos Django utilizados
-
-Verificar o projeto:
-
-```powershell
-python manage.py check
-```
-
-Criar migrations:
-
-```powershell
-python manage.py makemigrations
-```
-
-Aplicar migrations:
+SQLite é o banco configurado para desenvolvimento. `db.sqlite3` é local e ignorado pelo Git.
 
 ```powershell
 python manage.py migrate
-```
-
-Criar usuário administrativo:
-
-```powershell
 python manage.py createsuperuser
-```
-
-Executar servidor:
-
-```powershell
+python manage.py sincronizar_perfis
 python manage.py runserver
 ```
 
----
+O acesso local padrão é `http://127.0.0.1:8000/`; o Admin fica em `/admin/`. O `runserver` não é servidor de produção.
 
-## Estrutura Atual do Projeto
+## Ambiente local
 
-```text
-VersERP/
-│
-├── .venv/
-├── config/
-├── core/
-├── pessoas/
-├── docs/
-├── static/
-│   ├── css/
-│   ├── icons/
-│   ├── images/
-│   └── js/
-├── templates/
-│   ├── includes/
-│   └── base.html
-├── db.sqlite3
-├── manage.py
-├── README.md
-└── requirements.txt
-```
+Sem variáveis, o projeto assume `VERSERP_ENV=development`, `DEBUG=True` e hosts locais. `.env.example` lista as opções, mas o Django não lê arquivos `.env` sozinho: exporte as variáveis no processo quando necessário.
 
----
-
-## Django Admin
-
-O Django Admin está habilitado no projeto.
-
-Endereço durante o desenvolvimento:
-
-```text
-http://127.0.0.1:8000/admin/
-```
-
-O módulo Pessoas está registrado no Admin.
-
----
-
-## Observação sobre Python 3.14
-
-Durante a criação inicial do ambiente virtual foi necessário utilizar:
+## Comandos úteis
 
 ```powershell
-python -m venv .venv --without-pip
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py test --verbosity 1
+python -m pip check
+git diff --check
 ```
 
-e posteriormente:
-
-```powershell
-python -m ensurepip
-```
-
-Essa abordagem resolveu o problema encontrado na criação automática do ambiente virtual utilizando Python 3.14.
-
----
-
-## Ambiente de Produção
-
-O servidor executado através de:
-
-```powershell
-python manage.py runserver
-```
-
-é exclusivamente para desenvolvimento.
-
-Antes da publicação do VersERP deverão ser definidos:
-
-- banco de dados de produção;
-- servidor WSGI ou ASGI;
-- configuração de variáveis de ambiente;
-- tratamento da `SECRET_KEY`;
-- configuração de `DEBUG`;
-- configuração de `ALLOWED_HOSTS`;
-- estratégia de arquivos estáticos;
-- HTTPS;
-- backups;
-- logs;
-- estratégia de deploy.
+Novas alterações de model devem gerar migration versionada. Não edite migrations já aplicadas nem o banco SQLite manualmente.

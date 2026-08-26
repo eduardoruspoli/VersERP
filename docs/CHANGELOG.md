@@ -4,6 +4,19 @@ Todas as alterações relevantes do VersERP serão registradas neste arquivo.
 
 O projeto utiliza versionamento incremental durante a fase de desenvolvimento.
 
+## Não lançado
+
+### Evoluções recentes
+
+- refinamento do fluxo de propostas, criação da Rev. 00 e aplicação automática do modelo padrão da empresa;
+- composição interna, formação de preço por item, linhas públicas automáticas e juros de antecipação;
+- documento comercial/PDF e preservação da separação entre dados internos e públicos;
+- isolamento multiempresa reforçado nos relatórios de Compras e na importação OFX;
+- configuração segura de produção com ambiente fail-closed, HTTPS, cookies seguros e HSTS;
+- atualização de segurança para Django 6.0.8;
+- remoção de arquivos Python gerados (`.pyc` e `__pycache__`) do versionamento;
+- atualização da documentação técnica para refletir o estado atual.
+
 ## [0.5.0] - 2026-08-12
 
 ### Adicionado
