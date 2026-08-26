@@ -31,7 +31,7 @@ Este documento separa o que já está entregue das decisões ainda abertas. Não
 
 ## Próxima etapa
 
-- preparação do runbook e implantação no ambiente Windows da infraestrutura da empresa.
+- runbook técnico de produção criado e em validação para posterior implantação no Windows Server 2019 Standard.
 
 ## Pendências reais
 
@@ -42,11 +42,10 @@ Este documento separa o que já está entregue das decisões ainda abertas. Não
 
 ## Pendências de infraestrutura
 
-- confirmação da versão/edição exata do Windows com o TI;
-- versão e instalação definitiva do PostgreSQL;
+- homologação, versão e instalação definitiva do PostgreSQL no mesmo Windows Server 2019;
 - criação do banco, usuário e credenciais;
 - DNS/nome interno e certificados;
-- servidor WSGI/ASGI e proxy reverso;
+- Waitress/WSGI como serviço Windows e proxy reverso no IIS;
 - caminho e permissões do armazenamento corporativo;
 - regras necessárias de firewall e VPN;
 - política de backup, retenção, RPO/RTO e observabilidade.

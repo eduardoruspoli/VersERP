@@ -35,7 +35,7 @@ Se a criação da venv não instalar o pip, consulte [Ambiente](docs/01-ambiente
 
 ## Configuração
 
-O desenvolvimento funciona com SQLite e os padrões locais. As variáveis disponíveis estão em `.env.example`; o projeto não carrega `.env` automaticamente, portanto elas devem ser definidas no processo ou pela infraestrutura. Em produção, PostgreSQL e os settings seguros são configurados por variáveis de ambiente. Consulte [Deploy](docs/deploy.md) para os detalhes de implantação.
+O desenvolvimento funciona com SQLite e os padrões locais. As variáveis disponíveis estão em `.env.example`; o projeto não carrega `.env` automaticamente, portanto elas devem ser definidas no processo ou pela infraestrutura. Em produção, a arquitetura definida usa IIS, Waitress/WSGI como serviço Windows e PostgreSQL no mesmo Windows Server 2019; logs também são configurados por variável. Consulte [Deploy](docs/deploy.md) para os detalhes de implantação.
 
 ## Qualidade
 
@@ -52,6 +52,6 @@ git diff --check
 - [Ambiente](docs/01-ambiente.md) e [desenvolvimento](docs/desenvolvimento.md)
 - [Arquitetura detalhada](docs/02-arquitetura.md)
 - [Permissões](docs/permissoes.md) e [segurança](docs/seguranca.md)
-- [Deploy](docs/deploy.md), [backup e restauração](docs/backup_restore.md)
+- [Deploy](docs/deploy.md), [runbook de produção no Windows Server 2019](docs/runbook_producao_windows.md), [backup e restauração](docs/backup_restore.md)
 - [Comercial](docs/comercial.md), [Compras](docs/compras.md), [Financeiro](docs/financeiro.md) e [RH](docs/rh.md)
 - [Importação histórica](docs/importacao.md), [roadmap](docs/03-roadmap.md) e [troubleshooting](docs/troubleshooting.md)

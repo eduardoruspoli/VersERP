@@ -209,6 +209,62 @@ STATICFILES_DIRS = [
 STATIC_ROOT = BASE_DIR / 'staticfiles'  
 
 
+# In production Django writes application warnings/errors to a rotating file.
+# Waitress stdout/stderr remains the responsibility of the Windows service.
+if IS_PRODUCTION:
+    log_dir_value = os.environ.get("VERSERP_LOG_DIR", "").strip()
+    if not log_dir_value:
+        raise ImproperlyConfigured("VERSERP_LOG_DIR é obrigatória em produção.")
+    VERSERP_LOG_DIR = Path(log_dir_value).expanduser()
+    if not VERSERP_LOG_DIR.is_absolute():
+        raise ImproperlyConfigured(
+            "VERSERP_LOG_DIR deve ser um caminho absoluto em produção."
+        )
+    if not VERSERP_LOG_DIR.is_dir() or not os.access(VERSERP_LOG_DIR, os.W_OK):
+        raise ImproperlyConfigured(
+            "VERSERP_LOG_DIR deve existir e permitir gravação em produção."
+        )
+
+    LOGGING = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "production": {
+                "format": "{asctime} {levelname} {name} {message}",
+                "style": "{",
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "WARNING",
+                "formatter": "production",
+            },
+            "application_file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "WARNING",
+                "formatter": "production",
+                "filename": str(VERSERP_LOG_DIR / "verserp.log"),
+                "maxBytes": 10 * 1024 * 1024,
+                "backupCount": 10,
+                "encoding": "utf-8",
+                "delay": True,
+            },
+        },
+        "root": {
+            "handlers": ["console", "application_file"],
+            "level": "WARNING",
+        },
+        "loggers": {
+            "django": {
+                "handlers": ["console", "application_file"],
+                "level": "WARNING",
+                "propagate": False,
+            },
+        },
+    }
+
+
 # Login settings
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"

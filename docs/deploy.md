@@ -5,14 +5,16 @@ Este documento registra a arquitetura alvo definida para produção. O deploy ai
 ## Arquitetura alvo
 
 ```text
-Ambiente Windows da infraestrutura da empresa
+Windows Server 2019 Standard
+    → IIS/HTTPS
+    → Waitress/WSGI
     → VersERP/Django
-    → PostgreSQL
+    → PostgreSQL no mesmo servidor
     → armazenamento corporativo para PDFs e arquivos
     → acesso dos usuários pela rede corporativa ou VPN
 ```
 
-A estimativa inicial é de até quatro usuários simultâneos. Não há necessidade prevista de cluster, balanceamento de carga ou arquitetura distribuída neste estágio. Usuários acessarão o ERP pelo navegador; RDP não faz parte do fluxo normal e poderá ser usado pelo TI somente para administração do servidor. A implantação será executada e alinhada com o responsável de TI.
+A estimativa inicial é de até quatro usuários simultâneos. Não há necessidade prevista de cluster, balanceamento de carga ou arquitetura distribuída neste estágio. O IIS será o frontend interno e encaminhará requisições dinâmicas a um servidor WSGI; usuários acessarão pelo navegador e RDP será apenas administrativo. O PostgreSQL ficará no mesmo servidor. A implantação será executada e alinhada com o responsável de TI.
 
 ## Ambientes
 
@@ -36,15 +38,16 @@ DB_USER=<usuário do banco>
 DB_PASSWORD=<senha fornecida com segurança>
 DB_HOST=<host do PostgreSQL>
 DB_PORT=5432
+VERSERP_LOG_DIR=<diretório absoluto, existente e gravável>
 ```
 
-Nunca versione valores reais. O projeto não carrega `.env` automaticamente; o processo de hospedagem deve fornecer as variáveis.
+Nunca versione valores reais. O projeto não carrega `.env` automaticamente; o processo de hospedagem deve fornecer as variáveis. Em produção, o diretório de logs deve ser explícito, absoluto, existente e gravável.
 
 ## Banco de produção
 
 O desenvolvimento continua usando SQLite. Em produção, PostgreSQL é obrigatório e não existe fallback para SQLite: a inicialização falha se `DB_NAME`, `DB_USER`, `DB_PASSWORD` ou `DB_HOST` estiverem ausentes. `DB_PORT` usa 5432 quando não informado.
 
-O banco e o usuário deverão ser criados no ambiente Windows da infraestrutura da empresa durante a implantação, com credenciais fornecidas por meio seguro e privilégios adequados. Não registre senha no Git. Depois de configurar a conexão, execute as migrations no banco de produção durante o deploy.
+O banco e o usuário deverão ser criados durante a implantação, com credenciais fornecidas por meio seguro e privilégios adequados. A compatibilidade oficial da distribuição PostgreSQL com o Windows Server 2019 deve ser resolvida antes da instalação. Não registre senha no Git. Depois de configurar a conexão, execute as migrations no banco de produção durante o deploy.
 
 ## HTTPS e proxy
 
@@ -63,16 +66,17 @@ python manage.py migrate
 python manage.py collectstatic --noinput
 ```
 
-Use servidor WSGI/ASGI adequado; nunca `runserver`. Defina persistência de arquivos no servidor da empresa, logs, monitoramento e backup. A configuração de SSL da conexão PostgreSQL permanece dependente da topologia definida pelo TI.
+Use o Waitress 3.0.2 fixado no projeto atrás do IIS; nunca `runserver`. O IIS deverá servir `STATIC_ROOT` e encaminhar somente requisições dinâmicas ao Waitress em loopback. O log rotativo do Django já é configurável. PDFs e exportações continuam sendo gerados para visualização/download; o usuário arquiva manualmente o arquivo na pasta corporativa apropriada. Monitoramento e backup ainda precisam ser definidos.
+
+O procedimento operacional, as verificações de compatibilidade e os bloqueadores estão no [Runbook de Produção do VersERP — Windows Server 2019](runbook_producao_windows.md).
 
 ## Pendente de implantação com o TI
 
-- versão/edição exata do Windows do servidor;
 - versão definitiva do PostgreSQL no servidor;
 - criação do banco, usuário e entrega segura das credenciais;
 - DNS ou nome interno e HTTPS/certificado;
 - servidor WSGI/ASGI e execução como serviço;
-- necessidade e configuração de proxy reverso;
+- instalação/configuração de URL Rewrite e ARR para o proxy reverso IIS;
 - caminho definitivo de PDFs/documentos e permissões de filesystem;
 - procedimentos de backup e restauração;
 - logs e monitoramento;

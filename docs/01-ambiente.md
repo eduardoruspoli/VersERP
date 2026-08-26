@@ -52,6 +52,6 @@ Novas alterações de model devem gerar migration versionada. Não edite migrati
 
 ## Ambiente alvo de produção
 
-O alvo definido é o ambiente Windows da infraestrutura da empresa, com `VERSERP_ENV=production`, PostgreSQL e Psycopg 3. A versão/edição exata do Windows será confirmada com o TI. A aplicação ainda não foi implantada nesse ambiente.
+O servidor alvo confirmado é o Microsoft Windows Server 2019 Standard, versão 1809, build 17763.9020, com IIS como frontend, servidor WSGI executado como serviço Windows e PostgreSQL no mesmo servidor. A aplicação ainda não foi implantada nesse ambiente.
 
-PostgreSQL será configurado por `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` e, opcionalmente, `DB_PORT` (padrão 5432). Banco e usuário serão criados no servidor durante a implantação; credenciais reais não devem entrar no Git. As migrations deverão ser aplicadas ao PostgreSQL no processo de deploy.
+PostgreSQL será configurado por `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` e, opcionalmente, `DB_PORT` (padrão 5432). Banco e usuário serão criados durante a implantação; credenciais reais não devem entrar no Git. A compatibilidade da distribuição PostgreSQL com o Windows Server 2019 deve ser resolvida com o TI antes da instalação, conforme o runbook. As migrations deverão ser aplicadas ao PostgreSQL no processo de deploy.

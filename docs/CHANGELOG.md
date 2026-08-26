@@ -8,6 +8,8 @@ O projeto utiliza versionamento incremental durante a fase de desenvolvimento.
 
 ### Evoluções recentes
 
+- inclusão do Waitress 3.0.2 e da configuração fail-closed para logging rotativo em produção;
+- documentação do servidor alvo Windows Server 2019 Standard e criação do runbook técnico de produção para IIS, serviço WSGI, PostgreSQL local e armazenamento corporativo, com bloqueadores explicitados sem marcar o deploy como concluído;
 - refinamento do fluxo de propostas, criação da Rev. 00 e aplicação automática do modelo padrão da empresa;
 - composição interna, formação de preço por item, linhas públicas automáticas e juros de antecipação;
 - documento comercial/PDF e preservação da separação entre dados internos e públicos;
