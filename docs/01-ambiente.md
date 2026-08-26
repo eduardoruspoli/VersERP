@@ -23,7 +23,7 @@ Não instale Django isoladamente: `requirements.txt` é a referência das depend
 
 ## Banco e inicialização
 
-SQLite é o banco configurado para desenvolvimento. `db.sqlite3` é local e ignorado pelo Git.
+SQLite é o banco configurado para desenvolvimento. `db.sqlite3` é local e ignorado pelo Git. Nenhuma variável PostgreSQL é necessária no ambiente local.
 
 ```powershell
 python manage.py migrate
@@ -49,3 +49,7 @@ git diff --check
 ```
 
 Novas alterações de model devem gerar migration versionada. Não edite migrations já aplicadas nem o banco SQLite manualmente.
+
+## Banco de produção
+
+Produção usa PostgreSQL configurado por `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` e, opcionalmente, `DB_PORT` (padrão 5432). Banco e usuário serão criados no Windows Server durante a implantação; credenciais reais não devem entrar no Git. As migrations deverão ser aplicadas ao PostgreSQL no processo de deploy.

@@ -141,12 +141,37 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 
 # Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if IS_PRODUCTION:
+    required_database_variables = ("DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST")
+    missing_database_variables = [
+        name
+        for name in required_database_variables
+        if not os.environ.get(name, "").strip()
+    ]
+    if missing_database_variables:
+        raise ImproperlyConfigured(
+            "Variáveis obrigatórias do PostgreSQL ausentes: "
+            + ", ".join(missing_database_variables)
+            + "."
+        )
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ["DB_NAME"].strip(),
+            "USER": os.environ["DB_USER"].strip(),
+            "PASSWORD": os.environ["DB_PASSWORD"],
+            "HOST": os.environ["DB_HOST"].strip(),
+            "PORT": os.environ.get("DB_PORT", "5432").strip() or "5432",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation

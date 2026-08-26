@@ -16,6 +16,11 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
         "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS",
         "DJANGO_SECURE_HSTS_PRELOAD",
         "DJANGO_TRUST_X_FORWARDED_PROTO",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+        "DB_HOST",
+        "DB_PORT",
     }
 
     def executar_settings(self, **variaveis):
@@ -30,7 +35,8 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
                 (
                     "import config.settings as s; "
                     "print(s.DEBUG, s.ALLOWED_HOSTS, s.SECURE_SSL_REDIRECT, "
-                    "hasattr(s, 'SECURE_PROXY_SSL_HEADER'))"
+                    "hasattr(s, 'SECURE_PROXY_SSL_HEADER')); "
+                    "print(s.DATABASES['default'])"
                 ),
             ],
             cwd=os.getcwd(),
@@ -47,6 +53,7 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
         self.assertIn("True", resultado.stdout)
         self.assertIn("127.0.0.1", resultado.stdout)
         self.assertIn("False False", resultado.stdout)
+        self.assertIn("django.db.backends.sqlite3", resultado.stdout)
 
     def test_producao_exige_secret_key(self):
         resultado = self.executar_settings(
@@ -90,8 +97,65 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
             DJANGO_SECRET_KEY="chave-ficticia-segura-para-teste-com-mais-de-cinquenta-caracteres",
             DJANGO_ALLOWED_HOSTS="erp.example.test",
             DJANGO_CSRF_TRUSTED_ORIGINS="https://erp.example.test",
+            DB_NAME="verserp_teste",
+            DB_USER="usuario_teste",
+            DB_PASSWORD="senha-ficticia",
+            DB_HOST="postgres.example.test",
         )
 
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
         self.assertIn("False", resultado.stdout)
         self.assertIn("True False", resultado.stdout)
+
+    def test_producao_exige_variaveis_obrigatorias_do_postgresql(self):
+        base = {
+            "VERSERP_ENV": "production",
+            "DJANGO_SECRET_KEY": (
+                "chave-ficticia-segura-para-teste-com-mais-de-cinquenta-caracteres"
+            ),
+            "DJANGO_ALLOWED_HOSTS": "erp.example.test",
+            "DB_NAME": "verserp_teste",
+            "DB_USER": "usuario_teste",
+            "DB_PASSWORD": "senha-ficticia",
+            "DB_HOST": "postgres.example.test",
+        }
+        for variavel in ("DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST"):
+            with self.subTest(variavel=variavel):
+                dados = base.copy()
+                dados.pop(variavel)
+                resultado = self.executar_settings(**dados)
+                self.assertNotEqual(resultado.returncode, 0)
+                self.assertIn(variavel, resultado.stderr)
+
+    def test_producao_monta_postgresql_com_porta_padrao(self):
+        resultado = self.executar_settings(
+            VERSERP_ENV="production",
+            DJANGO_SECRET_KEY="chave-ficticia-segura-para-teste-com-mais-de-cinquenta-caracteres",
+            DJANGO_ALLOWED_HOSTS="erp.example.test",
+            DB_NAME="verserp_teste",
+            DB_USER="usuario_teste",
+            DB_PASSWORD="senha-ficticia",
+            DB_HOST="postgres.example.test",
+        )
+
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        self.assertIn("django.db.backends.postgresql", resultado.stdout)
+        self.assertIn("'NAME': 'verserp_teste'", resultado.stdout)
+        self.assertIn("'USER': 'usuario_teste'", resultado.stdout)
+        self.assertIn("'HOST': 'postgres.example.test'", resultado.stdout)
+        self.assertIn("'PORT': '5432'", resultado.stdout)
+
+    def test_producao_respeita_porta_postgresql_informada(self):
+        resultado = self.executar_settings(
+            VERSERP_ENV="production",
+            DJANGO_SECRET_KEY="chave-ficticia-segura-para-teste-com-mais-de-cinquenta-caracteres",
+            DJANGO_ALLOWED_HOSTS="erp.example.test",
+            DB_NAME="verserp_teste",
+            DB_USER="usuario_teste",
+            DB_PASSWORD="senha-ficticia",
+            DB_HOST="postgres.example.test",
+            DB_PORT="55432",
+        )
+
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        self.assertIn("'PORT': '55432'", resultado.stdout)
