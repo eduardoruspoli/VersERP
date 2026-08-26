@@ -7,6 +7,7 @@ ERP web modular da Versatile para operação integrada de cadastros, propostas c
 - Python 3.14.6 e Django 6.0.8;
 - Django MVT, HTML, CSS e JavaScript;
 - SQLite no desenvolvimento local;
+- PostgreSQL definido para produção;
 - `core`: autenticação, dashboard, perfis, empresas autorizadas, configurações e central de relatórios;
 - `pessoas`: clientes e fornecedores;
 - `comercial`: propostas, revisões, formação de preço, documento comercial e acompanhamento;
@@ -34,7 +35,7 @@ Se a criação da venv não instalar o pip, consulte [Ambiente](docs/01-ambiente
 
 ## Configuração
 
-O desenvolvimento funciona com os padrões locais. As variáveis disponíveis estão em `.env.example`; o projeto não carrega `.env` automaticamente, portanto elas devem ser definidas no processo ou pela infraestrutura. Em produção, use `VERSERP_ENV=production` e configure chave secreta, hosts, origens CSRF e opções HTTPS conforme [Deploy](docs/deploy.md).
+O desenvolvimento funciona com SQLite e os padrões locais. As variáveis disponíveis estão em `.env.example`; o projeto não carrega `.env` automaticamente, portanto elas devem ser definidas no processo ou pela infraestrutura. Em produção, PostgreSQL e os settings seguros são configurados por variáveis de ambiente. Consulte [Deploy](docs/deploy.md) para os detalhes de implantação.
 
 ## Qualidade
 

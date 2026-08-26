@@ -50,6 +50,8 @@ git diff --check
 
 Novas alterações de model devem gerar migration versionada. Não edite migrations já aplicadas nem o banco SQLite manualmente.
 
-## Banco de produção
+## Ambiente alvo de produção
 
-Produção usa PostgreSQL configurado por `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` e, opcionalmente, `DB_PORT` (padrão 5432). Banco e usuário serão criados no Windows Server durante a implantação; credenciais reais não devem entrar no Git. As migrations deverão ser aplicadas ao PostgreSQL no processo de deploy.
+O alvo definido é o ambiente Windows da infraestrutura da empresa, com `VERSERP_ENV=production`, PostgreSQL e Psycopg 3. A versão/edição exata do Windows será confirmada com o TI. A aplicação ainda não foi implantada nesse ambiente.
+
+PostgreSQL será configurado por `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` e, opcionalmente, `DB_PORT` (padrão 5432). Banco e usuário serão criados no servidor durante a implantação; credenciais reais não devem entrar no Git. As migrations deverão ser aplicadas ao PostgreSQL no processo de deploy.

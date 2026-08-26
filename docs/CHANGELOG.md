@@ -15,7 +15,11 @@ O projeto utiliza versionamento incremental durante a fase de desenvolvimento.
 - configuração segura de produção com ambiente fail-closed, HTTPS, cookies seguros e HSTS;
 - atualização de segurança para Django 6.0.8;
 - remoção de arquivos Python gerados (`.pyc` e `__pycache__`) do versionamento;
-- atualização da documentação técnica para refletir o estado atual.
+- atualização da documentação técnica para refletir o estado atual;
+- suporte a PostgreSQL em produção, mantendo SQLite no desenvolvimento;
+- inclusão do Psycopg 3 para conexão com PostgreSQL;
+- validação fail-closed das variáveis obrigatórias do banco de produção;
+- suíte completa atualizada para 400 testes aprovados.
 
 ## [0.5.0] - 2026-08-12
 

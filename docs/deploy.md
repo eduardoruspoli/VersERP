@@ -1,6 +1,18 @@
 # Preparação para deploy
 
-Este documento descreve configuração; não escolhe provedor, domínio, servidor ou banco definitivo.
+Este documento registra a arquitetura alvo definida para produção. O deploy ainda não foi executado.
+
+## Arquitetura alvo
+
+```text
+Ambiente Windows da infraestrutura da empresa
+    → VersERP/Django
+    → PostgreSQL
+    → armazenamento corporativo para PDFs e arquivos
+    → acesso dos usuários pela rede corporativa ou VPN
+```
+
+A estimativa inicial é de até quatro usuários simultâneos. Não há necessidade prevista de cluster, balanceamento de carga ou arquitetura distribuída neste estágio. Usuários acessarão o ERP pelo navegador; RDP não faz parte do fluxo normal e poderá ser usado pelo TI somente para administração do servidor. A implantação será executada e alinhada com o responsável de TI.
 
 ## Ambientes
 
@@ -32,7 +44,7 @@ Nunca versione valores reais. O projeto não carrega `.env` automaticamente; o p
 
 O desenvolvimento continua usando SQLite. Em produção, PostgreSQL é obrigatório e não existe fallback para SQLite: a inicialização falha se `DB_NAME`, `DB_USER`, `DB_PASSWORD` ou `DB_HOST` estiverem ausentes. `DB_PORT` usa 5432 quando não informado.
 
-O banco e o usuário deverão ser criados no Windows Server durante a implantação, com credenciais fornecidas por meio seguro e privilégios adequados. Não registre senha no Git. Depois de configurar a conexão, execute as migrations no banco de produção durante o deploy.
+O banco e o usuário deverão ser criados no ambiente Windows da infraestrutura da empresa durante a implantação, com credenciais fornecidas por meio seguro e privilégios adequados. Não registre senha no Git. Depois de configurar a conexão, execute as migrations no banco de produção durante o deploy.
 
 ## HTTPS e proxy
 
@@ -52,3 +64,18 @@ python manage.py collectstatic --noinput
 ```
 
 Use servidor WSGI/ASGI adequado; nunca `runserver`. Defina persistência de arquivos no servidor da empresa, logs, monitoramento e backup. A configuração de SSL da conexão PostgreSQL permanece dependente da topologia definida pelo TI.
+
+## Pendente de implantação com o TI
+
+- versão/edição exata do Windows do servidor;
+- versão definitiva do PostgreSQL no servidor;
+- criação do banco, usuário e entrega segura das credenciais;
+- DNS ou nome interno e HTTPS/certificado;
+- servidor WSGI/ASGI e execução como serviço;
+- necessidade e configuração de proxy reverso;
+- caminho definitivo de PDFs/documentos e permissões de filesystem;
+- procedimentos de backup e restauração;
+- logs e monitoramento;
+- regras necessárias de firewall, rede corporativa e VPN.
+
+Esses itens estão definidos como parte da implantação, mas ainda não estão configurados ou operacionais.
