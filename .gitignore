@@ -21,6 +21,7 @@ backups/
 *.pdf
 importacoes/
 dados_reais/
+verserp_*_export_*.json
 .pytest_cache/
 .coverage
 htmlcov/

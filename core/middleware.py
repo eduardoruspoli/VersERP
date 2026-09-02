@@ -56,6 +56,7 @@ class EmpresaAccessMiddleware:
         },
     }
     ROTAS_EXATAS = {
+        ("comercial", "proposta_pdf"): ("comercial.PropostaRevisao", "pk", "proposta__empresa_id"),
         ("compras", "documento_divergencia_resolver"): ("compras.DivergenciaDocumentoCompra", "pk", "documento__empresa_id"),
         ("compras", "divergencia_resolver"): ("compras.DivergenciaRecebimento", "pk", "recebimento_item__recebimento__pedido__empresa_id"),
         ("compras", "divergencia_criar"): ("compras.RecebimentoCompra", "pk", "pedido__empresa_id"),

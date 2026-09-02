@@ -256,7 +256,11 @@ def colocar_em_negociacao(proposta, usuario):
 def aprovar_proposta(proposta, usuario):
     _exigir_permissao(usuario, "aprovar_proposta")
     _exigir_permissao(usuario, "criar_obra_proposta")
-    proposta = Proposta.objects.select_for_update().select_related("empresa", "cliente", "centro_custo").get(pk=proposta.pk)
+    proposta = (
+        Proposta.objects.select_for_update(of=("self",))
+        .select_related("empresa", "cliente", "centro_custo")
+        .get(pk=proposta.pk)
+    )
     _validar_transicao(proposta, Proposta.Status.APROVADA)
     revisao = proposta.revisoes.select_for_update().get(numero=proposta.revisao_atual)
     if not revisao.congelada or not revisao.enviada_em:

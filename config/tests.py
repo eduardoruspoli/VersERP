@@ -2,13 +2,19 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
+
+from config.settings import load_development_env
 
 
 class ConfiguracaoAmbienteTests(SimpleTestCase):
     variaveis = {
         "VERSERP_ENV",
+        "VERSERP_DB",
+        "VERSERP_LOAD_DOTENV",
         "DJANGO_SECRET_KEY",
         "DJANGO_DEBUG",
         "DJANGO_ALLOWED_HOSTS",
@@ -29,6 +35,7 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
         ambiente = os.environ.copy()
         for nome in self.variaveis:
             ambiente.pop(nome, None)
+        ambiente["VERSERP_LOAD_DOTENV"] = "false"
         ambiente.update(variaveis)
         if (
             ambiente.get("VERSERP_ENV") == "production"
@@ -43,7 +50,8 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
                     "import config.settings as s; "
                     "print(s.DEBUG, s.ALLOWED_HOSTS, s.SECURE_SSL_REDIRECT, "
                     "hasattr(s, 'SECURE_PROXY_SSL_HEADER')); "
-                    "print(s.DATABASES['default']); "
+                    "print({key: value for key, value in "
+                    "s.DATABASES['default'].items() if key != 'PASSWORD'}); "
                     "print(getattr(s, 'VERSERP_LOG_DIR', None)); "
                     "print(getattr(s, 'LOGGING', None))"
                 ),
@@ -56,7 +64,7 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
         )
 
     def test_desenvolvimento_mantem_defaults_locais(self):
-        resultado = self.executar_settings()
+        resultado = self.executar_settings(VERSERP_ENV="development")
 
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
         self.assertIn("True", resultado.stdout)
@@ -64,6 +72,57 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
         self.assertIn("False False", resultado.stdout)
         self.assertIn("django.db.backends.sqlite3", resultado.stdout)
         self.assertIn("None\n", resultado.stdout)
+
+    def test_carregamento_env_local_preserva_variaveis_do_processo(self):
+        with tempfile.TemporaryDirectory() as diretorio:
+            arquivo = Path(diretorio) / ".env"
+            arquivo.write_text(
+                "# local\nDB_NAME=arquivo\nDB_HOST='localhost'\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"DB_NAME": "processo"}, clear=True):
+                load_development_env(arquivo)
+                self.assertEqual(os.environ["DB_NAME"], "processo")
+                self.assertEqual(os.environ["DB_HOST"], "localhost")
+
+    def test_desenvolvimento_aceita_postgresql_opcional(self):
+        resultado = self.executar_settings(
+            VERSERP_ENV="development",
+            VERSERP_DB="postgresql",
+            DB_NAME="verserp_teste",
+            DB_USER="usuario_teste",
+            DB_PASSWORD="senha-ficticia",
+            DB_HOST="localhost",
+            DB_PORT="55432",
+        )
+
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        self.assertIn("django.db.backends.postgresql", resultado.stdout)
+        self.assertIn("'PORT': '55432'", resultado.stdout)
+
+    def test_desenvolvimento_rejeita_banco_desconhecido(self):
+        resultado = self.executar_settings(
+            VERSERP_ENV="development",
+            VERSERP_DB="mysql",
+        )
+
+        self.assertNotEqual(resultado.returncode, 0)
+        self.assertIn("VERSERP_DB", resultado.stderr)
+
+    def test_producao_ignora_seletor_sqlite(self):
+        resultado = self.executar_settings(
+            VERSERP_ENV="production",
+            VERSERP_DB="sqlite",
+            DJANGO_SECRET_KEY="chave-ficticia-segura-para-teste-com-mais-de-cinquenta-caracteres",
+            DJANGO_ALLOWED_HOSTS="erp.example.test",
+            DB_NAME="verserp_teste",
+            DB_USER="usuario_teste",
+            DB_PASSWORD="senha-ficticia",
+            DB_HOST="postgres.example.test",
+        )
+
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        self.assertIn("django.db.backends.postgresql", resultado.stdout)
 
     def test_producao_exige_diretorio_de_logs(self):
         resultado = self.executar_settings(

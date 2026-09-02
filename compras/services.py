@@ -134,7 +134,12 @@ def iniciar_processo_cotacao(processo, usuario):
     ProcessoCotacao.objects.filter(pk=processo.pk).update(status=ProcessoCotacao.Status.EM_ANDAMENTO)
     processo.status = ProcessoCotacao.Status.EM_ANDAMENTO
     HistoricoProcessoCotacao.objects.create(processo=processo, status_anterior=anterior, status_novo=processo.status, usuario=usuario)
-    solicitacoes = SolicitacaoCompra.objects.select_for_update().filter(itens__itens_processo_cotacao__processo=processo).distinct()
+    solicitacao_ids = SolicitacaoCompra.objects.filter(
+        itens__itens_processo_cotacao__processo=processo
+    ).values_list("pk", flat=True).distinct()
+    solicitacoes = SolicitacaoCompra.objects.select_for_update().filter(
+        pk__in=solicitacao_ids
+    )
     for solicitacao in solicitacoes:
         if solicitacao.status == SolicitacaoCompra.Status.ABERTA:
             SolicitacaoCompra.objects.filter(pk=solicitacao.pk).update(status=SolicitacaoCompra.Status.EM_COTACAO)

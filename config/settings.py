@@ -13,7 +13,35 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def load_development_env(path):
+    """Load a local .env without overriding variables from the process."""
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        if not name or not name.replace("_", "a").isalnum():
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
+
+
 # Quick-start development settings - unsuitable for production
+PROCESS_ENVIRONMENT = os.environ.get("VERSERP_ENV", "development").strip().lower()
+LOAD_LOCAL_ENV = os.environ.get("VERSERP_LOAD_DOTENV", "true").strip().lower()
+if PROCESS_ENVIRONMENT == "development" and LOAD_LOCAL_ENV not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}:
+    load_development_env(BASE_DIR / ".env")
+
 ENVIRONMENT = os.environ.get("VERSERP_ENV", "development").strip().lower()
 if ENVIRONMENT not in {"development", "production"}:
     raise ImproperlyConfigured(
@@ -141,7 +169,18 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 
 # Database
+DEVELOPMENT_DATABASE = os.environ.get("VERSERP_DB", "sqlite").strip().lower()
+
 if IS_PRODUCTION:
+    database_engine = "postgresql"
+else:
+    if DEVELOPMENT_DATABASE not in {"sqlite", "postgresql"}:
+        raise ImproperlyConfigured(
+            "VERSERP_DB deve ser 'sqlite' ou 'postgresql' em development."
+        )
+    database_engine = DEVELOPMENT_DATABASE
+
+if database_engine == "postgresql":
     required_database_variables = ("DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST")
     missing_database_variables = [
         name
