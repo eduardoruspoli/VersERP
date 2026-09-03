@@ -11,6 +11,70 @@ from comercial.models import Proposta
 from .access import empresas_usuario, pode_acessar_empresa
 from .models import UsuarioEmpresa
 from .csv import celula_csv_segura
+from .permissions import PERFIS_PADRAO, sincronizar_perfis_padrao
+
+
+class PerfisPadraoTests(TestCase):
+    def setUp(self):
+        sincronizar_perfis_padrao()
+
+    def assertPermissoesDoGrupo(self, nome, esperadas):
+        atuais = set(
+            Group.objects.get(name=nome).permissions.values_list("pk", flat=True)
+        )
+        self.assertSetEqual(atuais, set(esperadas.values_list("pk", flat=True)))
+
+    def test_administrador_recebe_todas_as_permissoes(self):
+        self.assertPermissoesDoGrupo("Administrador", Permission.objects.all())
+
+    def test_gerencia_recebe_tudo_exceto_codenames_definidos(self):
+        excluidas = PERFIS_PADRAO["Gerência"]["exclude_codenames"]
+        esperadas = Permission.objects.exclude(codename__in=excluidas)
+        self.assertPermissoesDoGrupo("Gerência", esperadas)
+
+    def test_rh_recebe_exatamente_pessoas_e_rh(self):
+        esperadas = Permission.objects.filter(content_type__app_label__in={"pessoas", "rh"})
+        self.assertPermissoesDoGrupo("RH", esperadas)
+
+    def test_financeiro_e_compras_recebe_exatamente_apps_definidos(self):
+        esperadas = Permission.objects.filter(
+            content_type__app_label__in={"pessoas", "financeiro", "compras"}
+        )
+        self.assertPermissoesDoGrupo("Financeiro e Compras", esperadas)
+
+    def test_comercial_recebe_exatamente_pessoas_e_comercial(self):
+        esperadas = Permission.objects.filter(
+            content_type__app_label__in={"pessoas", "comercial"}
+        )
+        self.assertPermissoesDoGrupo("Comercial", esperadas)
+
+    def test_rh_restrito_ponto_recebe_exatamente_codenames_definidos(self):
+        esperadas = Permission.objects.filter(
+            content_type__app_label="rh",
+            codename__in=PERFIS_PADRAO["RH restrito/Ponto"]["codenames"],
+        )
+        self.assertPermissoesDoGrupo("RH restrito/Ponto", esperadas)
+
+    def test_sincronizacao_e_idempotente(self):
+        nomes = set(PERFIS_PADRAO)
+        antes = {
+            grupo.name: set(grupo.permissions.values_list("pk", flat=True))
+            for grupo in Group.objects.filter(name__in=nomes)
+        }
+
+        resultado = sincronizar_perfis_padrao()
+
+        depois = {
+            grupo.name: set(grupo.permissions.values_list("pk", flat=True))
+            for grupo in Group.objects.filter(name__in=nomes)
+        }
+        self.assertEqual(Group.objects.filter(name__in=nomes).count(), len(nomes))
+        self.assertTrue(all(not criado for _, criado, _ in resultado))
+        self.assertEqual(depois, antes)
+
+    def test_diretoria_gerencia_nao_e_criado(self):
+        self.assertNotIn("Diretoria/Gerência", PERFIS_PADRAO)
+        self.assertFalse(Group.objects.filter(name="Diretoria/Gerência").exists())
 
 
 class AcessoEmpresaTests(TestCase):
