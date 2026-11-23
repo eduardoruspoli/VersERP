@@ -1,0 +1,12 @@
+<service>
+  <id>VersERP</id>
+  <name>VersERP</name>
+  <executable>C:\Versatile\Financeiro\VersERP\.venv\Scripts\python.exe</executable>
+  <arguments>-m waitress --listen=127.0.0.1:8000 config.wsgi:application</arguments>
+  <workingdirectory>C:\Versatile\Financeiro\VersERP</workingdirectory>
+  <startmode>Automatic</startmode>
+  <onfailure action="restart" delay="10 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <logpath>C:\Versatile\Financeiro\VersERP\logs\service</logpath>
+  <log mode="roll"/>
+</service>

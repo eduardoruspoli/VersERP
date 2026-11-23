@@ -17,6 +17,7 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
         "VERSERP_LOAD_DOTENV",
         "DJANGO_SECRET_KEY",
         "DJANGO_DEBUG",
+        "DJANGO_HTTPS_ENABLED",
         "DJANGO_ALLOWED_HOSTS",
         "DJANGO_CSRF_TRUSTED_ORIGINS",
         "DJANGO_SECURE_HSTS_SECONDS",
@@ -50,6 +51,9 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
                     "import config.settings as s; "
                     "print(s.DEBUG, s.ALLOWED_HOSTS, s.SECURE_SSL_REDIRECT, "
                     "hasattr(s, 'SECURE_PROXY_SSL_HEADER')); "
+                    "print('HTTPS controls:', s.SESSION_COOKIE_SECURE, "
+                    "s.CSRF_COOKIE_SECURE, s.SECURE_HSTS_SECONDS, "
+                    "s.SECURE_HSTS_INCLUDE_SUBDOMAINS, s.SECURE_HSTS_PRELOAD); "
                     "print({key: value for key, value in "
                     "s.DATABASES['default'].items() if key != 'PASSWORD'}); "
                     "print(getattr(s, 'VERSERP_LOG_DIR', None)); "
@@ -196,20 +200,36 @@ class ConfiguracaoAmbienteTests(SimpleTestCase):
                 self.assertIn("DJANGO_ALLOWED_HOSTS", resultado.stderr)
 
     def test_producao_ativa_seguranca_sem_presumir_proxy(self):
-        resultado = self.executar_settings(
-            VERSERP_ENV="production",
-            DJANGO_SECRET_KEY="chave-ficticia-segura-para-teste-com-mais-de-cinquenta-caracteres",
-            DJANGO_ALLOWED_HOSTS="erp.example.test",
-            DJANGO_CSRF_TRUSTED_ORIGINS="https://erp.example.test",
-            DB_NAME="verserp_teste",
-            DB_USER="usuario_teste",
-            DB_PASSWORD="senha-ficticia",
-            DB_HOST="postgres.example.test",
-        )
+        for opcoes, seguranca, cookies_e_hsts in (
+            ({}, "True False", "True True 31536000 False False"),
+            (
+                {"DJANGO_HTTPS_ENABLED": "false", "DJANGO_TRUST_X_FORWARDED_PROTO": "true"},
+                "False False",
+                "False False 0 False False",
+            ),
+            (
+                {"DJANGO_HTTPS_ENABLED": "true", "DJANGO_TRUST_X_FORWARDED_PROTO": "true"},
+                "True True",
+                "True True 31536000 False False",
+            ),
+        ):
+            with self.subTest(opcoes=opcoes):
+                resultado = self.executar_settings(
+                    VERSERP_ENV="production",
+                    DJANGO_SECRET_KEY="chave-ficticia-segura-para-teste-com-mais-de-cinquenta-caracteres",
+                    DJANGO_ALLOWED_HOSTS="erp.example.test",
+                    DJANGO_CSRF_TRUSTED_ORIGINS="https://erp.example.test",
+                    DB_NAME="verserp_teste",
+                    DB_USER="usuario_teste",
+                    DB_PASSWORD="senha-ficticia",
+                    DB_HOST="postgres.example.test",
+                    **opcoes,
+                )
 
-        self.assertEqual(resultado.returncode, 0, resultado.stderr)
-        self.assertIn("False", resultado.stdout)
-        self.assertIn("True False", resultado.stdout)
+                self.assertEqual(resultado.returncode, 0, resultado.stderr)
+                self.assertTrue(resultado.stdout.splitlines()[0].endswith(seguranca))
+                self.assertIn(f"HTTPS controls: {cookies_e_hsts}", resultado.stdout)
+                self.assertIn("django.db.backends.postgresql", resultado.stdout)
 
     def test_producao_exige_variaveis_obrigatorias_do_postgresql(self):
         base = {

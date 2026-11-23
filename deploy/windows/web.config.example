@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <!-- URL Rewrite recebe o caminho do site sem a barra inicial. -->
+        <rule name="VersERP Reverse Proxy" stopProcessing="true">
+          <match url="^(?!static(?:/|$))(.*)$" />
+          <action type="Rewrite" url="http://127.0.0.1:8000/{R:1}" appendQueryString="true" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>

@@ -28,4 +28,6 @@ PostgreSQL foi definido como banco de produção, mas o procedimento definitivo 
 
 A política deverá possuir duas categorias independentes: PostgreSQL no servidor e pastas corporativas nas quais os usuários arquivam manualmente PDFs, planilhas e demais arquivos exportados. Uma categoria não substitui a outra. Também deverá prever criptografia, retenção, cópia externa, controle de acesso e testes conjuntos e periódicos de restauração. RPO e RTO serão definidos operacionalmente.
 
+Antes de executar `deploy/windows/update.ps1`, registre o commit atual e valide um backup recente do PostgreSQL e a recuperação das pastas corporativas. Após uma falha de migration, use o plano de rollback para decidir se é necessário restaurar o banco. Se houver restauração, valide o schema e os dados em ambiente isolado e use `collectstatic` para recompor os estáticos da revisão recuperada antes de iniciar o serviço `VersERP`.
+
 Use o [runbook de produção](runbook_producao_windows.md#16-backup-e-restauração) para planejar e validar a recuperação em ambiente isolado.

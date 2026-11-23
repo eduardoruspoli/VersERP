@@ -5,7 +5,7 @@ Este runbook prepara a implantação do VersERP no servidor alvo confirmado: **M
 ## 1. Arquitetura alvo
 
 ```text
-Usuário → navegador → rede corporativa/VPN → HTTPS/IIS
+Usuário → navegador → rede corporativa/VPN → IIS (80/443)
         → ARR + URL Rewrite → Waitress (127.0.0.1:8000) → Django → PostgreSQL local
 Usuário baixa/exporta arquivos → salva manualmente na pasta corporativa → backup externo
 ```
@@ -115,12 +115,13 @@ Variáveis existentes no projeto:
 VERSERP_ENV=production
 DJANGO_SECRET_KEY=<segredo forte e exclusivo>
 DJANGO_DEBUG=false
+DJANGO_HTTPS_ENABLED=false
 DJANGO_ALLOWED_HOSTS=<hosts explícitos separados por vírgula>
-DJANGO_CSRF_TRUSTED_ORIGINS=<origens HTTPS completas separadas por vírgula>
+DJANGO_CSRF_TRUSTED_ORIGINS=<origens completas separadas por vírgula>
 DJANGO_SECURE_HSTS_SECONDS=31536000
 DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=false
 DJANGO_SECURE_HSTS_PRELOAD=false
-DJANGO_TRUST_X_FORWARDED_PROTO=true
+DJANGO_TRUST_X_FORWARDED_PROTO=false
 VERSERP_LOG_DIR=<diretório absoluto, existente e gravável>
 DB_NAME=<nome do banco>
 DB_USER=<usuário dedicado>
@@ -131,7 +132,7 @@ DB_PORT=<porta definida pelo TI; padrão do projeto: 5432>
 
 Em produção, o projeto falha ao iniciar se a chave for insegura, `DEBUG` estiver ativo, os hosts forem ausentes/coringa, as variáveis obrigatórias do PostgreSQL estiverem ausentes ou o diretório de logs não for absoluto, existente e gravável. Não há fallback para SQLite.
 
-O projeto não lê `.env` automaticamente. O mecanismo definitivo deve ser fornecido ao processo/serviço pelo TI, com acesso restrito à conta de serviço. `.env`, `DJANGO_SECRET_KEY` e senha do PostgreSQL não entram no Git, logs, scripts compartilhados nem chamado sem proteção.
+Em produção, o projeto não lê `.env` automaticamente. O TI deve fornecer as mesmas configurações efetivas ao processo administrativo de deploy e ao serviço. A sessão PowerShell do operador não fornece automaticamente variáveis ao processo do serviço. `.env`, `DJANGO_SECRET_KEY` e senha do PostgreSQL não entram no Git, logs, scripts compartilhados nem chamado sem proteção.
 
 ## 8. PostgreSQL
 
@@ -227,7 +228,7 @@ Não será criado `DOCUMENT_ROOT`, `MEDIA_ROOT`, `FileField` ou metadado de arqu
 
 ## 12. Servidor WSGI e serviço Windows
 
-O projeto expõe `config.wsgi.application` e fixa `waitress==3.0.2` como servidor WSGI de produção. O import foi validado localmente com Python 3.14.6 x64; a mesma combinação deverá ser confirmada no servidor.
+O projeto expõe `config.wsgi.application` e fixa `waitress==3.0.2` como servidor WSGI de produção. Valide a combinação com Python 3.14.x x64 no servidor.
 
 Para este sistema síncrono e cerca de quatro usuários, **Waitress 3.0.2/WSGI** é puro Python, compatível com Windows e requer Python 3.9+. Django consome servidores WSGI compatíveis e o entrypoint real é `config.wsgi:application`. Gunicorn não é escolha automática no Windows; Uvicorn/Daphne agregariam complexidade sem necessidade assíncrona identificada.
 
@@ -237,7 +238,7 @@ Configure o serviço Windows com o nome `VersERP`, inicialização automática e
 & 'C:\Versatile\Financeiro\VersERP\.venv\Scripts\waitress-serve.exe' --listen=127.0.0.1:8000 --trusted-proxy=127.0.0.1 --trusted-proxy-headers=x-forwarded-proto config.wsgi:application
 ```
 
-A operação usa o serviço Windows e independe de VS Code e de `manage.py runserver`. Após registrar o serviço com o wrapper, use os comandos administrativos abaixo para iniciar, verificar ou reiniciar após uma atualização.
+A operação usa o serviço Windows e independe de VS Code, sessão PowerShell aberta e `manage.py runserver`. Após configurar o serviço e concluir a instalação, use os comandos administrativos abaixo para iniciar, verificar ou reiniciar quando necessário.
 
 ```powershell
 Start-Service -Name VersERP
@@ -253,7 +254,16 @@ Windows inicia → serviço VersERP inicia → Waitress inicia → Django dispon
 
 Waitress deve escutar somente em loopback; a rede corporativa acessará exclusivamente o IIS.
 
-Recomendação: **WinSW**, por possuir configuração declarativa, working directory, variáveis, logs e gerenciamento de executáveis como serviço. Usar conta dedicada, caminhos absolutos, variáveis seguras, reinício em falha e captura de stdout/stderr. NSSM é mais simples e conhecido, mas governança, atualização e suporte devem ser aceitos pelo TI. Serviço próprio com `pywin32` exigiria código e manutenção sem benefício atual. O requisito de serviço é confirmado; somente ferramenta e configuração permanecem por validar.
+Use o WinSW aprovado pelo TI e coloque o executável em `C:\VersERP-Service\VersERP-Service.exe`. Copie `deploy/windows/VersERP-Service.xml.example` ao lado do executável como `VersERP-Service.xml` e proteja o diretório contra alteração por usuários comuns. Em uma sessão administrativa, para a primeira instalação:
+
+```powershell
+& 'C:\VersERP-Service\VersERP-Service.exe' install
+New-Item -ItemType Directory -Force -Path 'C:\Versatile\Financeiro\VersERP\logs\service'
+```
+
+Antes de iniciar, configure a conta dedicada em Serviços do Windows ou pelo mecanismo aprovado pelo TI. Conceda leitura e execução na aplicação e na venv e escrita no diretório de logs do Django e em `C:\Versatile\Financeiro\VersERP\logs\service`. Configure o ambiente persistente do serviço e injete os segredos pelo mecanismo aprovado pelo TI. O modelo XML configura inicialização automática, reinício em falha e logs de stdout/stderr.
+
+O comando acima de Waitress com as opções de proxy se aplica ao modo HTTPS. Para HTTPS, acrescente `--trusted-proxy=127.0.0.1 --trusted-proxy-headers=x-forwarded-proto` aos argumentos do XML imediatamente antes de `config.wsgi:application`, depois de preparar o IIS. Preserve `--listen=127.0.0.1:8000` em ambos os modos.
 
 ## 13. HTTPS e proxy
 
@@ -263,9 +273,24 @@ Arquitetura recomendada:
 Cliente → HTTPS/IIS → HTTP em 127.0.0.1:8000 → Waitress/WSGI → Django
 ```
 
-Configure o binding HTTPS na porta 443 e redirecione o tráfego HTTP da porta 80 para HTTPS no IIS. Para atuar como proxy reverso, a solução usual documentada pela Microsoft requer **URL Rewrite 2.0** e **Application Request Routing (ARR)**, que não devem ser presumidos instalados. O site deverá terminar TLS, servir `/static/`, encaminhar rotas dinâmicas para o loopback do Waitress, preservar o `Host` necessário e remover/sobrescrever cabeçalhos externos conflitantes.
+Crie um site IIS dedicado com raiz física fora de `C:\Versatile\Financeiro\VersERP`. Instale conteúdo estático, **URL Rewrite 2.0** e **ARR**. Configure o binding para o IP ou DNS de acesso e inicie o site. Use o HTTP interno apenas durante a homologação, com `DJANGO_HTTPS_ENABLED=false`, rede restrita e contas de teste. Nesse modo, o Django usa HTTP sem redirecionamento SSL, cookies com flag Secure ou HSTS.
 
-Com `VERSERP_ENV=production`, o Django ativa `SECURE_SSL_REDIRECT`, cookies seguros de sessão/CSRF e HSTS. O IIS termina HTTPS e usa HTTP no salto local. Defina `DJANGO_TRUST_X_FORWARDED_PROTO=true` somente depois de configurar o IIS para sobrescrever de forma confiável `X-Forwarded-Proto=https`; sem isso pode ocorrer loop de redirecionamento. Configure `DJANGO_ALLOWED_HOSTS` com os nomes DNS explícitos servidos pelo IIS, sem esquema, porta ou caminho. Configure `DJANGO_CSRF_TRUSTED_ORIGINS` com as origens HTTPS completas autorizadas, sem caminho. Separe múltiplos valores por vírgula. Veja o [exemplo de deploy](deploy.md#https-e-proxy). Ative a inclusão de subdomínios no HSTS ou o preload somente após validar todo o domínio. DNS, certificado, regra ARR/Rewrite, headers e firewall ainda precisam de configuração operacional.
+No HTTPS definitivo, configure certificado e binding na porta 443. No próprio site, crie antes da regra de proxy uma regra de redirecionamento que corresponda a `(.*)`, com condição `{HTTPS}` igual a `OFF` e destino `https://<DNS aprovado>/{R:1}`. Use o DNS canônico aprovado, preserve a query string e interrompa o processamento. Configure `DJANGO_HTTPS_ENABLED=true` nos ambientes de deploy e do serviço. A regra de proxy do instalador, no modo HTTPS, só encaminha requisições com `{HTTPS}=ON` e sobrescreve `X-Forwarded-Proto=https`.
+
+Com `VERSERP_ENV=production` e `DJANGO_HTTPS_ENABLED=true`, o Django ativa `SECURE_SSL_REDIRECT`, cookies seguros de sessão/CSRF e HSTS. O IIS termina HTTPS e usa HTTP no salto local. Defina `DJANGO_TRUST_X_FORWARDED_PROTO=true` somente depois de configurar o IIS para sobrescrever de forma confiável `X-Forwarded-Proto=https`; sem isso pode ocorrer loop de redirecionamento. Configure `DJANGO_ALLOWED_HOSTS` com o IP ou DNS real servido pelo IIS, sem esquema, porta ou caminho. Configure `DJANGO_CSRF_TRUSTED_ORIGINS` com as origens completas autorizadas, incluindo `http://` ou `https://`, sem caminho. Separe múltiplos valores por vírgula. Veja o [exemplo de deploy](deploy.md#https-e-proxy). Ative a inclusão de subdomínios no HSTS ou o preload somente após validar todo o domínio. DNS, certificado, regra ARR/Rewrite, headers e firewall ainda precisam de configuração operacional.
+
+### Aplicar a configuração no servidor
+
+Execute em Windows PowerShell 5.1 x64 elevado, com o ambiente de produção já fornecido ao processo. Use o endereço real do site no parâmetro `-PublicUrl`:
+
+```powershell
+Set-Location 'C:\Versatile\Financeiro\VersERP'
+.\deploy\windows\install.ps1 -SiteName 'VersERP' -PublicUrl 'http://192.0.2.10/'
+```
+
+Para HTTPS definitivo, informe a URL `https://` que corresponde ao certificado. Execute novamente o instalador na janela da transição, com o certificado e a regra de redirecionamento preparados e a configuração HTTPS do serviço pronta. A inicialização ou o reinício do serviço pelo instalador ocorre após gravar a regra do IIS. O instalador mantém a regra `VersERP Reverse Proxy` no `applicationHost.config`. O arquivo `web.config.example` é uma referência para configuração HTTP manual. Use um único método para essa regra. A habilitação do ARR e a preservação de `Host` são configurações globais do IIS e devem ser alinhadas com o TI em servidores que hospedam outros sites.
+
+Em seguida, valide da rede autorizada o login, `/static/css/style.css` e o bloqueio do acesso remoto à porta 8000. A reinicialização do Windows deve iniciar o serviço e preservar o acesso pelo IIS.
 
 ## 14. Logs e monitoramento
 
@@ -369,7 +394,14 @@ desenvolvimento → testes → commit/tag aprovado → backup
 → collectstatic → reiniciar serviço → smoke test
 ```
 
-Nunca usar `git pull` indiscriminado em produção nem executar importadores históricos como parte automática desse fluxo.
+Execute a atualização em Windows PowerShell elevado, após validar o backup e preparar as variáveis efetivas do deploy:
+
+```powershell
+Set-Location 'C:\Versatile\Financeiro\VersERP'
+.\deploy\windows\update.ps1 -Revision '<commit ou referência aprovada>'
+```
+
+Para uma branch remota use, por exemplo, `origin/deploy/producao-windows`. O script faz fetch e usa a revisão resolvida em HEAD destacado. Alterações rastreadas e arquivos não rastreados da working tree fazem o script abortar antes de parar o serviço. Se houver falha depois de trocar a revisão, o serviço fica parado para recuperação conforme a seção 17. Valide pelo navegador através do IIS depois da atualização. Execute importadores históricos somente em procedimento separado.
 
 ## 21. Gaps de deploy
 

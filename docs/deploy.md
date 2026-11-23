@@ -7,7 +7,7 @@ Este documento registra a arquitetura alvo definida para produção. A aplicaç�
 ```text
 Windows Server 2019 Standard
     Navegador → IIS (80/443, ARR + URL Rewrite)
-                  ├─ /static/ → staticfiles (IIS)
+                  ├─ /static/ → C:\Versatile\Financeiro\VersERP\staticfiles (IIS)
                   └─ rotas dinâmicas → Waitress (127.0.0.1:8000)
                                         → Django → PostgreSQL
 ```
@@ -25,12 +25,13 @@ Variáveis implementadas:
 VERSERP_ENV=production
 DJANGO_SECRET_KEY=<segredo forte fornecido pela infraestrutura>
 DJANGO_DEBUG=false
+DJANGO_HTTPS_ENABLED=false
 DJANGO_ALLOWED_HOSTS=<hosts separados por vírgula>
-DJANGO_CSRF_TRUSTED_ORIGINS=<origens https separadas por vírgula>
+DJANGO_CSRF_TRUSTED_ORIGINS=<origens completas separadas por vírgula>
 DJANGO_SECURE_HSTS_SECONDS=31536000
 DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=false
 DJANGO_SECURE_HSTS_PRELOAD=false
-DJANGO_TRUST_X_FORWARDED_PROTO=true
+DJANGO_TRUST_X_FORWARDED_PROTO=false
 DB_NAME=<nome do banco>
 DB_USER=<usuário do banco>
 DB_PASSWORD=<senha fornecida com segurança>
@@ -39,7 +40,7 @@ DB_PORT=5432
 VERSERP_LOG_DIR=<diretório absoluto, existente e gravável>
 ```
 
-Nunca versione valores reais. O projeto não carrega `.env` automaticamente; o processo de hospedagem deve fornecer as variáveis. Em produção, o diretório de logs deve ser explícito, absoluto, existente e gravável.
+Forneça as variáveis ao processo de deploy e ao serviço Windows pelo mecanismo aprovado pelo TI. Produção não carrega `.env` automaticamente. Em produção, o diretório de logs deve ser explícito, absoluto, existente e gravável.
 
 ## Banco de produção
 
@@ -49,18 +50,21 @@ O banco e o usuário deverão ser criados durante a implantação, com credencia
 
 ## HTTPS e proxy
 
-`DJANGO_ALLOWED_HOSTS` define `ALLOWED_HOSTS`. Informe os nomes DNS aceitos, sem esquema, porta ou caminho. `DJANGO_CSRF_TRUSTED_ORIGINS` define `CSRF_TRUSTED_ORIGINS`. Informe as origens HTTPS que precisam enviar requisições protegidas por CSRF, com esquema e host, sem caminho. Ambos aceitam listas separadas por vírgula e usam valores explícitos em produção. Exemplo ilustrativo para um único nome:
+`DJANGO_ALLOWED_HOSTS` define `ALLOWED_HOSTS`. Informe o IP ou DNS real pelo qual o usuário acessa o IIS, sem esquema, porta ou caminho. `DJANGO_CSRF_TRUSTED_ORIGINS` define `CSRF_TRUSTED_ORIGINS`. Informe as origens que precisam enviar requisições protegidas por CSRF, com `http://` na homologação interna ou `https://` em HTTPS definitivo, com esquema e host, sem caminho. Ambos aceitam listas separadas por vírgula e usam valores explícitos em produção. Exemplo ilustrativo para um único nome:
 
 ```text
 DJANGO_ALLOWED_HOSTS=verserp.example.com
 DJANGO_CSRF_TRUSTED_ORIGINS=https://verserp.example.com
 ```
 
-O IIS redireciona HTTP na porta 80 para HTTPS na 443, preserva o `Host` original no proxy e sobrescreve `X-Forwarded-Proto` com `https` nas requisições HTTPS encaminhadas.
+- **HTTP interno temporário** — use `DJANGO_HTTPS_ENABLED=false` e `DJANGO_TRUST_X_FORWARDED_PROTO=false`. O Django desliga redirecionamento SSL, flags de cookies seguros e HSTS. Restrinja o acesso à rede de homologação e use dados e contas de teste. As validações de produção continuam ativas.
+- **HTTPS definitivo** — use `DJANGO_HTTPS_ENABLED=true`. O Django ativa redirecionamento SSL, cookies seguros e o HSTS configurado. O IIS termina TLS na porta 443, redireciona a porta 80 para HTTPS e preserva o `Host`. Habilite `DJANGO_TRUST_X_FORWARDED_PROTO=true` depois que o IIS estiver configurado para sobrescrever o cabeçalho `X-Forwarded-Proto` com `https` nas requisições TLS. Ative subdomínios e preload somente após validar todo o domínio.
 
-Em produção, redirecionamento HTTPS e cookies seguros de sessão/CSRF são ativados. HSTS usa o período configurado; inclusão de subdomínios e preload só devem ser habilitados após confirmar HTTPS definitivo para todo o domínio.
+Se `DJANGO_HTTPS_ENABLED` estiver ausente, produção mantém HTTPS ativo. Waitress escuta exclusivamente em `127.0.0.1:8000`. O acesso dos usuários usa o IP ou DNS do IIS na porta do protocolo.
 
-`DJANGO_TRUST_X_FORWARDED_PROTO=true` define `SECURE_PROXY_SSL_HEADER`. Use somente quando um proxy confiável remover cabeçalhos enviados pelo cliente e definir `X-Forwarded-Proto` corretamente.
+## Instalação e atualização
+
+O diretório `deploy/windows/` contém o modelo WinSW, o exemplo de URL Rewrite e os scripts `install.ps1` e `update.ps1`. Prepare o site IIS dedicado, registre o serviço `VersERP` e forneça as variáveis pela infraestrutura antes de executar a instalação como administrador. O instalador valida os módulos, executa migrations e coleta os estáticos, configura o IIS e verifica o serviço. Para atualizar, use `update.ps1 -Revision <referência aprovada>` em uma janela de manutenção com backup verificado.
 
 ## Validação
 
