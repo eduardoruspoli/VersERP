@@ -4,10 +4,11 @@ ERP web modular da Versatile para operação integrada de cadastros, propostas c
 
 ## Stack e módulos
 
-- Python 3.14.6 e Django 6.0.8;
+- Python 3.14.x e Django 6.0.8;
 - Django MVT, HTML, CSS e JavaScript;
-- SQLite no desenvolvimento local;
-- PostgreSQL definido para produção;
+- PostgreSQL 17 em desenvolvimento e homologação, com banco local `verserp_dev`;
+- PostgreSQL em produção;
+- `psycopg[binary]==3.3.4` e `Waitress==3.0.2`;
 - `core`: autenticação, dashboard, perfis, empresas autorizadas, configurações e central de relatórios;
 - `pessoas`: clientes e fornecedores;
 - `comercial`: propostas, revisões, formação de preço, documento comercial e acompanhamento;
@@ -17,7 +18,7 @@ ERP web modular da Versatile para operação integrada de cadastros, propostas c
 
 ## Instalação local no Windows
 
-Requer Python 3.14.
+Requer Python 3.14.x e PostgreSQL 17. Antes de executar as migrations, crie o banco `verserp_dev` e configure as variáveis da sessão conforme [Ambiente](docs/01-ambiente.md).x e PostgreSQL 17. Antes de executar as migrations, crie o banco `verserp_dev` e configure as variáveis da sessão conforme [Ambiente](docs/01-ambiente.md).
 
 ```powershell
 python -m venv .venv
@@ -35,7 +36,7 @@ Se a criação da venv não instalar o pip, consulte [Ambiente](docs/01-ambiente
 
 ## Configuração
 
-O desenvolvimento funciona com SQLite e os padrões locais. As variáveis disponíveis estão em `.env.example`; o projeto não carrega `.env` automaticamente, portanto elas devem ser definidas no processo ou pela infraestrutura. Em produção, a arquitetura definida usa IIS, Waitress/WSGI como serviço Windows e PostgreSQL no mesmo Windows Server 2019; logs também são configurados por variável. Consulte [Deploy](docs/deploy.md) para os detalhes de implantação.
+Use `VERSERP_DB=postgresql` no ambiente principal. SQLite continua disponível como opção simples ou legada em desenvolvimento com `VERSERP_DB=sqlite`. As variáveis disponíveis estão em `.env.example`; o projeto não carrega `.env` automaticamente, portanto elas devem ser definidas no processo ou pela infraestrutura. Em produção, o alvo é Windows Server 2019, com a aplicação em `C:\Versatile\Financeiro\VersERP`. O IIS atende nas portas 80/443, serve `/static/` diretamente e encaminha as demais requisições via ARR e URL Rewrite para Waitress em `127.0.0.1:8000`. O serviço Windows `VersERP` executa Waitress, que carrega o Django conectado ao PostgreSQL. Os usuários acessam somente o IIS. VS Code e `manage.py runserver` são ferramentas de desenvolvimento. Consulte [Deploy](docs/deploy.md) para os detalhes de implantação.
 
 ## Qualidade
 

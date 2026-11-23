@@ -6,16 +6,16 @@ Este runbook prepara a implantação do VersERP no servidor alvo confirmado: **M
 
 ```text
 Usuário → navegador → rede corporativa/VPN → HTTPS/IIS
-        → proxy reverso IIS → servidor WSGI → VersERP/Django → PostgreSQL local
+        → ARR + URL Rewrite → Waitress (127.0.0.1:8000) → Django → PostgreSQL local
 Usuário baixa/exporta arquivos → salva manualmente na pasta corporativa → backup externo
 ```
 
 - servidor: Windows Server 2019 Standard;
 - uso inicial estimado: até quatro usuários simultâneos;
-- acesso normal: navegador pela rede corporativa ou VPN, nunca RDP;
-- diretório ilustrativo da aplicação: `<APP_ROOT>\VersERP`;
+- acesso normal: navegador pela rede corporativa ou VPN, via IIS nas portas 80/443. A porta 8000 é exclusiva do loopback;
+- diretório da aplicação: `C:\Versatile\Financeiro\VersERP`;
 - IIS é o frontend confirmado e o PostgreSQL deverá ficar no mesmo servidor;
-- DNS, portas internas, componentes do proxy, certificado e caminhos definitivos serão definidos com o TI.
+- DNS, certificado, configuração do proxy e permissões serão validados com o TI.
 
 ## 2. Decisão crítica sobre compatibilidade
 
@@ -72,7 +72,7 @@ Antes da janela de implantação:
 2. validar Windows x64, atualizações do sistema e Python 3.14.x x64;
 3. definir conta de serviço sem privilégios administrativos rotineiros;
 4. instalar Git, Python e cliente PostgreSQL conforme política do TI;
-5. definir versão validada do Waitress, wrapper de serviço, HTTPS/IIS e entrega de segredos;
+5. validar Waitress 3.0.2 no servidor e configurar wrapper de serviço, HTTPS/IIS e entrega de segredos;
 6. liberar somente portas e diretórios estritamente necessários;
 7. validar espaço para aplicação, banco, estáticos, logs e documentos.
 
@@ -83,20 +83,20 @@ O projeto usa Django 6.0.8 e `psycopg[binary]==3.3.4`. A distribuição binária
 Produção deve usar um commit ou tag aprovado, nunca acompanhar automaticamente a branch de desenvolvimento.
 
 ```powershell
-Set-Location <APP_ROOT>
+Set-Location 'C:\Versatile\Financeiro'
 git clone <REPOSITORY_URL> VersERP
-Set-Location <APP_ROOT>\VersERP
+Set-Location 'C:\Versatile\Financeiro\VersERP'
 git fetch --tags
 git checkout <TAG_OU_COMMIT_APROVADO>
 git rev-parse HEAD
 ```
 
-Registrar no chamado de mudança: hash completo, data, responsável, versão do Python, versão do PostgreSQL e horário da implantação. O diretório definitivo será escolhido pelo TI.
+Registrar no chamado de mudança: hash completo, data, responsável, versão do Python, versão do PostgreSQL e horário da implantação.
 
 ## 6. Ambiente virtual e dependências
 
 ```powershell
-Set-Location <APP_ROOT>\VersERP
+Set-Location 'C:\Versatile\Financeiro\VersERP'
 python --version
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -120,7 +120,7 @@ DJANGO_CSRF_TRUSTED_ORIGINS=<origens HTTPS completas separadas por vírgula>
 DJANGO_SECURE_HSTS_SECONDS=31536000
 DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=false
 DJANGO_SECURE_HSTS_PRELOAD=false
-DJANGO_TRUST_X_FORWARDED_PROTO=false
+DJANGO_TRUST_X_FORWARDED_PROTO=true
 VERSERP_LOG_DIR=<diretório absoluto, existente e gravável>
 DB_NAME=<nome do banco>
 DB_USER=<usuário dedicado>
@@ -170,7 +170,7 @@ python manage.py migrate
 python manage.py showmigrations
 ```
 
-As migrations criam o schema no PostgreSQL. SQLite permanece banco de desenvolvimento; `db.sqlite3` não deve ser copiado como banco definitivo. Carga ou migração de dados existentes é procedimento separado, com reconciliação e rollback próprios. Importadores históricos nunca devem rodar automaticamente no deploy.
+As migrations criam o schema no PostgreSQL. Desenvolvimento e homologação usam PostgreSQL 17. SQLite permanece disponível como opção simples ou legada em desenvolvimento com `VERSERP_DB=sqlite`. Carga ou migração de dados existentes é procedimento separado, com reconciliação e rollback próprios. Importadores históricos nunca devem rodar automaticamente no deploy.
 
 ### Homologação obrigatória do PostgreSQL no servidor alvo
 
@@ -203,13 +203,13 @@ Em atualização, validar se o superusuário já existe e executar `sincronizar_
 
 ## 10. Arquivos estáticos
 
-O projeto possui `STATIC_URL='static/'` e `STATIC_ROOT=<APP_ROOT>\VersERP\staticfiles`. A coleta é compatível:
+O projeto possui `STATIC_URL='static/'` e `STATIC_ROOT=C:\Versatile\Financeiro\VersERP\staticfiles`. Execute a coleta na raiz da aplicação com a venv e as variáveis de produção:
 
 ```powershell
 python manage.py collectstatic --noinput
 ```
 
-Django/Waitress não deve servir estáticos como solução de produção. Com o IIS confirmado, a arquitetura recomendada é `collectstatic → STATIC_ROOT → IIS`: o IIS serve `/static/` diretamente e encaminha somente requisições dinâmicas ao Waitress. A conta que executa `collectstatic` precisa escrever no diretório; o IIS precisa somente de leitura. Regras e ACLs ainda devem ser configuradas e testadas.
+Crie no site IIS o diretório virtual `static` apontando para `C:\Versatile\Financeiro\VersERP\staticfiles`, habilite o recurso de conteúdo estático e exclua `/static/` da regra de proxy. Dê à identidade do IIS acesso de leitura ao diretório e à conta que executa `collectstatic` acesso de escrita.
 
 ## 11. PDFs, planilhas e documentos
 
@@ -231,13 +231,21 @@ O projeto expõe `config.wsgi.application` e fixa `waitress==3.0.2` como servido
 
 Para este sistema síncrono e cerca de quatro usuários, **Waitress 3.0.2/WSGI** é puro Python, compatível com Windows e requer Python 3.9+. Django consome servidores WSGI compatíveis e o entrypoint real é `config.wsgi:application`. Gunicorn não é escolha automática no Windows; Uvicorn/Daphne agregariam complexidade sem necessidade assíncrona identificada.
 
-Com Waitress futuramente instalado, o comando conceitual seria:
+Configure o serviço Windows com o nome `VersERP`, inicialização automática e diretório de trabalho `C:\Versatile\Financeiro\VersERP`. Execute sob a conta dedicada, com as variáveis de produção e o comando abaixo. As opções de proxy pressupõem que o IIS já sobrescreve `X-Forwarded-Proto` conforme a seção 13.
 
 ```powershell
-<APP_ROOT>\VersERP\.venv\Scripts\waitress-serve.exe --listen=127.0.0.1:<PORTA_INTERNA> config.wsgi:application
+& 'C:\Versatile\Financeiro\VersERP\.venv\Scripts\waitress-serve.exe' --listen=127.0.0.1:8000 --trusted-proxy=127.0.0.1 --trusted-proxy-headers=x-forwarded-proto config.wsgi:application
 ```
 
-`runserver` é proibido em produção. A arquitetura de reinicialização deve ser:
+A operação usa o serviço Windows e independe de VS Code e de `manage.py runserver`. Após registrar o serviço com o wrapper, use os comandos administrativos abaixo para iniciar, verificar ou reiniciar após uma atualização.
+
+```powershell
+Start-Service -Name VersERP
+Get-Service -Name VersERP
+Restart-Service -Name VersERP
+```
+
+A sequência de inicialização é:
 
 ```text
 Windows inicia → serviço VersERP inicia → Waitress inicia → Django disponível
@@ -252,12 +260,12 @@ Recomendação: **WinSW**, por possuir configuração declarativa, working direc
 Arquitetura recomendada:
 
 ```text
-Cliente → HTTPS/IIS → HTTP em 127.0.0.1:<PORTA_INTERNA> → Waitress/WSGI → Django
+Cliente → HTTPS/IIS → HTTP em 127.0.0.1:8000 → Waitress/WSGI → Django
 ```
 
-IIS é o frontend escolhido. Para atuar como proxy reverso, a solução usual documentada pela Microsoft requer **URL Rewrite 2.0** e **Application Request Routing (ARR)**, que não devem ser presumidos instalados. O site deverá terminar TLS, servir `/static/`, encaminhar rotas dinâmicas para o loopback do Waitress, preservar o `Host` necessário e remover/sobrescrever cabeçalhos externos conflitantes.
+Configure o binding HTTPS na porta 443 e redirecione o tráfego HTTP da porta 80 para HTTPS no IIS. Para atuar como proxy reverso, a solução usual documentada pela Microsoft requer **URL Rewrite 2.0** e **Application Request Routing (ARR)**, que não devem ser presumidos instalados. O site deverá terminar TLS, servir `/static/`, encaminhar rotas dinâmicas para o loopback do Waitress, preservar o `Host` necessário e remover/sobrescrever cabeçalhos externos conflitantes.
 
-Com `VERSERP_ENV=production`, o Django ativa `SECURE_SSL_REDIRECT`, cookies seguros de sessão/CSRF e HSTS. Como IIS termina HTTPS e o salto local é HTTP, `DJANGO_TRUST_X_FORWARDED_PROTO=true` será necessário somente depois de configurar o IIS para sobrescrever de forma confiável `X-Forwarded-Proto=https`; sem isso pode ocorrer loop de redirecionamento. `DJANGO_ALLOWED_HOSTS` depende do DNS, `DJANGO_CSRF_TRUSTED_ORIGINS` exige a origem HTTPS completa e `HSTS_INCLUDE_SUBDOMAINS`/`HSTS_PRELOAD` só podem ser ativados após validação de todo o domínio. DNS, certificado, regra ARR/Rewrite, headers e firewall ainda precisam de configuração operacional.
+Com `VERSERP_ENV=production`, o Django ativa `SECURE_SSL_REDIRECT`, cookies seguros de sessão/CSRF e HSTS. O IIS termina HTTPS e usa HTTP no salto local. Defina `DJANGO_TRUST_X_FORWARDED_PROTO=true` somente depois de configurar o IIS para sobrescrever de forma confiável `X-Forwarded-Proto=https`; sem isso pode ocorrer loop de redirecionamento. Configure `DJANGO_ALLOWED_HOSTS` com os nomes DNS explícitos servidos pelo IIS, sem esquema, porta ou caminho. Configure `DJANGO_CSRF_TRUSTED_ORIGINS` com as origens HTTPS completas autorizadas, sem caminho. Separe múltiplos valores por vírgula. Veja o [exemplo de deploy](deploy.md#https-e-proxy). Ative a inclusão de subdomínios no HSTS ou o preload somente após validar todo o domínio. DNS, certificado, regra ARR/Rewrite, headers e firewall ainda precisam de configuração operacional.
 
 ## 14. Logs e monitoramento
 
@@ -315,6 +323,10 @@ Rollback de código consiste em retornar ao commit/tag anterior, restaurar depen
 - [ ] RH abre
 - [ ] documentos persistem no local esperado
 - [ ] logout funciona
+- [ ] IIS redireciona HTTP (80) para HTTPS (443)
+- [ ] IIS entrega um CSS do Admin em `/static/admin/css/base.css`
+- [ ] serviço `VersERP` está em execução e Waitress escuta somente em `127.0.0.1:8000`
+- [ ] porta `8000` inacessível de outra máquina
 - [ ] acesso interno funciona
 - [ ] acesso por VPN funciona
 
@@ -365,7 +377,7 @@ Nunca usar `git pull` indiscriminado em produção nem executar importadores his
 
 1. **PostgreSQL/Windows:** o banco deve ficar no Server 2019, mas nenhuma versão PostgreSQL 14+ suportada pelo Django 6.0 aparece na matriz EDB atual como formalmente suportada nesse sistema. TI deve obter suporte ou formalizar risco e homologação.
 2. **Serviço Windows:** o serviço é obrigatório, mas wrapper, conta, variáveis, reinício e permissões não foram configurados.
-3. **IIS/HTTPS/rede:** IIS é requisito, mas ARR/URL Rewrite, DNS, certificado, regra, headers, porta interna e firewall ainda não foram configurados.
+3. **IIS/HTTPS/rede:** IIS é requisito, mas ARR/URL Rewrite, DNS, certificado, regra, headers e firewall precisam ser configurados e validados.
 4. **Arquivos estáticos:** `collectstatic` existe, mas falta configurar IIS e ACLs para `STATIC_ROOT`.
 5. **Segredos:** falta escolher o mecanismo seguro que fornecerá variáveis à conta de serviço.
 
@@ -376,7 +388,7 @@ Nunca usar `git pull` indiscriminado em produção nem executar importadores his
 3. **Logs:** logging Django está implementado; faltam destino definitivo, logs do serviço/IIS/PostgreSQL e monitoramento.
 4. **Backup/restore:** ferramenta, retenção, RPO/RTO e teste de restauração estão pendentes.
 5. **Dados:** carga inicial ou migração do SQLite deve ser planejada separadamente e reconciliada.
-6. **Filesystem:** diretórios e ACLs da aplicação, estáticos, logs e documentos não estão definidos.
+6. **Filesystem:** provisionar o diretório da aplicação, o diretório de estáticos e as ACLs. Confirmar os destinos de logs e documentos.
 7. **Homologação:** faltam smoke test e validação operacional no ambiente final.
 
 ### MELHORIA FUTURA

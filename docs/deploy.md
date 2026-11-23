@@ -1,20 +1,18 @@
 # Preparação para deploy
 
-Este documento registra a arquitetura alvo definida para produção. O deploy ainda não foi executado.
+Este documento registra a arquitetura alvo definida para produção. A aplicação deve ficar em `C:\Versatile\Financeiro\VersERP`.
 
 ## Arquitetura alvo
 
 ```text
 Windows Server 2019 Standard
-    → IIS/HTTPS
-    → Waitress/WSGI
-    → VersERP/Django
-    → PostgreSQL no mesmo servidor
-    → armazenamento corporativo para PDFs e arquivos
-    → acesso dos usuários pela rede corporativa ou VPN
+    Navegador → IIS (80/443, ARR + URL Rewrite)
+                  ├─ /static/ → staticfiles (IIS)
+                  └─ rotas dinâmicas → Waitress (127.0.0.1:8000)
+                                        → Django → PostgreSQL
 ```
 
-A estimativa inicial é de até quatro usuários simultâneos. Não há necessidade prevista de cluster, balanceamento de carga ou arquitetura distribuída neste estágio. O IIS será o frontend interno e encaminhará requisições dinâmicas a um servidor WSGI; usuários acessarão pelo navegador e RDP será apenas administrativo. O PostgreSQL ficará no mesmo servidor. A implantação será executada e alinhada com o responsável de TI.
+A estimativa inicial é de até quatro usuários simultâneos. Não há necessidade prevista de cluster, balanceamento de carga ou arquitetura distribuída neste estágio. O IIS será o frontend interno e encaminhará requisições dinâmicas ao Waitress, executado pelo serviço Windows `VersERP`; usuários acessarão pelo navegador exclusivamente pelo IIS, sem acesso direto à porta `8000` e RDP será apenas administrativo. O PostgreSQL ficará no mesmo servidor. A implantação será executada e alinhada com o responsável de TI.
 
 ## Ambientes
 
@@ -32,7 +30,7 @@ DJANGO_CSRF_TRUSTED_ORIGINS=<origens https separadas por vírgula>
 DJANGO_SECURE_HSTS_SECONDS=31536000
 DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=false
 DJANGO_SECURE_HSTS_PRELOAD=false
-DJANGO_TRUST_X_FORWARDED_PROTO=false
+DJANGO_TRUST_X_FORWARDED_PROTO=true
 DB_NAME=<nome do banco>
 DB_USER=<usuário do banco>
 DB_PASSWORD=<senha fornecida com segurança>
@@ -45,11 +43,20 @@ Nunca versione valores reais. O projeto não carrega `.env` automaticamente; o p
 
 ## Banco de produção
 
-O desenvolvimento continua usando SQLite. Em produção, PostgreSQL é obrigatório e não existe fallback para SQLite: a inicialização falha se `DB_NAME`, `DB_USER`, `DB_PASSWORD` ou `DB_HOST` estiverem ausentes. `DB_PORT` usa 5432 quando não informado.
+Desenvolvimento e homologação usam PostgreSQL 17, com `verserp_dev` como banco local principal. SQLite é opcional em desenvolvimento com `VERSERP_DB=sqlite`. Em produção, PostgreSQL é obrigatório e não existe fallback para SQLite: a inicialização falha se `DB_NAME`, `DB_USER`, `DB_PASSWORD` ou `DB_HOST` estiverem ausentes. `DB_PORT` usa 5432 quando não informado.
 
 O banco e o usuário deverão ser criados durante a implantação, com credenciais fornecidas por meio seguro e privilégios adequados. A compatibilidade oficial da distribuição PostgreSQL com o Windows Server 2019 deve ser resolvida antes da instalação. Não registre senha no Git. Depois de configurar a conexão, execute as migrations no banco de produção durante o deploy.
 
 ## HTTPS e proxy
+
+`DJANGO_ALLOWED_HOSTS` define `ALLOWED_HOSTS`. Informe os nomes DNS aceitos, sem esquema, porta ou caminho. `DJANGO_CSRF_TRUSTED_ORIGINS` define `CSRF_TRUSTED_ORIGINS`. Informe as origens HTTPS que precisam enviar requisições protegidas por CSRF, com esquema e host, sem caminho. Ambos aceitam listas separadas por vírgula e usam valores explícitos em produção. Exemplo ilustrativo para um único nome:
+
+```text
+DJANGO_ALLOWED_HOSTS=verserp.example.com
+DJANGO_CSRF_TRUSTED_ORIGINS=https://verserp.example.com
+```
+
+O IIS redireciona HTTP na porta 80 para HTTPS na 443, preserva o `Host` original no proxy e sobrescreve `X-Forwarded-Proto` com `https` nas requisições HTTPS encaminhadas.
 
 Em produção, redirecionamento HTTPS e cookies seguros de sessão/CSRF são ativados. HSTS usa o período configurado; inclusão de subdomínios e preload só devem ser habilitados após confirmar HTTPS definitivo para todo o domínio.
 
@@ -66,7 +73,7 @@ python manage.py migrate
 python manage.py collectstatic --noinput
 ```
 
-Use o Waitress 3.0.2 fixado no projeto atrás do IIS; nunca `runserver`. O IIS deverá servir `STATIC_ROOT` e encaminhar somente requisições dinâmicas ao Waitress em loopback. O log rotativo do Django já é configurável. PDFs e exportações continuam sendo gerados para visualização/download; o usuário arquiva manualmente o arquivo na pasta corporativa apropriada. Monitoramento e backup ainda precisam ser definidos.
+Execute a aplicação pelo serviço Windows `VersERP` com `Waitress==3.0.2`. O serviço opera sem VS Code ou `manage.py runserver`. O `collectstatic` reúne os arquivos em `C:\Versatile\Financeiro\VersERP\staticfiles`. Mapeie `/static/` para esse diretório no IIS e exclua essa rota da regra de proxy. O log rotativo do Django já é configurável. PDFs e exportações continuam sendo gerados para visualização/download; o usuário arquiva manualmente o arquivo na pasta corporativa apropriada. Monitoramento e backup ainda precisam ser definidos.
 
 O procedimento operacional, as verificações de compatibilidade e os bloqueadores estão no [Runbook de Produção do VersERP — Windows Server 2019](runbook_producao_windows.md).
 
@@ -75,7 +82,7 @@ O procedimento operacional, as verificações de compatibilidade e os bloqueador
 - versão definitiva do PostgreSQL no servidor;
 - criação do banco, usuário e entrega segura das credenciais;
 - DNS ou nome interno e HTTPS/certificado;
-- servidor WSGI/ASGI e execução como serviço;
+- configuração operacional do serviço Windows `VersERP` com Waitress;
 - instalação/configuração de URL Rewrite e ARR para o proxy reverso IIS;
 - caminho definitivo de PDFs/documentos e permissões de filesystem;
 - procedimentos de backup e restauração;

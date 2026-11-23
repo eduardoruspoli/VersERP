@@ -1,6 +1,8 @@
 # Desenvolvimento
 
-Use Python 3.14, Django 6.0.8 e a venv `.venv`. Instale dependências por `python -m pip install -r requirements.txt`; o desenvolvimento usa SQLite e `VERSERP_ENV=development` por padrão.
+Use Python 3.14.x, Django 6.0.8 e a venv `.venv`. Instale as dependências com `python -m pip install -r requirements.txt`.
+
+O ambiente principal de desenvolvimento e homologação usa PostgreSQL 17. Na máquina local, configure `VERSERP_ENV=development`, `VERSERP_DB=postgresql` e `DB_NAME=verserp_dev` conforme [Ambiente](01-ambiente.md). Para desenvolvimento simples ou legado, selecione `VERSERP_DB=sqlite`.
 
 ## Fluxo recomendado
 
@@ -18,6 +20,8 @@ python manage.py test --verbosity 1
 python -m pip check
 git diff --check
 ```
+
+Execute a suíte contra PostgreSQL para validar o banco usado em desenvolvimento e homologação. Se o Django falhar ao criar o banco de testes, consulte [Troubleshooting](troubleshooting.md#permission-denied-to-create-database-nos-testes-postgresql).
 
 ## Princípios do projeto
 

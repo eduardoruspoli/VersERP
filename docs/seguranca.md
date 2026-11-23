@@ -21,6 +21,14 @@ Esses mecanismos reduzem riscos, mas não significam que o sistema seja “100% 
 
 O acesso remoto previsto para os usuários será pelo navegador através da infraestrutura/VPN corporativa. Essa arquitetura ainda será implantada com o TI; RDP permanece ferramenta administrativa e não é o meio normal de acesso ao ERP.
 
-O servidor alvo confirmado é o Windows Server 2019 Standard, com IIS como frontend e PostgreSQL local. HTTPS, configuração segura do proxy, conta de serviço, armazenamento de segredos e regras de rede ainda dependem da implantação controlada com o TI. O Waitress deverá aceitar conexões somente pelo loopback, sem exposição direta à rede corporativa.
+## Controles de infraestrutura em produção
+
+No Windows Server 2019, o IIS atende em 80/443, termina TLS e encaminha requisições dinâmicas via ARR e URL Rewrite ao Waitress em `127.0.0.1:8000`. O serviço Windows `VersERP` executa Waitress e Django, que se conecta ao PostgreSQL. Os usuários acessam o IIS. Mantenha a porta `8000` restrita ao loopback.
+
+O IIS deve preservar o `Host` e sobrescrever `X-Forwarded-Proto` nas requisições encaminhadas. Habilite `DJANGO_TRUST_X_FORWARDED_PROTO` somente após validar essa configuração. Liste nomes DNS explícitos em `DJANGO_ALLOWED_HOSTS` e origens HTTPS completas em `DJANGO_CSRF_TRUSTED_ORIGINS`. Consulte os [exemplos de deploy](deploy.md#https-e-proxy).
+
+Execute `VersERP` com conta dedicada de privilégios mínimos. Forneça os segredos pelo ambiente protegido do serviço. Use uma role PostgreSQL de produção sem `CREATEDB`, `CREATEROLE` ou `SUPERUSER`. A role de testes com `CREATEDB` deve ficar restrita à instância de desenvolvimento ou de testes.
+
+No IIS, conceda à identidade do site acesso de leitura a `C:\Versatile\Financeiro\VersERP\staticfiles` para servir `/static/`. Restrinja o acesso à raiz da aplicação, configurações, logs e backups.
 
 PDFs e exportações continuam sendo entregues por views autenticadas e autorizadas para visualização/download, sem diretório público de mídia ou arquivamento automático. O usuário decide quais arquivos salvar nas pastas corporativas. `VERSERP_LOG_DIR` recebe somente warnings/erros da aplicação por padrão; credenciais e segredos não devem ser registrados.
